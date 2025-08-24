@@ -96,7 +96,9 @@ def agent_audit(
     config: str = typer.Option(None, "--config", help="Configuration file"),
     resume: bool = typer.Option(False, "--resume", help="Resume from previous session"),
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging"),
-    project: str = typer.Option(None, "--project", "-p", help="Use existing project")
+    project: str = typer.Option(None, "--project", "-p", help="Use existing project"),
+    platform: str = typer.Option(None, "--platform", help="Override LLM platform (e.g., openai, anthropic)"),
+    model: str = typer.Option(None, "--model", help="Override LLM model (e.g., gpt-4, claude-3)")
 ):
     """Run autonomous security audit (plans investigations automatically)."""
     from commands.agent import agent as agent_command
@@ -139,7 +141,9 @@ def agent_audit(
         'time_limit': time_limit,
         'config': config,
         'resume': resume,
-        'debug': debug
+        'debug': debug,
+        'platform': platform,
+        'model': model
     }
     agent_command.invoke(ctx)
 
@@ -152,7 +156,9 @@ def agent_investigate(
     iterations: int = typer.Option(None, "--iterations", help="Maximum iterations for the agent"),
     config: str = typer.Option(None, "--config", help="Configuration file"),
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging"),
-    project: str = typer.Option(None, "--project", "-p", help="Use existing project")
+    project: str = typer.Option(None, "--project", "-p", help="Use existing project"),
+    platform: str = typer.Option(None, "--platform", help="Override LLM platform (e.g., openai, anthropic)"),
+    model: str = typer.Option(None, "--model", help="Override LLM model (e.g., gpt-4, claude-3)")
 ):
     """Run targeted investigation with a specific prompt."""
     manager = ProjectManager()
@@ -190,7 +196,9 @@ def agent_investigate(
         prompt=prompt,
         iterations=iterations,
         config_path=Path(config) if config else None,
-        debug=debug
+        debug=debug,
+        platform=platform,
+        model=model
     )
 
 

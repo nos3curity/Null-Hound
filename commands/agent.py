@@ -26,7 +26,7 @@ def get_project_dir(project_id: str) -> Path:
     """Get project directory path."""
     return Path.home() / ".hound" / "projects" / project_id
 
-def run_investigation(project_path: str, prompt: str, iterations: Optional[int] = None, config_path: Optional[Path] = None, debug: bool = False):
+def run_investigation(project_path: str, prompt: str, iterations: Optional[int] = None, config_path: Optional[Path] = None, debug: bool = False, platform: Optional[str] = None, model: Optional[str] = None):
     """Run a user-driven investigation."""
     console = Console()
     
@@ -48,6 +48,21 @@ def run_investigation(project_path: str, prompt: str, iterations: Optional[int] 
         console.print(f"[yellow]Warning: Could not load config: {e}[/yellow]")
         console.print("[yellow]Using default configuration[/yellow]")
         config = None
+    
+    # If no config was loaded but platform/model were provided, create minimal config
+    if not config and (platform or model):
+        config = {'llm': {}}
+    
+    # Override platform and model if provided
+    if config and (platform or model):
+        if 'llm' not in config:
+            config['llm'] = {}
+        if platform:
+            config['llm']['platform'] = platform
+            console.print(f"[cyan]Overriding platform: {platform}[/cyan]")
+        if model:
+            config['llm']['model'] = model
+            console.print(f"[cyan]Overriding model: {model}[/cyan]")
     
     # Resolve project path
     if '/' in project_path or Path(project_path).exists():
@@ -526,12 +541,14 @@ class AgentRunner:
     
     def __init__(self, project_id: str, config_path: Optional[Path] = None, 
                  iterations: Optional[int] = None, time_limit_minutes: Optional[int] = None,
-                 debug: bool = False):
+                 debug: bool = False, platform: Optional[str] = None, model: Optional[str] = None):
         self.project_id = project_id
         self.config_path = config_path
         self.max_iterations = iterations
         self.time_limit_minutes = time_limit_minutes
         self.debug = debug
+        self.platform = platform
+        self.model = model
         self.agent = None
         self.start_time = None
         self.completed_investigations = []  # Track completed investigation goals
@@ -600,6 +617,18 @@ class AgentRunner:
             config = load_config(self.config_path)
         else:
             config = load_config()  # Uses default config.yaml
+        
+        # Override platform and model if provided
+        if self.platform or self.model:
+            if 'llm' not in config:
+                config['llm'] = {}
+            if self.platform:
+                config['llm']['platform'] = self.platform
+                console.print(f"[cyan]Overriding platform: {self.platform}[/cyan]")
+            if self.model:
+                config['llm']['model'] = self.model
+                console.print(f"[cyan]Overriding model: {self.model}[/cyan]")
+        
         # Keep config for planning
         self.config = config
         
@@ -1000,8 +1029,10 @@ class AgentRunner:
 @click.option('--config', type=click.Path(exists=True), help='Configuration file')
 @click.option('--resume', is_flag=True, help='Resume from previous session')
 @click.option('--debug', is_flag=True, help='Enable debug logging of prompts and responses')
+@click.option('--platform', default=None, help='Override LLM platform (e.g., openai, anthropic)')
+@click.option('--model', default=None, help='Override LLM model (e.g., gpt-4, claude-3)')
 def agent(project_id: str, iterations: Optional[int], plan_n: int, time_limit: Optional[int], 
-          config: Optional[str], resume: bool, debug: bool):
+          config: Optional[str], resume: bool, debug: bool, platform: Optional[str], model: Optional[str]):
     """Run autonomous security analysis agent."""
     
     if resume:
@@ -1010,7 +1041,7 @@ def agent(project_id: str, iterations: Optional[int], plan_n: int, time_limit: O
     
     config_path = Path(config) if config else None
     
-    runner = AgentRunner(project_id, config_path, iterations, time_limit, debug)
+    runner = AgentRunner(project_id, config_path, iterations, time_limit, debug, platform, model)
     
     if not runner.initialize():
         return
