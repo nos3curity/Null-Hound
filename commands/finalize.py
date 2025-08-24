@@ -1,0 +1,369 @@
+"""
+Finalize command for reviewing and confirming/rejecting hypotheses.
+"""
+
+import json
+import sys
+from pathlib import Path
+from typing import Dict, List, Tuple
+from dataclasses import dataclass
+
+import click
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn
+
+from analysis.concurrent_knowledge import HypothesisStore
+from analysis.finalization_prefilter import pre_filter_hypotheses, apply_filter_decisions
+from commands.project import ProjectManager
+
+console = Console()
+
+
+@click.command()
+@click.argument('project_name')
+@click.option('--threshold', '-t', default=0.5, help="Confidence threshold for hypothesis review (default: 0.5)")
+@click.option('--skip-filter', is_flag=True, help="Skip pre-filtering of hypotheses")
+@click.option('--debug', is_flag=True, help="Enable debug mode")
+def finalize(project_name: str, threshold: float, skip_filter: bool, debug: bool):
+    """
+    Finalize hypotheses in a project by reviewing high-confidence findings.
+    
+    This command:
+    1. Pre-filters hypotheses to remove false positives
+    2. Reviews remaining hypotheses with full source code context
+    3. Confirms or rejects each hypothesis with reasoning
+    """
+    manager = ProjectManager()
+    project = manager.get_project(project_name)
+    
+    if not project:
+        console.print(f"[red]Project '{project_name}' not found.[/red]")
+        sys.exit(1)
+    
+    project_dir = Path(project["path"])
+    
+    # Check for existing hypotheses
+    hypothesis_file = project_dir / "hypotheses.json"
+    if not hypothesis_file.exists():
+        console.print("[yellow]No hypotheses found in project.[/yellow]")
+        sys.exit(0)
+    
+    # Load hypotheses
+    store = HypothesisStore(hypothesis_file, agent_id="finalize")
+    # Load all hypotheses directly from the store
+    data = store._load_data()
+    all_hypotheses = data.get("hypotheses", {})
+    
+    if not all_hypotheses:
+        console.print("[yellow]No hypotheses to review.[/yellow]")
+        sys.exit(0)
+    
+    # Load config for LLM
+    config_path = Path(__file__).parent.parent / "config.yaml"
+    config = {}
+    if config_path.exists():
+        import yaml
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f) or {}
+    
+    # Count hypotheses above threshold
+    above_threshold = {
+        hid: h for hid, h in all_hypotheses.items() 
+        if h.get("confidence", 0) >= threshold and h.get("status") not in ["confirmed", "rejected"]
+    }
+    
+    # Initialize filter debug logger variable at outer scope
+    filter_debug_logger = None
+    
+    # Pre-filter hypotheses
+    if skip_filter:
+        candidates = [(hid, h) for hid, h in above_threshold.items()]
+        filtered_out = []
+    else:
+        # Initialize LLM for pre-filtering
+        from llm.unified_client import UnifiedLLMClient
+        # Create debug logger for pre-filtering if debug is enabled
+        if debug:
+            from analysis.debug_logger import DebugLogger
+            filter_debug_logger = DebugLogger(f"prefilter_{project_name}")
+            console.print(f"[dim]Pre-filter debug log: {filter_debug_logger.log_file}[/dim]")
+        filter_llm = UnifiedLLMClient(cfg=config, profile="finalize", debug_logger=filter_debug_logger)
+        candidates, filtered_out = pre_filter_hypotheses(above_threshold, threshold, llm=filter_llm, debug=debug)
+    
+    # Display summary
+    summary_panel = Panel(
+        f"[bold]Hypothesis Finalization[/bold]\n\n"
+        f"Project: {project_name}\n"
+        f"Total hypotheses: {len(all_hypotheses)}\n"
+        f"Above threshold: {len(above_threshold)}\n"
+        f"Pre-filtered: [red]{len(filtered_out)} removed[/red]\n"
+        f"To review: [green]{len(candidates)} hypotheses[/green]",
+        title="Finalization Summary",
+        expand=False
+    )
+    console.print(summary_panel)
+    
+    if not candidates and not filtered_out:
+        console.print("\n[yellow]No hypotheses meet the threshold criteria.[/yellow]")
+        sys.exit(0)
+    
+    # Show what was filtered - show ALL filtered hypotheses
+    if filtered_out:
+        console.print("\n[bold]Pre-filtered hypotheses (automatically rejected):[/bold]")
+        for hid, hyp, reason in filtered_out:  # Show ALL filtered hypotheses
+            title = hyp.get("title", "Unknown")[:50]
+            console.print(f"  [red]✗[/red] {title} - [dim]{reason}[/dim]")
+    
+    # Show candidates
+    if candidates:
+        console.print("\n[bold]Hypotheses to review:[/bold]")
+        table = Table(show_header=True, header_style="bold magenta")
+        table.add_column("Conf", style="cyan", width=5)
+        table.add_column("Type", style="yellow", width=16)
+        table.add_column("Title", width=55)
+        
+        for hid, h in candidates[:10]:
+            conf = h.get("confidence", 0)
+            vuln_type = h.get("vulnerability_type", "unknown")
+            title = h.get("title", "Unknown")
+            
+            if conf >= 0.8:
+                conf_str = f"[bold green]{conf:.0%}[/bold green]"
+            elif conf >= 0.6:
+                conf_str = f"[yellow]{conf:.0%}[/yellow]"
+            else:
+                conf_str = f"[red]{conf:.0%}[/red]"
+            
+            table.add_row(conf_str, vuln_type, title)
+        
+        console.print(table)
+        if len(candidates) > 10:
+            console.print(f"  [dim]... and {len(candidates) - 10} more[/dim]")
+    
+    # Initialize debug logger if needed
+    debug_logger = None
+    if debug:
+        from analysis.debug_logger import DebugLogger
+        debug_logger = DebugLogger(f"finalize_{project_name}")
+        console.print(f"[dim]Debug log will be saved to: {debug_logger.log_file}[/dim]")
+    
+    # Initialize LLM for finalization
+    from llm.unified_client import UnifiedLLMClient
+    llm = UnifiedLLMClient(cfg=config, profile="finalize", debug_logger=debug_logger)
+    
+    # Process filtered hypotheses first
+    if filtered_out and not skip_filter:
+        apply_filter_decisions(store, filtered_out, debug=debug)
+    
+    # Load manifest for source code access
+    manifest_dir = project_dir / "manifest"
+    manifest_file = manifest_dir / "manifest.json"
+    manifest_data = {}
+    if manifest_file.exists():
+        with open(manifest_file, 'r') as f:
+            manifest_data = json.load(f)
+    
+    # Get repository root
+    repo_root = None
+    if manifest_data.get("repo_path"):
+        repo_root = Path(manifest_data["repo_path"])
+        if not repo_root.exists():
+            console.print(f"[yellow]Warning: Repository path not found: {repo_root}[/yellow]")
+            repo_root = None
+    
+    # Process candidates for review
+    if not candidates:
+        console.print("\n[green]✓ Pre-filtering complete. No hypotheses require manual review.[/green]")
+        sys.exit(0)
+    
+    console.print(f"\n[bold cyan]Initializing finalization process...[/bold cyan]")
+    
+    # Simple structured output for verdict
+    @dataclass
+    class ReviewResult:
+        verdict: str  # "confirmed", "rejected", or "uncertain"
+        reasoning: str
+        confidence: float = 0.5
+    
+    confirmed = 0
+    rejected = 0
+    uncertain = 0
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console
+    ) as progress:
+        
+        for idx, (hid, hypothesis) in enumerate(candidates, 1):
+            task_desc = f"[{idx}/{len(candidates)}] Reviewing: {hypothesis.get('title', '')[:50]}..."
+            task = progress.add_task(task_desc, total=1)
+            
+            try:
+                # Get source files from hypothesis
+                source_files = hypothesis.get('properties', {}).get('source_files', [])
+                node_refs = hypothesis.get('node_refs', [])
+                
+                # Load source code
+                source_code = {}
+                if source_files and repo_root:
+                    for file_path in source_files[:10]:  # Load up to 10 files
+                        try:
+                            full_path = repo_root / file_path
+                            if full_path.exists():
+                                with open(full_path, 'r') as f:
+                                    content = f.read()
+                                    # Include full file contents to ensure complete context
+                                    source_code[file_path] = content
+                        except Exception as e:
+                            if debug:
+                                progress.console.print(f"  [red]Failed to load {file_path}: {e}[/red]")
+                
+                # Build review prompt
+                review_prompt = f"""You are a security expert performing final review of a vulnerability hypothesis.
+
+=== HYPOTHESIS UNDER REVIEW ===
+Title: {hypothesis.get('title', 'Unknown')}
+Type: {hypothesis.get('vulnerability_type', 'unknown')}
+Severity: {hypothesis.get('severity', 'unknown')}
+Confidence: {hypothesis.get('confidence', 0):.0%}
+Description: {hypothesis.get('description', '')}
+
+=== SOURCE CODE ===
+"""
+                if source_code:
+                    for file_path, code in source_code.items():
+                        review_prompt += f"\n--- File: {file_path} ---\n{code}\n"
+                else:
+                    review_prompt += "No source code available.\n"
+                
+                review_prompt += """
+=== YOUR TASK ===
+Review the SOURCE CODE to determine if this hypothesis represents a REAL vulnerability.
+
+Focus on:
+1. Does the SOURCE CODE show the vulnerability exists?
+2. Is there a clear attack vector in the code?
+3. Are there checks/guards that prevent exploitation?
+4. Is this a false positive based on the actual implementation?
+
+Provide your determination in this EXACT JSON format:
+{
+    "verdict": "confirmed" or "rejected" or "uncertain",
+    "reasoning": "Brief explanation (max 100 chars)",
+    "confidence": 0.0 to 1.0
+}
+
+Rules:
+- "confirmed" = Vulnerability clearly exists in the code with exploitable path
+- "rejected" = Code analysis shows this is a false positive or mitigated
+- "uncertain" = Need more code context to determine
+
+Be conservative - only confirm if the code clearly shows the vulnerability.
+"""
+                
+                # Get LLM verdict
+                try:
+                    # Use raw() method and parse JSON response (robust to code fences)
+                    response_text = llm.raw(system="You are a security expert. Respond only with valid JSON.", user=review_prompt)
+                    from utils.json_utils import extract_json_object
+                    response = extract_json_object(response_text)
+                    if isinstance(response, dict):
+                        result = ReviewResult(
+                            verdict=response.get('verdict', 'uncertain'),
+                            reasoning=response.get('reasoning', 'No reasoning provided'),
+                            confidence=response.get('confidence', 0.5)
+                        )
+                    else:
+                        result = ReviewResult(verdict='uncertain', reasoning='Failed to parse response')
+                except Exception as e:
+                    if debug:
+                        progress.console.print(f"  [red]LLM error: {e}[/red]")
+                    result = ReviewResult(verdict='uncertain', reasoning='LLM error')
+                
+                # Apply verdict
+                if result.verdict == "confirmed":
+                    # Mark as confirmed
+                    store.adjust_confidence(hid, 1.0, result.reasoning)
+                    
+                    # Update status to confirmed
+                    def update_status(data):
+                        if hid in data["hypotheses"]:
+                            data["hypotheses"][hid]["status"] = "confirmed"
+                            data["metadata"]["confirmed"] = sum(
+                                1 for h in data["hypotheses"].values() 
+                                if h["status"] == "confirmed"
+                            )
+                        return data, True
+                    
+                    store.update_atomic(update_status)
+                    confirmed += 1
+                    
+                    progress.console.print(f"  [green]✓ CONFIRMED:[/green] {hypothesis.get('title', '')[:60]}")
+                    if debug:
+                        progress.console.print(f"    [dim]{result.reasoning[:100]}...[/dim]")
+                
+                elif result.verdict == "rejected":
+                    # Mark as rejected
+                    store.adjust_confidence(hid, 0.0, result.reasoning)
+                    
+                    # Update status to rejected
+                    def update_status(data):
+                        if hid in data["hypotheses"]:
+                            data["hypotheses"][hid]["status"] = "rejected"
+                        return data, True
+                    
+                    store.update_atomic(update_status)
+                    rejected += 1
+                    
+                    progress.console.print(f"  [red]✗ REJECTED:[/red] {hypothesis.get('title', '')[:60]}")
+                    if debug:
+                        progress.console.print(f"    [dim]{result.reasoning[:100]}...[/dim]")
+                
+                else:
+                    uncertain += 1
+                    progress.console.print(f"  [yellow]? UNCERTAIN:[/yellow] {hypothesis.get('title', '')[:60]}")
+            
+            except Exception as e:
+                uncertain += 1
+                if debug:
+                    progress.console.print(f"  [red]Error reviewing {hid}: {e}[/red]")
+            
+            progress.advance(task)
+            progress.remove_task(task)
+    
+    # Final summary
+    console.print("\n" + "="*60)
+    console.print(f"\n[bold]Finalization Complete:[/bold]")
+    console.print(f"  [green]✓ Confirmed:[/green] {confirmed}")
+    console.print(f"  [red]✗ Rejected:[/red] {rejected + len(filtered_out)}")
+    console.print(f"  [yellow]? Uncertain:[/yellow] {uncertain}")
+    console.print(f"\n[dim]Total reviewed: {len(candidates) + len(filtered_out)}[/dim]")
+    
+    # Show confirmed vulnerabilities
+    if confirmed > 0:
+        console.print("\n[bold green]Confirmed Vulnerabilities:[/bold green]")
+        # Load hypotheses directly from the store
+        data = store._load_data()
+        confirmed_hyps = data.get("hypotheses", {})
+        for hid, hyp in confirmed_hyps.items():
+            if hyp.get("status") == "confirmed":
+                console.print(f"  • {hyp.get('title', 'Unknown')}")
+                console.print(f"    [dim]Type: {hyp.get('vulnerability_type', 'unknown')} | Severity: {hyp.get('severity', 'unknown')}[/dim]")
+    
+    console.print()
+    
+    # Close debug loggers if they exist
+    if debug:
+        if filter_debug_logger:
+            filter_debug_logger.finalize()
+            console.print(f"[dim]Pre-filter debug log saved to: {filter_debug_logger.log_file}[/dim]")
+        if debug_logger:
+            debug_logger.finalize()
+            console.print(f"[dim]Finalization debug log saved to: {debug_logger.log_file}[/dim]")
+
+
+if __name__ == "__main__":
+    finalize()

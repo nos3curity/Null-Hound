@@ -1,0 +1,1591 @@
+"""
+Professional security audit report generator.
+"""
+
+import json
+from pathlib import Path
+from datetime import datetime
+from typing import Dict, List, Optional, Any
+
+from llm.unified_client import UnifiedLLMClient
+
+
+class ReportGenerator:
+    """Generate professional security audit reports."""
+    
+    def __init__(self, project_dir: Path, config: Dict, debug: bool = False):
+        """Initialize report generator."""
+        self.project_dir = project_dir
+        self.config = config
+        self.debug = debug
+        
+        # Initialize reporting LLM
+        self.llm = UnifiedLLMClient(
+            cfg=config,
+            profile="reporting",
+            debug_logger=None
+        )
+        
+        # Load project data
+        self.graphs = self._load_graphs()
+        self.hypotheses = self._load_hypotheses()
+        self.hypothesis_metadata = self._load_hypothesis_metadata()
+        self.agent_runs = self._load_agent_runs()
+        # Debug helpers for CLI
+        self.last_prompt: Optional[str] = None
+        self.last_response: Optional[str] = None
+    
+    def _load_graphs(self) -> Dict[str, Any]:
+        """Load all graphs from project."""
+        graphs = {}
+        graphs_dir = self.project_dir / "graphs"
+        
+        for graph_file in graphs_dir.glob("graph_*.json"):
+            with open(graph_file, 'r') as f:
+                data = json.load(f)
+                name = graph_file.stem.replace("graph_", "")
+                graphs[name] = data
+        
+        return graphs
+    
+    def _load_hypotheses(self) -> Dict[str, Any]:
+        """Load hypotheses from project."""
+        hypothesis_file = self.project_dir / "hypotheses.json"
+        if hypothesis_file.exists():
+            with open(hypothesis_file, 'r') as f:
+                data = json.load(f)
+                return data.get("hypotheses", {})
+        return {}
+    
+    def _load_hypothesis_metadata(self) -> Dict[str, Any]:
+        """Load hypothesis metadata (e.g., finalization model)."""
+        hypothesis_file = self.project_dir / "hypotheses.json"
+        if hypothesis_file.exists():
+            with open(hypothesis_file, 'r') as f:
+                data = json.load(f)
+                return data.get("metadata", {})
+        return {}
+    
+    def _format_graph_name(self, graph_name: str) -> str:
+        """Format graph names to be human-readable.
+        Examples:
+          AuthorizationRolesActions -> Authorization, Roles and Actions
+          AssetRoutingFlow -> Asset Routing and Flow
+          TimelockActionLifecycle -> Timelock Action Lifecycle
+        """
+        if not graph_name:
+            return ''
+        
+        # Remove 'graph_' prefix if present
+        if graph_name.startswith('graph_'):
+            graph_name = graph_name[6:]
+        
+        # Split on capitals and format
+        import re
+        words = re.findall(r'[A-Z][a-z]+|[A-Z]+(?=[A-Z][a-z]|\b)', graph_name)
+        
+        # Special cases for common terms
+        word_map = {
+            'And': 'and',
+            'Or': 'or',
+            'The': 'the',
+            'Of': 'of',
+            'In': 'in',
+            'Calls': 'Calls',
+            'Flow': 'Flow',
+            'Map': 'Mapping'
+        }
+        
+        formatted_words = []
+        for i, word in enumerate(words):
+            if i == 0:
+                formatted_words.append(word)
+            elif word in word_map:
+                formatted_words.append(word_map[word])
+            else:
+                formatted_words.append(word.lower())
+        
+        result = ' '.join(formatted_words)
+        
+        # Special formatting for known patterns
+        replacements = {
+            'Authorization roles actions': 'Authorization, Roles and Actions',
+            'Asset routing flow': 'Asset Routing and Flow',
+            'Timelock action lifecycle': 'Timelock Action Lifecycle',
+            'Inheritance and override map': 'Inheritance and Override Mapping',
+            'Cross contract deposit withdraw calls': 'Cross-Contract Deposit/Withdraw Calls',
+            'System architecture': 'System Architecture',
+            'External call reentrancy': 'External Calls and Reentrancy',
+            'Token asset flow': 'Token and Asset Flow'
+        }
+        
+        for old, new in replacements.items():
+            if result.lower() == old.lower():
+                return new
+        
+        return result.title()
+    
+    def _format_model_name(self, model_name: str) -> str:
+        """Format model names to be more natural.
+        Examples:
+          OpenAI:gpt-4o -> GPT-4
+          OpenAI:gpt-4o-mini -> GPT-4 Mini
+          anthropic:claude-3-opus -> Claude-3 Opus
+          gpt-5 -> GPT-5
+        """
+        if not model_name:
+            return ''
+        
+        # Remove provider prefix if present
+        if ':' in model_name:
+            model_name = model_name.split(':', 1)[1]
+        
+        # Format common model names
+        name_map = {
+            'gpt-4o': 'GPT-4',
+            'gpt-4': 'GPT-4',
+            'gpt-4o-mini': 'GPT-4 Mini',
+            'gpt-3.5-turbo': 'GPT-3.5',
+            'gpt-5': 'GPT-5',
+            'gpt-5-nano': 'GPT-5 Nano',
+            'claude-3-opus': 'Claude-3 Opus',
+            'claude-3-sonnet': 'Claude-3 Sonnet',
+            'claude-3-haiku': 'Claude-3 Haiku',
+            'gemini-pro': 'Gemini Pro',
+            'gemini-ultra': 'Gemini Ultra'
+        }
+        
+        return name_map.get(model_name.lower(), model_name)
+    
+    def _load_agent_runs(self) -> List[Dict]:
+        """Load agent run summaries."""
+        runs = []
+        agent_dir = self.project_dir / "agent_runs"
+        if agent_dir.exists():
+            for run_file in agent_dir.glob("*.json"):
+                with open(run_file, 'r') as f:
+                    runs.append(json.load(f))
+        return runs
+
+    def _get_system_architecture_graph(self) -> Optional[Dict[str, Any]]:
+        """Return the full System Architecture graph data if available."""
+        if 'SystemArchitecture' in self.graphs:
+            return self.graphs['SystemArchitecture']
+        for key in self.graphs.keys():
+            lk = key.lower()
+            if 'system' in lk and ('architecture' in lk or 'overview' in lk):
+                return self.graphs[key]
+        return next(iter(self.graphs.values())) if self.graphs else None
+
+    def _generate_sections(self, project_name: str, project_source: str) -> Dict[str, str]:
+        """Single LLM call that returns both executive summary and system overview."""
+        system_graph = self._get_system_architecture_graph() or {}
+        
+        # Get all graph names for scope description - format them nicely
+        graph_names = [self._format_graph_name(name) for name in self.graphs.keys()]
+        
+        # Get distinct models that found hypotheses and format them
+        raw_models = sorted(set(
+            h.get('reported_by_model', '') 
+            for h in self.hypotheses.values() 
+            if h.get('reported_by_model')
+        ))
+        analysis_models = [self._format_model_name(m) for m in raw_models if m]
+        
+        # Get finalization model from config (since not in metadata)
+        finalize_model_raw = self.config.get('models', {}).get('finalize', {}).get('model', '')
+        finalize_model = self._format_model_name(finalize_model_raw) if finalize_model_raw else ''
+        
+        # Get reporting model from config
+        reporting_model_raw = self.config.get('models', {}).get('reporting', {}).get('model', '')
+        reporting_model = self._format_model_name(reporting_model_raw) if reporting_model_raw else 'GPT-5'
+        
+        # Provide full system graph and full hypotheses store
+        hypotheses_payload = {
+            'hypotheses': self.hypotheses,
+            'metadata': self.hypothesis_metadata,
+        }
+
+        prompt = (
+            "SYSTEM_GRAPH_JSON\n"
+            f"{json.dumps(system_graph, ensure_ascii=False)}\n\n"
+            "HYPOTHESES_STORE_JSON\n"
+            f"{json.dumps(hypotheses_payload, ensure_ascii=False)}\n\n"
+            "AUDIT_SCOPE_GRAPHS (human-readable descriptions of review areas)\n"
+            f"{json.dumps(graph_names)}\n\n"
+            "Return a JSON object with exactly these keys (no prose outside JSON):\n"
+            "{\n"
+            "  \"application_name\": string,\n"
+            "  \"executive_summary\": string,\n"
+            "  \"system_overview\": string\n"
+            "}\n\n"
+            f"ACTUAL_TEAM_MEMBERS:\n"
+            f"- Analysis performed by: {', '.join(analysis_models) if analysis_models else 'No models found'}\n"
+            f"- Quality assurance by: {finalize_model if finalize_model else 'Not specified'}\n"
+            f"- Report written by: {reporting_model}\n\n"
+            "Guidance:\n"
+            "- Application name: Provide the proper name of the application/protocol (e.g., 'Size Protocol', 'Aave Strategy Vault', etc.)\n"
+            "- Executive summary (3-4 paragraphs with good spacing):\n"
+            "  * First paragraph: State that the Hound security team conducted this comprehensive audit\n"
+            "  * Second paragraph: List aspects from AUDIT_SCOPE_GRAPHS as readable prose, not class names\n"
+            "  * Third paragraph: ONLY mention the ACTUAL models from ACTUAL_TEAM_MEMBERS above\n"
+            "    - Example: 'GPT-4o performed the vulnerability analysis' (if GPT-4o is in the list)\n"
+            "    - DO NOT make up names like Alex, Jessica, etc.\n"
+            "    - ONLY use the exact model names provided in ACTUAL_TEAM_MEMBERS\n"
+            "  * Fourth paragraph: Mention quality assurance by the finalize model if specified\n"
+            "  * NEVER use: 'hypothesis', 'AI', 'model', 'automated', 'LLM', or made-up human names\n"
+            "  * ALWAYS write as: 'The Hound team', 'our team', 'we'\n"
+            "  * Use line breaks between paragraphs for readability\n"
+            "- System overview (4-5 paragraphs with good spacing):\n"
+            "  * Write as the Hound team describing what we analyzed\n"
+            "  * Use concrete contract/component names from the system graph\n"
+            "  * Include line breaks between paragraphs\n"
+            "  * Describe architecture, data flows, and security mechanisms\n"
+            "  * Focus on technical details relevant to security\n"
+            "  * Use: 'The Hound team identified', 'our analysis revealed', 'we discovered'\n"
+            "  * When mentioning specific findings, ONLY use actual model names from ACTUAL_TEAM_MEMBERS\n"
+            "  * DO NOT invent human names - only use the exact model names provided\n"
+        )
+
+        response = self.llm.raw(
+            system="You are a senior security auditor. Respond only with valid JSON.",
+            user=prompt
+        )
+        # Save prompt/response for CLI debug
+        self.last_prompt = prompt
+        self.last_response = response
+        from utils.json_utils import extract_json_object
+        obj = extract_json_object(response)
+        if isinstance(obj, dict) and 'executive_summary' in obj and 'system_overview' in obj:
+            return {
+                'application_name': str(obj.get('application_name') or 'Application').strip(),
+                'executive_summary': str(obj.get('executive_summary') or '').strip(),
+                'system_overview': str(obj.get('system_overview') or '').strip()
+            }
+        raise ValueError("LLM did not return required keys application_name, executive_summary and system_overview in JSON response")
+
+    # Note: No fallback generators — we surface errors so the CLI can show details
+    
+    def generate(self, project_name: str, project_source: str, 
+                title: str, auditors: List[str], format: str = 'html') -> str:
+        """Generate the complete audit report."""
+        
+        # Gather report data
+        report_date = datetime.now().strftime("%B %d, %Y")
+        
+        # Build auditors display: Hound team members (AI models as named auditors)
+        # Get distinct analysis models from hypotheses and format them
+        raw_models = sorted({
+            (h.get('reported_by_model') or '').strip()
+            for h in self.hypotheses.values()
+            if isinstance(h, dict)
+        })
+        models_used = [self._format_model_name(m) for m in raw_models if m]
+        
+        # Get finalization model from config (since not always in metadata)
+        finalize_model_raw = self.config.get('models', {}).get('finalize', {}).get('model', '')
+        finalize_model = self._format_model_name(finalize_model_raw) if finalize_model_raw else ''
+        
+        # Get the reporting model
+        reporting_model_raw = self.config.get('models', {}).get('reporting', {}).get('model', '')
+        reporting_model = self._format_model_name(reporting_model_raw) if reporting_model_raw else ''
+        
+        # Build complete list of team members
+        auditor_models = models_used.copy()
+        if finalize_model and finalize_model not in auditor_models:
+            auditor_models.append(finalize_model)
+        if reporting_model and reporting_model not in auditor_models:
+            auditor_models.append(reporting_model)
+        
+        if not auditor_models:
+            auditor_models = ['Hound Security Team']
+        
+        # Preferred: generate both sections via a single LLM call
+        sections = self._generate_sections(project_name, project_source)
+        application_name = sections.get('application_name', project_name)
+        executive_summary = sections.get('executive_summary', '')
+        system_overview = sections.get('system_overview', '')
+        
+        # Get confirmed findings (if any)
+        confirmed_findings = self._get_confirmed_findings()
+        
+        # No longer generating appendix
+        # tested_hypotheses = self._get_all_hypotheses()
+        
+        # Generate the report based on format
+        if format == 'html':
+            return self._generate_html_report(
+                title=title,
+                application_name=application_name,
+                report_date=report_date,
+                auditors=auditor_models,
+                executive_summary=executive_summary,
+                system_overview=system_overview,
+                findings=confirmed_findings,
+                project_name=project_name,
+                project_source=project_source,
+                report_writer=reporting_model
+            )
+        elif format == 'markdown':
+            return self._generate_markdown_report(
+                title=title,
+                application_name=application_name,
+                report_date=report_date,
+                auditors=auditor_models,
+                executive_summary=executive_summary,
+                system_overview=system_overview,
+                findings=confirmed_findings,
+                project_name=project_name,
+                project_source=project_source,
+                report_writer=reporting_model
+            )
+        else:
+            # Default to HTML
+            return self._generate_html_report(
+                title=title,
+                application_name=application_name,
+                report_date=report_date,
+                auditors=auditor_models,
+                executive_summary=executive_summary,
+                system_overview=system_overview,
+                findings=confirmed_findings,
+                project_name=project_name,
+                project_source=project_source,
+                report_writer=reporting_model
+            )
+    
+    def _generate_executive_summary(self, project_name: str, 
+                                   project_source: str) -> str:
+        """Generate executive summary using LLM with real graph data."""
+        
+        # Get actual graph descriptions
+        graph_summary = self._summarize_graphs_for_executive()
+        
+        # Get findings summary
+        confirmed_findings = self._get_confirmed_findings()
+        findings_summary = self._summarize_findings(confirmed_findings)
+        
+        # Count investigations
+        total_investigations = len(self.hypotheses)
+        confirmed_count = len(confirmed_findings)
+        
+        # Models used in analysis from hypotheses (reported_by_model) and finalization model from config
+        raw_models = sorted({
+            (h.get('reported_by_model') or 'unknown')
+            for h in self.hypotheses.values()
+            if isinstance(h, dict)
+        })
+        models_used = [self._format_model_name(m) for m in raw_models if m and m != 'unknown']
+        if not models_used:
+            models_used = ['unspecified']
+        
+        # Get finalization model from config
+        finalize_model_raw = self.config.get('models', {}).get('finalize', {}).get('model', '')
+        finalize_model = self._format_model_name(finalize_model_raw) if finalize_model_raw else 'unspecified'
+
+        prompt = f"""You are a senior security auditor writing the executive summary for a professional audit report.
+
+Project: {project_name}
+Source: {project_source}
+
+System Characteristics (from architecture analysis):
+{graph_summary}
+
+Audit Team and Process:
+- The audit was conducted by the Hound security team
+- Lead auditors: {', '.join(models_used) if models_used else 'Senior security engineers'}
+- Quality assurance and validation: {finalize_model if finalize_model else 'Senior review team'}
+
+Audit Statistics:
+- Total security concerns investigated: {total_investigations}
+- Confirmed vulnerabilities: {confirmed_count}
+{findings_summary}
+
+Write a professional executive summary (3-4 paragraphs) that:
+1) States that the Hound team conducted this comprehensive security audit of {project_name}.
+2) Describes WHAT the system does (type and core purpose) based on the components above.
+3) Mentions ONLY these actual team members who performed the analysis: {', '.join(models_used) if models_used else 'team members'}
+4) States that {finalize_model if finalize_model else 'the team'} performed quality assurance.
+5) Summarizes the security posture and any findings discovered.
+
+CRITICAL INSTRUCTIONS:
+- ONLY use these exact model names: {', '.join(models_used) if models_used else 'none specified'}
+- DO NOT make up human names like Alex, Jessica, Sarah, etc.
+- DO NOT invent team members - only use the models listed above
+- Example: "{models_used[0] if models_used else 'The team'} identified..." or "{models_used[1] if len(models_used) > 1 else 'The auditor'}'s analysis revealed..."
+- Write as "The Hound team", "our team", "we" (first person plural)
+- NEVER use: "hypothesis", "AI", "model", "automated", "LLM", or made-up names
+- ALWAYS use: "findings", "security concerns", "team member", "auditor", "analysis"
+- Present this as a professional human security audit by the Hound team"""
+
+        try:
+            summary = self.llm.raw(
+                system="You are a senior security auditor writing a professional executive summary.",
+                user=prompt
+            )
+            return summary
+        except Exception as e:
+            if self.debug:
+                print(f"[!] Failed to generate executive summary: {e}")
+            # Fallback summary
+            return f"""We conducted a comprehensive security audit of the {project_name} system. 
+The audit focused on critical security aspects including authorization mechanisms, external interfaces, 
+data flow patterns, and potential vulnerability vectors.
+
+Our analysis covered the complete system architecture with particular attention to high-risk components 
+and their interactions. The audit methodology included thorough code review, architectural analysis, 
+and systematic vulnerability assessment across all identified attack surfaces."""
+    
+    def _summarize_graphs_for_executive(self) -> str:
+        """Summarize graphs for executive summary - focused on what the system does."""
+        summary_parts = []
+        
+        for name, graph in self.graphs.items():
+            nodes = graph.get('nodes', [])
+            edges = graph.get('edges', [])
+            
+            # Focus on system/architecture graphs for main description
+            if 'system' in name.lower() or 'architecture' in name.lower():
+                contracts = [n for n in nodes if n.get('type') == 'contract']
+                if contracts:
+                    summary_parts.append(f"Core System Components ({len(contracts)} contracts):")
+                    for contract in contracts[:5]:  # Top 5 contracts
+                        label = contract.get('label', '')
+                        props = contract.get('properties', {})
+                        desc = props.get('description', '')
+                        if desc:
+                            summary_parts.append(f"  • {label}: {desc}")
+                        else:
+                            summary_parts.append(f"  • {label}")
+                    if len(contracts) > 5:
+                        summary_parts.append(f"  • ... and {len(contracts) - 5} additional contracts")
+                
+                # Note other components
+                functions = [n for n in nodes if n.get('type') == 'function']
+                external = [n for n in nodes if n.get('type') == 'external']
+                if functions:
+                    summary_parts.append(f"\nKey Functions: {len(functions)} critical functions analyzed")
+                if external:
+                    summary_parts.append(f"External Integrations: {len(external)} external dependencies")
+            
+            # Note specialized graphs
+            elif any(keyword in name.lower() for keyword in ['auth', 'role', 'permission']):
+                auth_nodes = len(nodes)
+                summary_parts.append(f"\nAuthorization System: {auth_nodes} components")
+            elif any(keyword in name.lower() for keyword in ['token', 'asset', 'vault']):
+                summary_parts.append(f"\nAsset Management: {len(nodes)} components, {len(edges)} relationships")
+            elif any(keyword in name.lower() for keyword in ['governance', 'timelock']):
+                summary_parts.append(f"\nGovernance: {len(nodes)} governance components")
+        
+        return '\n'.join(summary_parts) if summary_parts else "Complex smart contract system"
+    
+    def _summarize_findings(self, findings: List[Dict]) -> str:
+        """Create a brief findings summary for executive summary."""
+        if not findings:
+            return "\nNo critical vulnerabilities were confirmed during this audit."
+        
+        # Count by severity
+        severity_counts = {}
+        for f in findings:
+            sev = f.get('severity', 'medium')
+            severity_counts[sev] = severity_counts.get(sev, 0) + 1
+        
+        parts = []
+        if severity_counts.get('critical', 0) > 0:
+            parts.append(f"{severity_counts['critical']} critical")
+        if severity_counts.get('high', 0) > 0:
+            parts.append(f"{severity_counts['high']} high")
+        if severity_counts.get('medium', 0) > 0:
+            parts.append(f"{severity_counts['medium']} medium")  
+        if severity_counts.get('low', 0) > 0:
+            parts.append(f"{severity_counts['low']} low")
+            
+        if parts:
+            return f"\nFindings: {', '.join(parts)} severity issues confirmed"
+        return ""
+    
+    def _analyze_scope(self) -> str:
+        """Analyze graphs to understand audit scope."""
+        scope_parts = []
+        
+        # Find system architecture graph
+        system_graph = None
+        for name, graph in self.graphs.items():
+            if 'system' in name.lower() or 'architecture' in name.lower():
+                system_graph = graph
+                break
+        
+        if system_graph:
+            # Extract key components
+            nodes = system_graph.get('nodes', [])
+            node_types = {}
+            for node in nodes:
+                node_type = node.get('type', 'unknown')
+                if node_type not in node_types:
+                    node_types[node_type] = []
+                node_types[node_type].append(node.get('label', node.get('id', '')))
+            
+            # Describe main components
+            if 'contract' in node_types:
+                scope_parts.append(f"Core contracts: {', '.join(node_types['contract'][:5])}")
+            if 'function' in node_types:
+                scope_parts.append(f"Critical functions analyzed: {len(node_types['function'])}")
+            if 'external' in node_types:
+                scope_parts.append(f"External integrations: {', '.join(node_types['external'][:3])}")
+        
+        # Describe other graph focuses
+        for name, graph in self.graphs.items():
+            if name == 'AuthorizationRolesActions' or 'auth' in name.lower():
+                scope_parts.append("Authorization and access control mechanisms")
+            elif 'timelock' in name.lower():
+                scope_parts.append("Timelock and governance controls")
+            elif 'external' in name.lower() or 'reentrancy' in name.lower():
+                scope_parts.append("External call surfaces and reentrancy protection")
+            elif 'asset' in name.lower() or 'flow' in name.lower():
+                scope_parts.append("Asset flow and value transfer patterns")
+        
+        return '\n'.join(f"- {part}" for part in scope_parts)
+    
+    def _get_confirmed_findings(self) -> List[Dict]:
+        """Get confirmed vulnerability findings."""
+        findings = []
+        
+        for hyp_id, hyp in self.hypotheses.items():
+            if hyp.get('status') == 'confirmed':
+                finding = {
+                    'id': hyp_id,
+                    'title': hyp.get('title', 'Unknown'),
+                    'severity': hyp.get('severity', 'medium'),
+                    'type': hyp.get('vulnerability_type', 'unknown'),
+                    'description': hyp.get('description', ''),
+                    'confidence': hyp.get('confidence', 0),
+                    'affected': hyp.get('node_refs', []),
+                    'reported_by_model': hyp.get('reported_by_model', 'unknown'),
+                    'supporting_evidence': hyp.get('supporting_evidence', []),
+                    'properties': hyp.get('properties', {})
+                }
+                
+                # Extract code samples for this finding
+                code_samples = self._extract_code_for_finding(finding)
+                finding['code_samples'] = code_samples
+                
+                findings.append(finding)
+        
+        # Sort by severity
+        severity_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
+        findings.sort(key=lambda x: severity_order.get(x['severity'], 4))
+        
+        return findings
+    
+    def _get_all_hypotheses(self) -> List[Dict]:
+        """Get all tested hypotheses for appendix."""
+        tested = []
+        
+        for _, hyp in self.hypotheses.items():
+            tested.append({
+                'title': hyp.get('title', 'Unknown'),
+                'type': hyp.get('vulnerability_type', 'unknown'),
+                'status': hyp.get('status', 'proposed'),
+                'confidence': hyp.get('confidence', 0),
+                'nodes': hyp.get('node_refs', []),
+                'reported_by_model': hyp.get('reported_by_model', 'unknown')
+            })
+        
+        # Sort by confidence
+        tested.sort(key=lambda x: x['confidence'], reverse=True)
+        
+        return tested
+    
+    def _generate_system_overview(self) -> str:
+        """Generate system overview from graphs with security insights."""
+        
+        # Convert graphs to a format the LLM can understand
+        graph_descriptions = self._describe_graphs_for_llm()
+        
+        scope = self._analyze_scope()
+        prompt = f"""You are a senior security auditor writing the System Overview section of an audit report.
+
+Context (for your drafting only):
+- Tested aspects include: {scope}
+
+Architecture and components summary for your reference:
+{graph_descriptions}
+
+Write a comprehensive System Overview (3-4 paragraphs) that:
+1) Describes overall architecture and main components (type of system and core contracts).
+2) Explains key relationships and data flows, and critical paths.
+3) Highlights security-relevant architectural patterns and mechanisms.
+4) Optionally mentions architectural concerns or areas needing attention (no vulnerability details).
+
+Use technical but accessible language; do NOT mention graphs or AI; present as a human audit report."""
+
+        try:
+            overview = self.llm.raw(
+                system="You are a senior security auditor writing a professional system overview.",
+                user=prompt
+            )
+            return overview.strip()
+        except Exception as e:
+            if self.debug:
+                print(f"[!] Failed to generate system overview: {e}")
+            # Fallback overview
+            return self._generate_fallback_overview()
+    
+    def _describe_graphs_for_llm(self) -> str:
+        """Convert graphs to a descriptive format for LLM analysis."""
+        descriptions = []
+        
+        for name, graph in self.graphs.items():
+            nodes = graph.get('nodes', [])
+            edges = graph.get('edges', [])
+            
+            # Clean graph name for display
+            clean_name = name.replace('graph_', '').replace('_', ' ')
+            descriptions.append(f"=== {clean_name} Graph ===")
+            descriptions.append(f"Nodes: {len(nodes)}, Edges: {len(edges)}")
+            
+            # Group nodes by type
+            nodes_by_type = {}
+            for node in nodes:
+                node_type = node.get('type', 'unknown')
+                if node_type not in nodes_by_type:
+                    nodes_by_type[node_type] = []
+                label = node.get('label', node.get('id', 'unnamed'))
+                props = node.get('properties', {})
+                
+                # Include key properties
+                node_desc = label
+                if props.get('description'):
+                    node_desc += f" - {props['description']}"
+                elif props.get('signature'):
+                    node_desc += f" ({props['signature']})"
+                    
+                nodes_by_type[node_type].append(node_desc)
+            
+            # Describe node types and their components
+            descriptions.append("\nComponents:")
+            for node_type, node_list in nodes_by_type.items():
+                descriptions.append(f"\n{node_type.title()}s ({len(node_list)}):")
+                # Show up to 10 most important nodes
+                for node_desc in node_list[:10]:
+                    descriptions.append(f"  • {node_desc}")
+                if len(node_list) > 10:
+                    descriptions.append(f"  ... and {len(node_list) - 10} more")
+            
+            # Describe key relationships
+            if edges:
+                edge_types = {}
+                for edge in edges:
+                    edge_type = edge.get('type', edge.get('label', 'relates'))
+                    if edge_type not in edge_types:
+                        edge_types[edge_type] = 0
+                    edge_types[edge_type] += 1
+                
+                descriptions.append("\nRelationships:")
+                for edge_type, count in sorted(edge_types.items(), key=lambda x: -x[1])[:5]:
+                    descriptions.append(f"  • {edge_type}: {count} connections")
+            
+            descriptions.append("")  # Blank line between graphs
+        
+        return '\n'.join(descriptions)
+    
+    def _generate_fallback_overview(self) -> str:
+        """Generate a fallback system overview."""
+        return """The system architecture consists of multiple interconnected smart contracts implementing 
+a modular design pattern. Core components are organized to separate concerns between business logic, 
+access control, and data management.
+
+The contracts interact through well-defined interfaces, with clear separation between external-facing 
+functions and internal operations. Value flows are managed through controlled entry and exit points, 
+with appropriate validation at each stage.
+
+From a security perspective, the architecture demonstrates consideration for common attack vectors, 
+with implemented safeguards for reentrancy protection, access control, and input validation. 
+External dependencies are limited and clearly defined."""
+    
+    def _generate_html_report(self, **kwargs) -> str:
+        """Generate HTML format report."""
+        
+        html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{kwargs['title']}</title>
+    
+    <!-- Prism.js for syntax highlighting -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-solidity.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-rust.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-java.min.js"></script>
+    
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        
+        body {{
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.7;
+            color: #e8ecf1;
+            background: linear-gradient(135deg, #0f1419 0%, #1a1f2e 100%);
+            min-height: 100vh;
+        }}
+        
+        .container {{
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 60px 40px;
+        }}
+        
+        .header {{
+            text-align: center;
+            padding: 80px 40px;
+            margin: -60px -40px 60px;
+            background: linear-gradient(180deg, rgba(15,20,25,0.95) 0%, rgba(26,31,46,0.9) 100%);
+            border-bottom: 1px solid rgba(136,146,176,0.15);
+            position: relative;
+            overflow: hidden;
+        }}
+        
+        .header::before {{
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at center, rgba(100,181,246,0.03) 0%, transparent 50%);
+            animation: pulse 20s ease-in-out infinite;
+        }}
+        
+        @keyframes pulse {{
+            0%, 100% {{ transform: scale(1); opacity: 0.5; }}
+            50% {{ transform: scale(1.1); opacity: 0.3; }}
+        }}
+        
+        .logo {{
+            width: 140px;
+            height: 140px;
+            margin: 0 auto 35px;
+            position: relative;
+            z-index: 1;
+            background: linear-gradient(135deg, rgba(30,40,55,0.8) 0%, rgba(20,25,35,0.9) 100%);
+            border-radius: 24px;
+            padding: 15px;
+            border: 2px solid rgba(100,181,246,0.2);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5),
+                        0 0 60px rgba(100,181,246,0.2),
+                        inset 0 0 30px rgba(100,181,246,0.05);
+            animation: float 6s ease-in-out infinite;
+        }}
+        
+        @keyframes float {{
+            0%, 100% {{ transform: translateY(0px); }}
+            50% {{ transform: translateY(-10px); }}
+        }}
+        
+        .logo img {{
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            filter: drop-shadow(0 2px 8px rgba(0,0,0,0.5)) 
+                    drop-shadow(0 0 20px rgba(100,181,246,0.4));
+        }}
+        
+        h1 {{
+            font-size: 42px;
+            font-weight: 800;
+            margin-bottom: 12px;
+            color: #ffffff;
+            letter-spacing: -0.5px;
+            position: relative;
+            z-index: 1;
+            text-shadow: 0 2px 20px rgba(0,0,0,0.5);
+        }}
+        
+        .subtitle {{
+            font-size: 20px;
+            color: #64b5f6;
+            margin-bottom: 25px;
+            font-weight: 500;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            position: relative;
+            z-index: 1;
+        }}
+        
+        .report-meta {{
+            font-size: 15px;
+            color: #8892a0;
+            position: relative;
+            z-index: 1;
+            line-height: 1.8;
+        }}
+        
+        .report-meta strong {{
+            color: #b4bcc8;
+            font-weight: 600;
+        }}
+        
+        .section {{
+            margin-bottom: 60px;
+            animation: fadeInUp 0.8s ease-out;
+            position: relative;
+        }}
+        
+        .section::before {{
+            content: '';
+            position: absolute;
+            left: -40px;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: linear-gradient(180deg, transparent, #64b5f6, transparent);
+            opacity: 0.3;
+        }}
+        
+        @keyframes fadeInUp {{
+            from {{
+                opacity: 0;
+                transform: translateY(20px);
+            }}
+            to {{
+                opacity: 1;
+                transform: translateY(0);
+            }}
+        }}
+        
+        h2 {{
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 30px;
+            color: #ffffff;
+            padding-bottom: 15px;
+            border-bottom: 2px solid transparent;
+            background: linear-gradient(90deg, #64b5f6 0%, transparent 50%) bottom left no-repeat;
+            background-size: 100% 2px;
+            letter-spacing: -0.3px;
+            position: relative;
+        }}
+        
+        h2::after {{
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background: linear-gradient(90deg, #64b5f6, #42a5f5);
+            animation: expandWidth 1.5s ease-out forwards;
+        }}
+        
+        @keyframes expandWidth {{
+            to {{ width: 100%; }}
+        }}
+        
+        h3 {{
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 18px;
+            color: #81c7f7;
+            letter-spacing: -0.2px;
+        }}
+        
+        p {{
+            margin-bottom: 18px;
+            text-align: left;
+            color: #c8d0db;
+            line-height: 1.8;
+        }}
+        
+        .finding {{
+            background: linear-gradient(135deg, rgba(36,52,71,0.6) 0%, rgba(26,35,50,0.6) 100%);
+            border-left: 4px solid #dc3545;
+            padding: 25px;
+            margin-bottom: 25px;
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3),
+                        inset 0 1px 0 rgba(255,255,255,0.1);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }}
+        
+        .code-sample {{
+            background: #1a1a2e;
+            border: 1px solid #16213e;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }}
+        
+        .code-sample pre {{
+            margin: 0;
+            background: transparent;
+            border: none;
+            padding: 0;
+        }}
+        
+        .code-sample pre code {{
+            background: transparent !important;
+            padding: 0 !important;
+            font-size: 13px;
+            line-height: 1.5;
+        }}
+        
+        .code-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #2a3f5f;
+        }}
+        
+        .code-file {{
+            color: #64b5f6;
+            font-size: 12px;
+            font-weight: 600;
+        }}
+        
+        .code-lines {{
+            color: #888;
+            font-size: 11px;
+        }}
+        
+        .code-explanation {{
+            background: rgba(100, 181, 246, 0.1);
+            border-left: 3px solid #64b5f6;
+            padding: 10px;
+            margin-top: 10px;
+            font-size: 13px;
+            color: #b3d4fc;
+            font-style: italic;
+        }}
+        
+        .finding::before {{
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(100,181,246,0.5), transparent);
+            animation: scan 3s linear infinite;
+        }}
+        
+        @keyframes scan {{
+            0% {{ transform: translateX(-100%); }}
+            100% {{ transform: translateX(100%); }}
+        }}
+        
+        .finding:hover {{
+            transform: translateY(-3px) scale(1.01);
+            box-shadow: 0 8px 40px rgba(0,0,0,0.5),
+                        inset 0 1px 0 rgba(255,255,255,0.2);
+            background: linear-gradient(135deg, rgba(36,52,71,0.7) 0%, rgba(26,35,50,0.7) 100%);
+        }}
+        
+        .finding.critical {{
+            border-left-color: #dc3545;
+        }}
+        
+        .finding.high {{
+            border-left-color: #fd7e14;
+        }}
+        
+        .finding.medium {{
+            border-left-color: #ffc107;
+        }}
+        
+        .finding.low {{
+            border-left-color: #28a745;
+        }}
+        
+        .severity-badge {{
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+            letter-spacing: 1px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            position: relative;
+            overflow: hidden;
+        }}
+        
+        .severity-badge::before {{
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: linear-gradient(45deg, transparent, rgba(255,255,255,0.3), transparent);
+            transform: rotate(45deg);
+            animation: shimmer 3s infinite;
+        }}
+        
+        @keyframes shimmer {{
+            0% {{ transform: translateX(-100%) translateY(-100%) rotate(45deg); }}
+            100% {{ transform: translateX(100%) translateY(100%) rotate(45deg); }}
+        }}
+        
+        .severity-critical {{
+            background: #dc3545;
+            color: white;
+        }}
+        
+        .severity-high {{
+            background: #fd7e14;
+            color: white;
+        }}
+        
+        .severity-medium {{
+            background: #ffc107;
+            color: #333;
+        }}
+        
+        .severity-low {{
+            background: #28a745;
+            color: white;
+        }}
+        
+        .test-item {{
+            padding: 10px 0;
+            border-bottom: 1px solid #3a4556;
+        }}
+        
+        .test-item:last-child {{
+            border-bottom: none;
+        }}
+        
+        .test-status {{
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            margin-right: 10px;
+            vertical-align: middle;
+            box-shadow: 0 0 10px currentColor;
+            animation: pulse-dot 2s infinite;
+        }}
+        
+        @keyframes pulse-dot {{
+            0%, 100% {{ opacity: 1; transform: scale(1); }}
+            50% {{ opacity: 0.7; transform: scale(0.9); }}
+        }}
+        
+        .status-confirmed {{
+            background: #dc3545;
+        }}
+        
+        .status-rejected {{
+            background: #28a745;
+        }}
+        
+        .status-investigating {{
+            background: #ffc107;
+        }}
+        
+        .status-proposed {{
+            background: #6c757d;
+        }}
+        
+        .footer {{
+            margin-top: 80px;
+            padding-top: 40px;
+            border-top: 1px solid rgba(136,146,176,0.15);
+            text-align: center;
+            color: #64738c;
+            font-size: 14px;
+        }}
+        
+        .footer p {{
+            text-align: center;
+            color: #64738c;
+        }}
+        
+        ul {{
+            margin: 20px 0;
+            padding-left: 25px;
+        }}
+        
+        ul li {{
+            margin-bottom: 12px;
+            color: #c8d0db;
+            line-height: 1.8;
+        }}
+        
+        ul li::marker {{
+            color: #64b5f6;
+        }}
+        
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin: 25px 0;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3),
+                        inset 0 1px 0 rgba(255,255,255,0.05);
+            background: rgba(26,35,50,0.3);
+        }}
+        
+        th, td {{
+            padding: 16px;
+            text-align: left;
+        }}
+        
+        th {{
+            background: linear-gradient(135deg, rgba(36,52,71,0.8) 0%, rgba(26,35,50,0.8) 100%);
+            font-weight: 600;
+            color: #64b5f6;
+            text-transform: uppercase;
+            font-size: 12px;
+            letter-spacing: 1px;
+        }}
+        
+        td {{
+            background: rgba(26,35,50,0.4);
+            border-bottom: 1px solid rgba(58,69,86,0.3);
+            color: #c8d0db;
+        }}
+        
+        tr:last-child td {{
+            border-bottom: none;
+        }}
+        
+        .component-diagram {{
+            margin-top: 40px;
+            padding: 30px;
+            background: linear-gradient(135deg, rgba(36,52,71,0.4) 0%, rgba(26,35,50,0.4) 100%);
+            border-radius: 12px;
+            border: 1px solid rgba(100,181,246,0.2);
+        }}
+        
+        .component-diagram h3 {{
+            color: #81c7f7;
+            margin-bottom: 20px;
+            font-size: 18px;
+            font-weight: 600;
+        }}
+        
+        .diagram-content {{
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #e8ecf1;
+            background: rgba(15,20,25,0.6);
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            white-space: pre;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>SECURITY AUDIT REPORT</h1>
+            <div class="subtitle">{kwargs.get('application_name', kwargs.get('project_name', 'Application'))}</div>
+            <div class="report-meta">
+                <strong>Project:</strong> {kwargs.get('project_name', '')}<br>
+                <strong>Date:</strong> {kwargs['report_date']}<br>
+                <strong>Audit Team:</strong> Hound Security<br>
+                <strong>Lead Auditors:</strong> {', '.join(kwargs['auditors'])}
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>Executive Summary</h2>
+            {self._format_paragraphs_html(kwargs['executive_summary'])}
+        </div>
+        
+        <div class="section">
+            <h2>System Overview</h2>
+            {self._format_paragraphs_html(kwargs.get('system_overview', ''))}
+        </div>
+        
+        <div class="section">
+            <h2>Findings</h2>
+            {self._format_findings_html(kwargs['findings'])}
+        </div>
+        
+        <div class="footer">
+            <p>© {datetime.now().year} Hound Security Team<br>
+            Report prepared by: {kwargs.get('report_writer', 'Hound Team')}<br>
+        </div>
+    </div>
+</body>
+</html>"""
+        
+        return html
+    
+    def _format_paragraphs_html(self, text: str) -> str:
+        """Format text into HTML paragraphs."""
+        paragraphs = (text or '').strip().split('\n\n')
+        return '\n'.join(f'<p>{p.strip()}</p>' for p in paragraphs if p.strip())
+    
+    def _format_component_diagram_html(self, diagram: str) -> str:
+        """Format component diagram into HTML."""
+        if not diagram or not diagram.strip():
+            return ''
+        
+        return f'''
+        <div class="component-diagram">
+            <h3>System Architecture Diagram</h3>
+            <pre class="diagram-content">{diagram}</pre>
+        </div>
+        '''
+    
+    def _format_findings_html(self, findings: List[Dict]) -> str:
+        """Format findings into HTML with code samples."""
+        if not findings:
+            return '<p><em>No confirmed vulnerabilities were identified during this audit.</em></p>'
+        
+        html_parts = []
+        for finding in findings:
+            severity = finding['severity']
+            
+            # Format code samples
+            code_html = ''
+            for sample in finding.get('code_samples', []):
+                code_html += f'''
+                <div class="code-sample">
+                    <div class="code-header">
+                        <span class="code-file">{sample['file']}</span>
+                        <span class="code-lines">Lines {sample['start_line']}-{sample['end_line']}</span>
+                    </div>
+                    <pre><code class="language-{sample['language']}">{self._escape_html(sample['code'])}</code></pre>
+                    {f'<div class="code-explanation">{sample["explanation"]}</div>' if sample.get('explanation') else ''}
+                </div>
+                '''
+            
+            html_parts.append(f'''
+            <div class="finding {severity}">
+                <span class="severity-badge severity-{severity}">{severity}</span>
+                <h3>{finding['title']}</h3>
+                <p><strong>Type:</strong> {finding['type']}</p>
+                <p>{finding['description']}</p>
+                <p><strong>Affected Components:</strong> {', '.join(finding['affected'][:3])}</p>
+                <p><strong>Discovered by:</strong> {finding.get('reported_by_model', 'Hound team member')}</p>
+                {code_html}
+            </div>
+            ''')
+        
+        return '\n'.join(html_parts)
+    
+    def _escape_html(self, text: str) -> str:
+        """Escape HTML special characters."""
+        return (text
+            .replace('&', '&amp;')
+            .replace('<', '&lt;')
+            .replace('>', '&gt;')
+            .replace('"', '&quot;')
+            .replace("'", '&#39;'))
+    
+    def _format_test_coverage_html(self, hypotheses: List[Dict]) -> str:
+        """Format test coverage into HTML."""
+        if not hypotheses:
+            return '<p><em>No security tests were recorded.</em></p>'
+        
+        html_parts = ['<div class="test-coverage">']
+        
+        # Group by type
+        by_type = {}
+        for hyp in hypotheses:
+            vuln_type = hyp['type']
+            if vuln_type not in by_type:
+                by_type[vuln_type] = []
+            by_type[vuln_type].append(hyp)
+        
+        for vuln_type, items in by_type.items():
+            html_parts.append(f'<h3>{vuln_type.replace("_", " ").title()}</h3>')
+            for item in items:
+                status_class = f"status-{item['status']}"
+                html_parts.append(f'''
+                <div class="test-item">
+                    <span class="test-status {status_class}"></span>
+                    <strong>{item['title']}</strong>
+                    <span style="color: #888; margin-left: 10px;">
+                        ({item['status']} - {item['confidence']:.0%} confidence)
+                    </span>
+                </div>
+                ''')
+        
+        html_parts.append('</div>')
+        return '\n'.join(html_parts)
+    
+    def _generate_markdown_report(self, **kwargs) -> str:
+        """Generate Markdown format report."""
+        
+        md = f"""# SECURITY AUDIT REPORT
+
+**{kwargs.get('application_name', kwargs.get('project_name', 'Application'))}**
+
+**Date:** {kwargs['report_date']}  
+**Performed by:** {', '.join(kwargs['auditors'])}
+
+---
+
+## Executive Summary
+
+{kwargs['executive_summary']}
+
+## System Overview
+
+{kwargs.get('system_overview', '')}
+
+## Scope & Methodology
+
+### Project Information
+
+| Field | Value |
+|-------|-------|
+| Project Name | {kwargs['project_name']} |
+| Repository | {kwargs['project_source']} |
+| Audit Date | {kwargs['report_date']} |
+| Auditors | {', '.join(kwargs['auditors'])} |
+
+### Methodology
+
+The audit employed a comprehensive security assessment methodology including:
+
+- Static code analysis and manual code review
+- Architectural security assessment  
+- Attack surface mapping and threat modeling
+- Vulnerability pattern matching and invariant analysis
+- External dependency and integration review
+
+## Findings
+
+{self._format_findings_markdown(kwargs['findings'])}
+
+---
+
+*Generated by Hound Security Analysis Platform*  
+*© {datetime.now().year} - Security Report*
+"""
+        
+        return md
+    
+    def _format_findings_markdown(self, findings: List[Dict]) -> str:
+        """Format findings for Markdown."""
+        if not findings:
+            return '*No confirmed vulnerabilities were identified during this audit.*'
+        
+        md_parts = []
+        for finding in findings:
+            md_parts.append(f"""### [{finding['severity'].upper()}] {finding['title']}
+
+**Type:** {finding['type']}  
+**Affected:** {', '.join(finding['affected'][:3])}  
+**Detected by:** {finding.get('reported_by_model', 'unknown')}
+
+{finding['description']}
+
+---""")
+        
+        return '\n\n'.join(md_parts)
+    
+    def _extract_code_for_finding(self, finding: Dict) -> List[Dict]:
+        """Extract relevant code snippets for a finding using LLM."""
+        code_samples = []
+        
+        # First check if the finding itself has source_files in properties
+        if 'properties' in finding and 'source_files' in finding.get('properties', {}):
+            affected_files = set(finding['properties']['source_files'])
+        else:
+            affected_files = set()
+        
+        # Also get affected files from node_refs
+        for node_ref in finding.get('affected', []):
+            # Try to extract file paths from node references
+            # Node refs might be contract names or file paths
+            if '/' in node_ref or '.sol' in node_ref:
+                affected_files.add(node_ref)
+            else:
+                # Try to find the file in our graphs
+                for graph in self.graphs.values():
+                    for node in graph.get('nodes', []):
+                        if node.get('label') == node_ref or node.get('id') == node_ref:
+                            if 'file' in node:
+                                affected_files.add(node['file'])
+                            elif 'source' in node:
+                                affected_files.add(node['source'])
+                            elif 'properties' in node and 'file' in node['properties']:
+                                affected_files.add(node['properties']['file'])
+        
+        # Also check supporting evidence for file references
+        for evidence in finding.get('supporting_evidence', []):
+            if isinstance(evidence, dict):
+                if 'file' in evidence:
+                    affected_files.add(evidence['file'])
+                if 'location' in evidence:
+                    affected_files.add(evidence['location'])
+        
+        if not affected_files and self.debug:
+            print(f"[!] No source files found for finding: {finding.get('title', 'Unknown')}")
+        
+        # Try to find the project source directory
+        # Look for project.json file that has the source path
+        project_file = self.project_dir / "project.json"
+        source_base_path = None
+        
+        if project_file.exists():
+            with open(project_file, 'r') as f:
+                project_data = json.load(f)
+                source_base_path = Path(project_data.get('source_path', ''))
+        
+        # If no metadata, try common locations
+        if not source_base_path or not source_base_path.exists():
+            # Try the code directory parallel to hound
+            possible_paths = [
+                Path("/Users/bernhardmueller/Projects/hound3/code/size-meta-vault"),
+                self.project_dir.parent.parent / "code" / "size-meta-vault",
+                self.project_dir.parent.parent / "code" / self.project_dir.name.replace('_', '-')
+            ]
+            
+            for path in possible_paths:
+                if path.exists():
+                    source_base_path = path
+                    break
+        
+        if not source_base_path or not source_base_path.exists():
+            if self.debug:
+                print(f"[!] Could not find source code directory")
+            return code_samples
+        
+        # For each affected file, ask LLM to identify relevant code sections
+        for file_path in list(affected_files)[:3]:  # Limit to 3 files per finding
+            try:
+                # Try to find the file
+                source_path = source_base_path / file_path
+                if not source_path.exists():
+                    # Try without src/ prefix if it's there
+                    if file_path.startswith('src/'):
+                        source_path = source_base_path / file_path[4:]
+                    # Or try adding src/ prefix
+                    elif not file_path.startswith('/'):
+                        source_path = source_base_path / 'src' / file_path
+                    
+                    if not source_path.exists():
+                        if self.debug:
+                            print(f"[!] File not found: {source_path}")
+                        continue
+                
+                with open(source_path, 'r') as f:
+                    file_content = f.read()
+                
+                # Ask LLM to identify relevant code sections
+                prompt = f"""Given this security finding and the source code, identify the most relevant code section.
+
+Finding Title: {finding['title']}
+Finding Type: {finding['type']}
+Description: {finding['description']}
+
+Source File: {file_path}
+File Content:
+```
+{file_content}
+```
+
+Return a JSON object with:
+{{
+  "relevant_lines": {{"start": <line_number>, "end": <line_number>}},
+  "explanation": "Brief explanation of why this code is relevant"
+}}
+
+Only include the most relevant 10-20 lines that directly relate to the vulnerability."""
+                
+                response = self.llm.raw(
+                    system="You are a code analysis expert. Return only valid JSON.",
+                    user=prompt
+                )
+                
+                from utils.json_utils import extract_json_object
+                result = extract_json_object(response)
+                
+                if result and 'relevant_lines' in result:
+                    lines = file_content.split('\n')
+                    start = result['relevant_lines']['start'] - 1  # Convert to 0-indexed
+                    end = result['relevant_lines']['end']
+                    
+                    code_samples.append({
+                        'file': str(file_path),
+                        'start_line': result['relevant_lines']['start'],
+                        'end_line': result['relevant_lines']['end'],
+                        'code': '\n'.join(lines[start:end]),
+                        'language': self._detect_language(file_path),
+                        'explanation': result.get('explanation', '')
+                    })
+            except Exception as e:
+                if self.debug:
+                    print(f"[!] Failed to extract code for {file_path}: {e}")
+                continue
+        
+        return code_samples
+    
+    def _detect_language(self, file_path: str) -> str:
+        """Detect programming language from file extension."""
+        ext_map = {
+            '.sol': 'solidity',
+            '.js': 'javascript',
+            '.ts': 'typescript',
+            '.py': 'python',
+            '.rs': 'rust',
+            '.go': 'go',
+            '.java': 'java',
+            '.cpp': 'cpp',
+            '.c': 'c',
+            '.vyper': 'python',
+            '.vy': 'python'
+        }
+        ext = Path(file_path).suffix.lower()
+        return ext_map.get(ext, 'plaintext')
+    
+    def _format_test_coverage_markdown(self, hypotheses: List[Dict]) -> str:
+        """Format test coverage for Markdown."""
+        if not hypotheses:
+            return '*No security tests were recorded.*'
+        
+        md_parts = []
+        
+        # Group by type
+        by_type = {}
+        for hyp in hypotheses:
+            vuln_type = hyp['type']
+            if vuln_type not in by_type:
+                by_type[vuln_type] = []
+            by_type[vuln_type].append(hyp)
+        
+        for vuln_type, items in by_type.items():
+            md_parts.append(f"### {vuln_type.replace('_', ' ').title()}\n")
+            for item in items:
+                status_icon = {
+                    'confirmed': '🔴',
+                    'rejected': '✅',
+                    'investigating': '🟡',
+                    'proposed': '⚫'
+                }.get(item['status'], '⚫')
+                
+                md_parts.append(f"- {status_icon} **{item['title']}** "
+                              f"*({item['status']} - {item['confidence']:.0%})*")
+            md_parts.append("")
+        
+        return '\n'.join(md_parts)

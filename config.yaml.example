@@ -1,0 +1,141 @@
+# Hound Configuration Example
+# Copy this file to config.yaml and customize for your setup
+
+# ============================================================================
+# LLM Provider Configuration
+# ============================================================================
+# Configure API keys for each provider you want to use
+
+# OpenAI Configuration
+openai:
+  api_key_env: OPENAI_API_KEY    # Environment variable containing your OpenAI API key
+  # api_base: https://api.openai.com/v1  # Optional: Custom API endpoint
+
+# Google Gemini Configuration  
+gemini:
+  api_key_env: GOOGLE_API_KEY    # Environment variable containing your Google API key
+
+# Anthropic Configuration
+anthropic:
+  api_key_env: ANTHROPIC_API_KEY # Environment variable containing your Anthropic API key
+
+# ============================================================================
+# Model Profiles
+# ============================================================================
+# Configure different models for different tasks
+# Each profile can use a different provider and model with specific settings
+#
+# Available providers: openai, gemini, anthropic
+# 
+# Common OpenAI models:
+#   - gpt-4o-mini: Fast, cost-effective for simple tasks
+#   - gpt-4o: Balanced performance and cost
+#   - gpt-4-turbo: High performance
+#   - o1-mini: Reasoning model (supports reasoning_effort)
+#   - o1-preview: Advanced reasoning model (supports reasoning_effort)
+#
+# Common Gemini models:
+#   - gemini-1.5-flash: Fast, efficient model
+#   - gemini-1.5-flash-8b: Smaller, faster variant
+#   - gemini-1.5-pro: Advanced capabilities
+#   - gemini-2.0-flash-thinking-exp: Experimental thinking model (supports thinking_enabled)
+#
+# Common Anthropic models:
+#   - claude-3-5-haiku-20241022: Fast, efficient model
+#   - claude-3-5-sonnet-20241022: Balanced performance
+#   - claude-3-opus-20240229: Most capable model
+
+models:
+  # Profile for graph building operations (fast, structured output)
+  graph:
+    provider: openai              # Options: openai, gemini, anthropic
+    model: gpt-4o-mini           # Fast model for structured graph generation
+    
+  # Profile for agent discovery and analysis (powerful reasoning)
+  agent:
+    provider: openai
+    model: o1-mini               # Reasoning model for complex analysis
+    
+    # Reasoning effort (OpenAI o1 models only)
+    # Options: low, medium, high
+    # Higher effort = better reasoning but slower/more expensive
+    reasoning_effort: medium
+    
+  # Profile for hypothesis finalization
+  finalize:
+    provider: anthropic
+    model: claude-3-5-sonnet-20241022
+    
+  # Alternative configuration with Gemini thinking mode
+  # agent:
+  #   provider: gemini
+  #   model: gemini-2.0-flash-thinking-exp
+  #   thinking_enabled: true      # Enable chain-of-thought reasoning
+  #   thinking_budget: -1          # Token budget for thinking (-1 = unlimited)
+
+# ============================================================================
+# Request Configuration
+# ============================================================================
+
+# Timeout settings
+timeouts:
+  request_seconds: 120            # Maximum time to wait for LLM response (increase for o1 models)
+
+# Retry configuration
+retries:
+  max_attempts: 3                 # Number of retry attempts on failure
+  backoff_min_seconds: 2          # Minimum wait between retries
+  backoff_max_seconds: 8          # Maximum wait between retries
+
+# ============================================================================
+# Code Processing Configuration
+# ============================================================================
+
+# Bundling parameters - How code is chunked for analysis
+bundling:
+  target_chars: 25000             # Target size for each code bundle
+  min_chunk_chars: 1000           # Minimum chunk size to create
+  max_chunk_chars: 2000           # Maximum chunk size to create
+
+# ============================================================================
+# Logging Configuration (Optional)
+# ============================================================================
+
+logging:
+  llm_verbose: false              # Enable verbose LLM request/response logging
+  # Can also be enabled via environment variable: HOUND_LLM_VERBOSE=1
+
+# ============================================================================
+# Advanced Configuration Examples
+# ============================================================================
+
+# Example: Multiple profiles for different security analysis tasks
+# models:
+#   # Fast initial scan
+#   scan:
+#     provider: gemini
+#     model: gemini-1.5-flash-8b
+#   
+#   # Detailed vulnerability analysis
+#   analyze:
+#     provider: openai
+#     model: o1-preview
+#     reasoning_effort: high
+#   
+#   # Code understanding and graph building
+#   graph:
+#     provider: anthropic
+#     model: claude-3-5-haiku-20241022
+#   
+#   # Final review and confirmation
+#   review:
+#     provider: anthropic
+#     model: claude-3-5-sonnet-20241022
+
+# ============================================================================
+# Storage Configuration
+# ============================================================================
+
+# Default paths
+paths:
+  cache_dir: .hound_cache         # Directory for storing analysis results
