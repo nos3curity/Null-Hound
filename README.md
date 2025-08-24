@@ -156,3 +156,7 @@ python hound.py graph build --help
 ## Configuration
 
 See `config.yaml.example` for all available options and model configurations.
+
+## Contributing
+
+Contributions are welcome! To contribute to the base framework, you need to sign the [Contributor License Agreement](https://cla-assistant.io/muellerberndt/hound).
