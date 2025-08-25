@@ -19,9 +19,9 @@
 
 ## Overview
 
-**Hound** is a research framework for **AI-driven code security auditing** that mirrors how expert auditors actually think, learn, and collaborate. Instead of spamming shallow hypotheses or rigidly parsing syntax trees, Hound builds **flexible cognitive models** of a system—models that accumulate, adapt, and get refined over time.  
+**Hound** is a research framework for **AI-driven code security auditing** that mirrors how expert auditors actually think, learn, and collaborate. Instead of spamming shallow hypotheses or rigidly parsing syntax trees, Hound builds **flexible cognitive models** of a system that accumulate, adapt, and get refined over time.  
 
-Agents reason across **abstract business logic and concrete code details**, capturing assumptions, invariants, and observations into evolving **knowledge graphs**. These graphs dynamic relational models that change as the audit deepens. The process mirrors real audit teams: weeks of cumulative understanding, targeted hypotheses, and collaborative review that surface **deep, business-logic vulnerabilities** missed by pattern-matching tools.
+Agents reason across **abstract business logic and concrete code details**, capturing assumptions, invariants, and observations into evolving **knowledge graphs**. These graphs are dynamic relational models that change as the audit deepens. The process mirrors real audit teams: weeks of cumulative understanding, targeted hypotheses, and collaborative review that surface **deep, business-logic vulnerabilities** missed by pattern-matching tools.
 
 ### Key innovations
 
@@ -108,7 +108,7 @@ python hound.py agent finalize my_audit
 # - Updates confidence levels
 ```
 
-### 7. Generate audit reportDCF
+### 7. Generate audit report
 
 ```bash
 # Create security audit report
