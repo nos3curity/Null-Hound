@@ -45,7 +45,7 @@ models:
   # Profile for deep thinking/guidance model (used by agent's deep_think action)
   guidance:
     provider: openai
-    model: gpt-5             # Strong reasoning model for deep analysis
+    model: gpt-5         # Strong reasoning model for deep analysis
     reasoning_effort: high
 
   # Profile for hypothesis finalization

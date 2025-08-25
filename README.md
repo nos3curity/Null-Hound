@@ -17,14 +17,22 @@
 
 ## Overview
 
-Hound is a language-agnostic framework for code security reviews that replicates how expert auditors think and collaborate. Its agents build and refine cognitive models of a system and update them as new insights emerge. This process mirrors real audit teams: cumulative understanding, targeted hypotheses, and professional reports that surface deep logic flaws.
+## Overview
 
-- Dynamic modeling of any codebase to find logic bugs
-- Model relationships between abstract and concrete concepts across granularities
-- Code understanding accumulates in knowledge graphs
-- Dynamic model switching (use larger models for guidance and hypotheses formation)
-- Orchestrate multiple agents serially and in parallel
-- Create complete audit reports with exec summary and system overview
+**Hound** is a research framework for **AI-driven code security auditing** that mirrors how expert auditors actually think, learn, and collaborate. Instead of spamming shallow hypotheses or rigidly parsing syntax trees, Hound builds **flexible cognitive models** of a system—models that accumulate, adapt, and get refined over time.  
+
+Agents reason across **abstract business logic and concrete code details**, capturing assumptions, invariants, and observations into evolving **knowledge graphs**. These graphs dynamic relational models that change as the audit deepens. The process mirrors real audit teams: weeks of cumulative understanding, targeted hypotheses, and collaborative review that surface **deep, business-logic vulnerabilities** missed by pattern-matching tools.
+
+### Key innovations
+
+- **Dynamic modeling** of any codebase, from small libraries to complex protocols  
+- **Aspect graphs** that relate abstract concepts (monetary flows, authorization, invariants) to concrete implementations (functions, storage, calls)  
+- **Iterative accumulation** of knowledge — beliefs, hypotheses, and observations evolve with time, not discarded after each run  
+- **Dynamic model switching**: lightweight agents can escalate reasoning to larger models for guidance and hypothesis formation  
+- **Collaborative orchestration**: run multiple agents in parallel or serial pipelines, mirroring real audit teams  
+- **Professional outputs**: generate complete audit reports with executive summaries, system overviews, and detailed findings  
+
+Hound is designed to scale with both **time and resources**: a one-hour run gives quick coverage, while a days-long review provide more detailed results.
 
  See the [tech overview](tech.md) for details.
 
@@ -78,7 +86,7 @@ python hound.py graph export my_audit --output graphs.html
 
 ```bash
 # Explore and investigate the codebase
-python hound.py agent audit my_audit --time-limit 30
+python hound.py agent audit my_audit --time-limit 3
 
 # The audit agent will:
 # - Analyze the knowledge graphs
@@ -100,7 +108,7 @@ python hound.py agent finalize my_audit
 # - Updates confidence levels
 ```
 
-### 7. Generate audit report
+### 7. Generate audit reportDCF
 
 ```bash
 # Create security audit report
