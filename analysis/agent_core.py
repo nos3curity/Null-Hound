@@ -460,13 +460,13 @@ class AutonomousAgent:
         nodes = graph_data.get('nodes', [])
         edges = graph_data.get('edges', [])
         lines.append(f"Total: {len(nodes)} nodes, {len(edges)} edges")
-        lines.append("⚠️ USE EXACT NODE IDS AS SHOWN BELOW - NO VARIATIONS!\n")
+        lines.append("USE EXACT NODE IDS AS SHOWN BELOW - NO VARIATIONS!\n")
         
         # Show ALL nodes with top observations/assumptions
         if nodes:
             lines.append("AVAILABLE NODES (use these EXACT IDs with load_nodes):")
             lines.append("📊 Code size indicator: [S]=small (1-2 cards), [M]=medium (3-5), [L]=large (6+)")
-            lines.append("⚠️ PRIORITIZE [S] and [M] nodes! Only load [L] if absolutely necessary!\n")
+            lines.append("PRIORITIZE [S] and [M] nodes! Only load [L] if absolutely necessary!\n")
             
             for node in nodes:
                 node_id = node.get('id', 'unknown')
@@ -881,6 +881,15 @@ class AutonomousAgent:
         """
         system_prompt = """You are an autonomous security investigation agent analyzing smart contracts.
 
+YOUR CORE RESPONSIBILITY: You are the EXPLORER and CONTEXT BUILDER. Your primary job is to:
+- Navigate and explore the graph structure to understand the system
+- Load relevant code that implements the features being investigated  
+- Build comprehensive context by examining multiple related components
+- Prepare complete information for the deep think model to analyze
+
+The deep think model (guidance) is a separate, expensive reasoning engine that performs vulnerability analysis.
+It can ONLY analyze the context you prepare - if you don't load it, it can't analyze it!
+
 Your task is to investigate the system and identify potential vulnerabilities. The system architecture graph is automatically loaded and visible. You can see all available graphs and which are loaded.
 
 CRITICAL RULES FOR NODE AND GRAPH NAMES:
@@ -938,30 +947,57 @@ AVAILABLE ACTIONS - USE EXACT PARAMETERS AS SHOWN:
    EXAMPLE: {"hypothesis_index": 0, "new_confidence": 0.9, "evidence": "Confirmed by analyzing implementation"}
    ONLY SEND: hypothesis_index, new_confidence, evidence - NOTHING ELSE!
 
-5. deep_think — Analyze recent exploration for vulnerabilities (use after exploring)
+5. deep_think — Analyze recent exploration for vulnerabilities (EXPENSIVE - use wisely!)
    PARAMETERS: {}
    EXAMPLE: {}
    Send empty object {} - NO PARAMETERS!
-   IMPORTANT: Use this ONLY after you have explored code (loaded nodes, made observations)
-   - Call after every 3-5 exploration actions
-   - Analyzes your recent discoveries for vulnerabilities
-   - Provides strategic guidance on what to explore next
+   
+   CRITICAL PREREQUISITES - DO NOT CALL deep_think UNTIL:
+   - You have loaded RELEVANT graphs for the investigation topic
+   - You have loaded ACTUAL CODE (nodes) that implements the feature being investigated
+   - You have made observations about the loaded code
+   - You have a COMPLETE VIEW of the feature/subsystem being analyzed
+   
+   NEVER call deep_think:
+   - At the start of investigation (no context loaded yet!)
+   - After only loading graphs without loading any nodes
+   - When you haven't explored the specific feature mentioned in the investigation
+   
+   ONLY call deep_think:
+   - After loading and examining 5-10 relevant nodes minimum
+   - When you have a complete understanding of a subsystem
+   - When you need strategic guidance after thorough exploration
+   
+   Purpose: The deep think model performs expensive, thorough vulnerability analysis
+   on the context YOU have prepared. It can only analyze what you've loaded!
 
 6. complete — Finish the current investigation
    PARAMETERS: {}
    EXAMPLE: {}
    Send empty object {} - NO PARAMETERS!
 
-EXPLORATION STRATEGY:
-1. LOOK at the graph to see what nodes exist (check size indicators!)
-2. START with [S] and [M] nodes - these are specific functions and targeted code
-3. COPY exact node IDs when using load_nodes - no guessing!
-4. AVOID loading [L:n] nodes (entire contracts) unless you have a specific reason
-5. After 3-5 exploration actions, call deep_think to analyze what you found
-6. Follow the guidance from deep_think to explore related areas
-7. Repeat: explore targeted nodes → deep_think → explore more → deep_think
+YOUR PRIMARY ROLE - CONTEXT PREPARATION:
+You are the NAVIGATOR and EXPLORER. Your job is to:
+1. Navigate the graph structure to find relevant components
+2. Load and examine code that implements the investigated feature
+3. Build a complete understanding of how the system works
+4. PREPARE comprehensive context for the deep think model to analyze
 
-💡 SMART LOADING: Load func_* nodes (specific functions) rather than contract_* nodes (entire files)!
+The deep think model is EXPENSIVE and can only analyze what YOU load!
+Think of yourself as preparing a detailed case file for an expert analyst.
+
+EXPLORATION STRATEGY:
+1. UNDERSTAND the investigation goal - what feature/property are we examining?
+2. LOAD relevant graphs that show this feature's structure
+3. IDENTIFY nodes that implement this feature (check size indicators!)
+4. LOAD the actual code (5-10+ nodes minimum) for these components
+5. MAKE observations about how the code works
+6. ONLY THEN call deep_think when you have a COMPLETE picture
+7. Follow deep_think's guidance to explore related areas
+8. Repeat: thorough exploration → deep_think → more exploration
+
+SMART LOADING: Load func_* nodes (specific functions) rather than contract_* nodes (entire files)!
+REMEMBER: deep_think can only analyze what you've loaded - incomplete context = incomplete analysis!
 
 COMPLETION CRITERIA (WHEN TO CALL complete):
 1. You have explored key areas AND deep_think has analyzed them for vulnerabilities, OR
@@ -970,8 +1006,10 @@ COMPLETION CRITERIA (WHEN TO CALL complete):
 
 IMPORTANT: 
 - Do NOT form hypotheses directly - that's deep_think's job
-- ALWAYS explore first (load nodes, observe) before calling deep_think
-- Deep_think analyzes YOUR discoveries to find vulnerabilities
+- NEVER call deep_think without loading substantial code context first (5-10+ nodes minimum)
+- Deep_think is EXPENSIVE and analyzes YOUR discoveries - incomplete prep = wasted analysis
+- Your role: EXPLORE thoroughly, LOAD relevant code, BUILD complete context
+- Only call deep_think when you have a COMPLETE understanding of the investigated feature
 
 EXPECTATIONS:
 - Choose nodes at the most informative granularity (functions/storage) when available.
@@ -1691,10 +1729,16 @@ Required fields:
 - Confidence: high/medium/low
 - Reasoning: Brief explanation of why this is vulnerable
 
+FALSE POSITIVES MUST BE DISMISSED! DO NOT PROPOSE VULNERABILITES IF:
+- The issue is trivial and/or has no impact (e.g. missing input validation with no effect)
+- Exploitation requires admin privileges
+- The issue is impractical to exploit
+- You cannot think of a concrete attack vector
+
 EXPLORATION STRATEGY:
 [One paragraph - what patterns to look for next and why]
 Focus on areas not yet explored. Suggest specific node IDs or code patterns to examine based on vulnerabilities found.
-If you have a hypothesis but need more code to confirm it, let the agent know in thois section!
+If you have a hypothesis but need to see more code to confirm it, let the agent know in this section!
 Keep responses COMPACT but include ALL required fields."""
             
             user_prompt = f"""Security audit context (FOCUS ON 'RECENT ACTIONS' section):

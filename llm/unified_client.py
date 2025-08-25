@@ -10,6 +10,7 @@ from .base_provider import BaseLLMProvider
 from .openai_provider import OpenAIProvider
 from .gemini_provider import GeminiProvider
 from .anthropic_provider import AnthropicProvider
+from .xai_provider import XAIProvider
 
 T = TypeVar('T', bound=BaseModel)
 
@@ -28,6 +29,8 @@ class UnifiedLLMClient:
         
         The config now supports a 'provider' field for each model profile.
         If not specified, defaults to 'openai' for backward compatibility.
+        
+        Available providers: openai, gemini, anthropic, xai
         
         Args:
             cfg: Configuration dictionary
@@ -87,6 +90,11 @@ class UnifiedLLMClient:
                 api_key_env=cfg.get("anthropic", {}).get("api_key_env", "ANTHROPIC_API_KEY"),
                 verbose=llm_verbose,
                 thinking_enabled=model_config.get("thinking_enabled", False)
+            )
+        elif provider_name == "xai":
+            self.provider = XAIProvider(
+                **common_kwargs,
+                verbose=llm_verbose
             )
         else:
             raise ValueError(f"Unknown provider: {provider_name}")
