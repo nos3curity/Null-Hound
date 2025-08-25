@@ -464,12 +464,30 @@ class AutonomousAgent:
         # Show ALL nodes with top observations/assumptions
         if nodes:
             lines.append("AVAILABLE NODES (use these EXACT IDs with load_nodes):")
+            lines.append("📊 Code size indicator: [S]=small (1-2 cards), [M]=medium (3-5), [L]=large (6+)")
+            lines.append("⚠️ PRIORITIZE [S] and [M] nodes! Only load [L] if absolutely necessary!\n")
+            
             for node in nodes:
                 node_id = node.get('id', 'unknown')
                 node_label = node.get('label', node_id)
                 node_type = node.get('type', 'unknown')
+                
+                # Count source_refs to estimate code size
+                source_refs = node.get('source_refs', []) or []
+                card_count = len(source_refs)
+                
+                # Size indicator
+                if card_count == 0:
+                    size_indicator = "[∅]"  # No code
+                elif card_count <= 2:
+                    size_indicator = "[S]"  # Small
+                elif card_count <= 5:
+                    size_indicator = "[M]"  # Medium
+                else:
+                    size_indicator = f"[L:{card_count}]"  # Large with count
+                
                 # Make node IDs stand out more
-                lines.append(f"  [{node_id}] → {node_label} ({node_type})")
+                lines.append(f"  {size_indicator} [{node_id}] → {node_label} ({node_type})")
                 
                 # Show top 3 observations
                 observations = node.get('observations', [])
@@ -895,10 +913,16 @@ AVAILABLE ACTIONS - USE EXACT PARAMETERS AS SHOWN:
    ⚠️ REQUIRED: graph_name (string) AND node_ids (array)
    ⚠️ COPY THE EXACT NODE IDs from the square brackets [like_this] in the graph display
    
-   CORRECT EXAMPLE: {"graph_name": "SystemArchitecture", "node_ids": ["contract_Agent", "func_AIToken_mint"]}
-   WRONG EXAMPLE: {"graph_name": "System", "node_ids": ["Agent", "mint", "func_Agent_transfer"]}
+   🎯 LOADING STRATEGY:
+   - PRIORITIZE nodes marked [S] (small) and [M] (medium) - these are targeted functions
+   - AVOID nodes marked [L:n] (large) - these are entire contracts with many code blocks
+   - Load specific functions (func_*) rather than entire contracts (contract_*)
+   - If you must load a large node, explain WHY it's necessary
    
-   The node IDs are shown in square brackets in the graph. Copy them EXACTLY!
+   CORRECT EXAMPLE: {"graph_name": "SystemArchitecture", "node_ids": ["func_AIToken_mint"]}
+   WRONG EXAMPLE: {"graph_name": "System", "node_ids": ["contract_Agent"]} ← entire contract!
+   
+   The node IDs are shown in square brackets. Size indicators show code volume.
 
 3. update_node — Add observations/assumptions about ONE node
    PARAMETERS: {"node_id": "node", "observations": [...], "assumptions": [...]}
@@ -928,12 +952,15 @@ AVAILABLE ACTIONS - USE EXACT PARAMETERS AS SHOWN:
    ⚠️ Send empty object {} - NO PARAMETERS!
 
 EXPLORATION STRATEGY:
-1. LOOK at the graph to see what nodes exist (they're in square brackets)
-2. COPY exact node IDs when using load_nodes - no guessing!
-3. START by exploring: load graphs, load nodes, make observations
-4. After 3-5 exploration actions, call deep_think to analyze what you found
-5. Follow the guidance from deep_think to explore related areas
-6. Repeat: explore → deep_think → explore → deep_think
+1. LOOK at the graph to see what nodes exist (check size indicators!)
+2. START with [S] and [M] nodes - these are specific functions and targeted code
+3. COPY exact node IDs when using load_nodes - no guessing!
+4. AVOID loading [L:n] nodes (entire contracts) unless you have a specific reason
+5. After 3-5 exploration actions, call deep_think to analyze what you found
+6. Follow the guidance from deep_think to explore related areas
+7. Repeat: explore targeted nodes → deep_think → explore more → deep_think
+
+💡 SMART LOADING: Load func_* nodes (specific functions) rather than contract_* nodes (entire files)!
 
 COMPLETION CRITERIA (WHEN TO CALL complete):
 1. You have explored key areas AND deep_think has analyzed them for vulnerabilities, OR
@@ -1328,6 +1355,13 @@ DO NOT include any text before or after the JSON object."""
                 continue
             
             chosen_id = req_id
+            
+            # Warn about loading large nodes
+            source_refs = ndata.get('source_refs', []) or []
+            if len(source_refs) > 6:
+                if self.debug:
+                    print(f"[WARNING] Loading large node {chosen_id} with {len(source_refs)} code cards!")
+                # Could add to display_lines later if needed
 
             # Collect evidence cards from node and its incident edges
             # We already have graph_edges from the specified graph
@@ -1431,6 +1465,18 @@ DO NOT include any text before or after the JSON object."""
         display_lines = []
         display_lines.append(f"\n=== LOADED NODE DETAILS FROM {graph_name} ===")
         display_lines.append(f"This request: {current_loaded_count} nodes ({current_code_count} with code)")
+        
+        # Check if any large nodes were loaded
+        large_nodes_loaded = []
+        for nid in loaded_nodes:
+            node_data = self.loaded_data['nodes'][nid]
+            if 'cards' in node_data and len(node_data['cards']) > 6:
+                large_nodes_loaded.append(f"{nid}({len(node_data['cards'])} blocks)")
+        
+        if large_nodes_loaded:
+            display_lines.append(f"⚠️ WARNING: Loaded LARGE nodes: {', '.join(large_nodes_loaded)}")
+            display_lines.append("Consider loading specific functions instead of entire contracts!")
+        
         if total_loaded_count > current_loaded_count:
             display_lines.append(f"Total cached: {total_loaded_count} nodes\n")
         else:
