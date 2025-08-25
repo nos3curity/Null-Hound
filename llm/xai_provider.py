@@ -39,6 +39,7 @@ class XAIProvider(BaseLLMProvider):
         logging_cfg = config.get("logging", {}) if isinstance(config, dict) else {}
         env_verbose = os.environ.get("HOUND_LLM_VERBOSE", "").lower() in {"1","true","yes","on"}
         self.verbose = bool(logging_cfg.get("llm_verbose", False) or env_verbose)
+        self._last_token_usage = None
         
         # Get API key from environment
         api_key_env = config.get("xai", {}).get("api_key_env", "XAI_API_KEY")
@@ -86,6 +87,15 @@ class XAIProvider(BaseLLMProvider):
                 # Log response details
                 response_time = time.time() - attempt_start
                 response_content = completion.choices[0].message.content or ""
+                
+                # Track token usage
+                if hasattr(completion, 'usage') and completion.usage:
+                    self._last_token_usage = {
+                        'input_tokens': completion.usage.prompt_tokens or 0,
+                        'output_tokens': completion.usage.completion_tokens or 0,
+                        'total_tokens': completion.usage.total_tokens or 0
+                    }
+                
                 if self.verbose:
                     print(f"  Response in {response_time:.2f}s ({len(response_content):,} chars)")
                     if hasattr(completion, 'usage'):
@@ -128,6 +138,15 @@ class XAIProvider(BaseLLMProvider):
                     messages=messages,
                     timeout=self.timeout
                 )
+                
+                # Track token usage
+                if hasattr(completion, 'usage') and completion.usage:
+                    self._last_token_usage = {
+                        'input_tokens': completion.usage.prompt_tokens or 0,
+                        'output_tokens': completion.usage.completion_tokens or 0,
+                        'total_tokens': completion.usage.total_tokens or 0
+                    }
+                
                 return completion.choices[0].message.content
                 
             except Exception as e:
@@ -147,3 +166,7 @@ class XAIProvider(BaseLLMProvider):
     def supports_thinking(self) -> bool:
         """XAI Grok models don't have explicit thinking mode like Gemini."""
         return False
+    
+    def get_last_token_usage(self) -> Optional[Dict[str, int]]:
+        """Return token usage from the last call if available."""
+        return self._last_token_usage

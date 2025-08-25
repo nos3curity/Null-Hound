@@ -20,6 +20,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from analysis.agent import AutonomousAgent
+from analysis.run_tracker import RunTracker
+from llm.token_tracker import get_token_tracker
 from pydantic import BaseModel, Field
 
 def get_project_dir(project_id: str) -> Path:
@@ -556,6 +558,7 @@ class AgentRunner:
         self.agent = None
         self.start_time = None
         self.completed_investigations = []  # Track completed investigation goals
+        self.run_tracker: Optional[RunTracker] = None
         
     def initialize(self):
         """Initialize the agent."""
@@ -883,6 +886,26 @@ class AgentRunner:
 
     def run(self, plan_n: int = 5):
         """Run the agent using the unified autonomous flow."""
+        # Initialize run tracker
+        if '/' in self.project_id or Path(self.project_id).exists():
+            project_dir = Path(self.project_id).resolve()
+        else:
+            project_dir = get_project_dir(self.project_id)
+        
+        output_dir = project_dir / "agent_runs"
+        output_dir.mkdir(exist_ok=True, parents=True)
+        run_file = output_dir / f"run_{self.agent.agent_id}.json"
+        
+        self.run_tracker = RunTracker(run_file)
+        
+        # Set up token tracker
+        token_tracker = get_token_tracker()
+        token_tracker.reset()
+        
+        # Capture command line arguments
+        command_args = sys.argv
+        self.run_tracker.set_run_info(self.agent.agent_id, command_args)
+        
         # Display configuration (omit context window; not available in unified client)
         # Get the actual models being used
         agent_model_info = "default"
@@ -1021,10 +1044,24 @@ class AgentRunner:
                 console.print(f"\n[bold blue]→ Investigating:[/bold blue] {inv.goal}")
                 max_iters = self.agent.max_iterations if self.agent.max_iterations else 5
                 self.start_time = time.time()
-                report = self.agent.investigate(inv.goal, max_iterations=max_iters, progress_callback=progress_cb)
-                results.append((inv, report))
-                # Track completed investigation
-                self.completed_investigations.append(inv.goal)
+                try:
+                    report = self.agent.investigate(inv.goal, max_iterations=max_iters, progress_callback=progress_cb)
+                    results.append((inv, report))
+                    # Track completed investigation
+                    self.completed_investigations.append(inv.goal)
+                    
+                    # Update run tracker with investigation and token usage
+                    self.run_tracker.add_investigation({
+                        'goal': inv.goal,
+                        'priority': getattr(inv, 'priority', 0),
+                        'category': getattr(inv, 'category', None),
+                        'iterations_completed': report.get('iterations_completed', 0) if report else 0,
+                        'hypotheses': report.get('hypotheses', {}) if report else {}
+                    })
+                    self.run_tracker.update_token_usage(token_tracker.get_summary())
+                except Exception as e:
+                    self.run_tracker.add_error(str(e))
+                    raise
                 # Show progress
                 console.print(f"[green]✓ Completed:[/green] {inv.goal}")
 
@@ -1048,40 +1085,23 @@ class AgentRunner:
                 console.print(f"\n[bold]Iterations:[/bold] {last_report.get('iterations_completed', 0)}")
                 console.print(f"[bold]Hypotheses:[/bold] {last_report.get('hypotheses', {})}")
 
-        # Save report to project directory
-        if '/' in self.project_id or Path(self.project_id).exists():
-            project_dir = Path(self.project_id)
-            if not project_dir.is_absolute():
-                project_dir = project_dir.resolve()
-        else:
-            project_dir = get_project_dir(self.project_id)
-
-        output_dir = project_dir / "agent_runs"
-        output_dir.mkdir(exist_ok=True, parents=True)
-        output_file = output_dir / f"run_{self.agent.agent_id}.json"
-        # Save combined results: checklist + reports
-        combined = {
-            'planned': [
-                {
-                    'goal': getattr(inv, 'goal', ''),
-                    'priority': getattr(inv, 'priority', 0),
-                    'focus_areas': getattr(inv, 'focus_areas', []),
-                    'reasoning': getattr(inv, 'reasoning', ''),
-                    'expected_impact': getattr(inv, 'expected_impact', None),
-                    'category': getattr(inv, 'category', None),
-                } for inv, _ in results
-            ],
-            'reports': [rep for _, rep in results]
-        }
-        with open(output_file, 'w') as f:
-            json.dump(combined, f, indent=2)
-        console.print(f"\n[green]Summary saved to:[/green] {output_file}")
+        # Finalize run tracker with final token usage
+        self.run_tracker.update_token_usage(token_tracker.get_summary())
+        self.run_tracker.finalize(status='completed')
+        console.print(f"\n[green]Run details saved to:[/green] {run_file}")
     
     def _generate_enhanced_summary(self):
         """Deprecated in unified agent flow; retained for API compatibility."""
         return {
             'note': 'Use report returned by agent.investigate() for results',
         }
+    
+    def finalize_tracking(self, status: str = 'completed'):
+        """Finalize run tracking with given status."""
+        if self.run_tracker:
+            token_tracker = get_token_tracker()
+            self.run_tracker.update_token_usage(token_tracker.get_summary())
+            self.run_tracker.finalize(status=status)
 
 
 @click.command()
@@ -1113,6 +1133,16 @@ def agent(project_id: str, iterations: Optional[int], plan_n: int, time_limit: O
         runner.run(plan_n=plan_n)
     except KeyboardInterrupt:
         console.print("\n[yellow]Agent interrupted by user[/yellow]")
+        # Try to save partial results
+        try:
+            runner.finalize_tracking('interrupted')
+        except:
+            pass
     except Exception as e:
         console.print(f"\n[red]Error:[/red] {e}")
+        # Try to save partial results
+        try:
+            runner.finalize_tracking('failed')
+        except:
+            pass
         raise

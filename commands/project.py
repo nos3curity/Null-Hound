@@ -629,5 +629,206 @@ def path(name: str):
         raise click.Exit(1)
 
 
+@project.command()
+@click.argument('project_name')
+@click.argument('run_id', required=False)
+@click.option('--list', 'list_runs', is_flag=True, help="List all runs for the project")
+@click.option('--json', 'output_json', is_flag=True, help="Output as JSON")
+def runs(project_name: str, run_id: Optional[str], list_runs: bool, output_json: bool):
+    """View agent run information for a project.
+    
+    Examples:
+        hound project runs myproject --list       # List all runs
+        hound project runs myproject run_123      # Show details for specific run
+    """
+    manager = ProjectManager()
+    project_path = manager.get_project_path(project_name)
+    
+    if not project_path:
+        console.print(f"[red]Project '{project_name}' not found.[/red]")
+        return
+    
+    runs_dir = Path(project_path) / "agent_runs"
+    
+    if not runs_dir.exists() or not list(runs_dir.glob("*.json")):
+        console.print(f"[yellow]No agent runs found for project '{project_name}'.[/yellow]")
+        return
+    
+    if list_runs or not run_id:
+        # List all runs
+        _list_runs(runs_dir, output_json)
+    else:
+        # Show details for specific run
+        _show_run_details(runs_dir, run_id, output_json)
+
+
+def _list_runs(runs_dir: Path, output_json: bool):
+    """List all runs in a project."""
+    runs_data = []
+    
+    for run_file in sorted(runs_dir.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
+        try:
+            with open(run_file) as f:
+                data = json.load(f)
+            
+            # Extract run ID from filename
+            run_id = run_file.stem
+            
+            # Calculate totals
+            token_usage = data.get('token_usage', {}).get('total_usage', {})
+            total_tokens = token_usage.get('total_tokens', 0)
+            
+            # Format command
+            cmd_args = data.get('command_args', [])
+            command = ' '.join(cmd_args) if cmd_args else 'N/A'
+            if len(command) > 50:
+                command = command[:47] + '...'
+            
+            runs_data.append({
+                'run_id': run_id,
+                'start_time': data.get('start_time', 'Unknown'),
+                'status': data.get('status', 'unknown'),
+                'runtime': f"{data.get('runtime_seconds', 0):.1f}s",
+                'investigations': len(data.get('investigations', [])),
+                'total_tokens': total_tokens,
+                'command': command
+            })
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not read {run_file.name}: {e}[/yellow]")
+    
+    if output_json:
+        click.echo(json.dumps(runs_data, indent=2))
+    else:
+        if not runs_data:
+            console.print("[yellow]No valid run data found.[/yellow]")
+            return
+        
+        # Create table
+        table = Table(title="Agent Runs", show_header=True, header_style="bold cyan")
+        table.add_column("Run ID", style="yellow")
+        table.add_column("Start Time", style="white")
+        table.add_column("Status", style="green")
+        table.add_column("Runtime", style="cyan")
+        table.add_column("Investigations", style="magenta", justify="right")
+        table.add_column("Total Tokens", style="blue", justify="right")
+        table.add_column("Command", style="dim")
+        
+        for run in runs_data:
+            # Style status column
+            status = run['status']
+            if status == 'completed':
+                status_style = "[green]✓ completed[/green]"
+            elif status == 'running':
+                status_style = "[yellow]⚡ running[/yellow]"
+            elif status == 'failed':
+                status_style = "[red]✗ failed[/red]"
+            elif status == 'interrupted':
+                status_style = "[yellow]⚠ interrupted[/yellow]"
+            else:
+                status_style = status
+            
+            # Format time
+            try:
+                dt = datetime.fromisoformat(run['start_time'].replace('Z', '+00:00'))
+                time_str = dt.strftime("%Y-%m-%d %H:%M")
+            except:
+                time_str = run['start_time'][:19] if len(run['start_time']) > 19 else run['start_time']
+            
+            table.add_row(
+                run['run_id'],
+                time_str,
+                status_style,
+                run['runtime'],
+                str(run['investigations']),
+                f"{run['total_tokens']:,}" if run['total_tokens'] > 0 else "-",
+                run['command']
+            )
+        
+        console.print(table)
+
+
+def _show_run_details(runs_dir: Path, run_id: str, output_json: bool):
+    """Show details for a specific run."""
+    # Try to find the run file
+    run_file = runs_dir / f"{run_id}.json"
+    if not run_file.exists():
+        # Try with run_ prefix
+        run_file = runs_dir / f"run_{run_id}.json"
+    
+    if not run_file.exists():
+        console.print(f"[red]Run '{run_id}' not found.[/red]")
+        console.print("[dim]Use --list to see available runs.[/dim]")
+        return
+    
+    try:
+        with open(run_file) as f:
+            data = json.load(f)
+    except Exception as e:
+        console.print(f"[red]Error reading run file: {e}[/red]")
+        return
+    
+    if output_json:
+        click.echo(json.dumps(data, indent=2))
+    else:
+        # Display formatted run details
+        console.print(Panel.fit(
+            f"[bold cyan]Run Details: {run_id}[/bold cyan]",
+            border_style="cyan"
+        ))
+        
+        # Basic info
+        console.print("\n[bold]Basic Information:[/bold]")
+        console.print(f"  Start Time: {data.get('start_time', 'Unknown')}")
+        console.print(f"  End Time: {data.get('end_time', 'N/A')}")
+        console.print(f"  Runtime: {data.get('runtime_seconds', 0):.1f} seconds")
+        console.print(f"  Status: {data.get('status', 'unknown')}")
+        
+        # Command
+        cmd_args = data.get('command_args', [])
+        if cmd_args:
+            console.print(f"\n[bold]Command:[/bold]")
+            console.print(f"  {' '.join(cmd_args)}")
+        
+        # Token usage
+        token_usage = data.get('token_usage', {})
+        if token_usage:
+            console.print("\n[bold]Token Usage:[/bold]")
+            total = token_usage.get('total_usage', {})
+            console.print(f"  Total Input Tokens: {total.get('input_tokens', 0):,}")
+            console.print(f"  Total Output Tokens: {total.get('output_tokens', 0):,}")
+            console.print(f"  Total Tokens: {total.get('total_tokens', 0):,}")
+            console.print(f"  Total API Calls: {total.get('call_count', 0)}")
+            
+            by_model = token_usage.get('by_model', {})
+            if by_model:
+                console.print("\n  [bold]By Model:[/bold]")
+                for model, usage in by_model.items():
+                    console.print(f"    {model}:")
+                    console.print(f"      Calls: {usage.get('call_count', 0)}")
+                    console.print(f"      Input: {usage.get('input_tokens', 0):,}")
+                    console.print(f"      Output: {usage.get('output_tokens', 0):,}")
+                    console.print(f"      Total: {usage.get('total_tokens', 0):,}")
+        
+        # Investigations
+        investigations = data.get('investigations', [])
+        if investigations:
+            console.print(f"\n[bold]Investigations ({len(investigations)}):[/bold]")
+            for i, inv in enumerate(investigations, 1):
+                console.print(f"\n  [{i}] {inv.get('goal', 'Unknown goal')}")
+                console.print(f"      Priority: {inv.get('priority', 'N/A')}")
+                console.print(f"      Category: {inv.get('category', 'N/A')}")
+                console.print(f"      Iterations: {inv.get('iterations_completed', 0)}")
+                hypotheses = inv.get('hypotheses', {})
+                if hypotheses:
+                    console.print(f"      Hypotheses: {hypotheses.get('total', 0)}")
+        
+        # Errors
+        errors = data.get('errors', [])
+        if errors:
+            console.print(f"\n[bold red]Errors ({len(errors)}):[/bold red]")
+            for err in errors:
+                console.print(f"  {err.get('timestamp', 'Unknown time')}: {err.get('error', 'Unknown error')}")
+
+
 if __name__ == "__main__":
     project()

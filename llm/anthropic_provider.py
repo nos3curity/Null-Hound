@@ -5,7 +5,7 @@ Anthropic Claude provider implementation.
 import os
 import time
 import json
-from typing import Type, TypeVar, Optional
+from typing import Type, TypeVar, Optional, Dict
 from pydantic import BaseModel
 
 from .base_provider import BaseLLMProvider
@@ -45,6 +45,7 @@ class AnthropicProvider(BaseLLMProvider):
         self.retries = retries
         self.verbose = verbose
         self.thinking_enabled = thinking_enabled
+        self._last_token_usage = None
         
         # Get API key
         if api_key:
@@ -99,6 +100,14 @@ class AnthropicProvider(BaseLLMProvider):
                 
                 # Extract JSON from response
                 response_text = response.content[0].text if response.content else ""
+                
+                # Track token usage
+                if hasattr(response, 'usage'):
+                    self._last_token_usage = {
+                        'input_tokens': response.usage.input_tokens or 0,
+                        'output_tokens': response.usage.output_tokens or 0,
+                        'total_tokens': (response.usage.input_tokens or 0) + (response.usage.output_tokens or 0)
+                    }
                 
                 # Log response details
                 response_time = time.time() - start_time
@@ -172,6 +181,14 @@ class AnthropicProvider(BaseLLMProvider):
                 # Extract text from response
                 response_text = response.content[0].text if response.content else ""
                 
+                # Track token usage
+                if hasattr(response, 'usage'):
+                    self._last_token_usage = {
+                        'input_tokens': response.usage.input_tokens or 0,
+                        'output_tokens': response.usage.output_tokens or 0,
+                        'total_tokens': (response.usage.input_tokens or 0) + (response.usage.output_tokens or 0)
+                    }
+                
                 # Log response details
                 response_time = time.time() - start_time
                 if self.verbose:
@@ -208,3 +225,7 @@ class AnthropicProvider(BaseLLMProvider):
         """Check if this model supports thinking mode."""
         # Claude 3.5 Sonnet supports thinking through o1-style reasoning
         return self.thinking_enabled and "3-5-sonnet" in self.model_name.lower()
+    
+    def get_last_token_usage(self) -> Optional[Dict[str, int]]:
+        """Return token usage from the last call if available."""
+        return self._last_token_usage

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Type, TypeVar
+from typing import Any, Dict, Optional, Type, TypeVar, Tuple
 
 from pydantic import BaseModel
 
@@ -57,3 +57,11 @@ class BaseLLMProvider(ABC):
     def supports_thinking(self) -> bool:
         """Return whether this provider/model supports thinking mode."""
         pass
+    
+    def get_last_token_usage(self) -> Optional[Dict[str, int]]:
+        """Return token usage from the last call if available.
+        
+        Returns:
+            Dict with 'input_tokens', 'output_tokens', 'total_tokens' or None
+        """
+        return None

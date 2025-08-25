@@ -87,6 +87,30 @@ def project_hypotheses(
     ctx.params = {'name': name, 'details': details}
     hypotheses.invoke(ctx)
 
+@project_app.command("runs")
+def project_runs(
+    project_name: str = typer.Argument(..., help="Project name"),
+    run_id: str = typer.Argument(None, help="Run ID to show details for"),
+    list_runs: bool = typer.Option(False, "--list", "-l", help="List all runs for the project"),
+    output_json: bool = typer.Option(False, "--json", help="Output as JSON")
+):
+    """View agent run information for a project.
+    
+    Examples:
+        hound project runs myproject --list       # List all runs
+        hound project runs myproject run_123      # Show details for specific run
+    """
+    from commands.project import runs
+    import click
+    ctx = click.Context(runs)
+    ctx.params = {
+        'project_name': project_name,
+        'run_id': run_id,
+        'list_runs': list_runs,
+        'output_json': output_json
+    }
+    runs.invoke(ctx)
+
 # Agent audit subcommand
 @agent_app.command("audit")
 def agent_audit(

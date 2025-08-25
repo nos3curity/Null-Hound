@@ -11,6 +11,7 @@ from .openai_provider import OpenAIProvider
 from .gemini_provider import GeminiProvider
 from .anthropic_provider import AnthropicProvider
 from .xai_provider import XAIProvider
+from .token_tracker import get_token_tracker
 
 T = TypeVar('T', bound=BaseModel)
 
@@ -118,6 +119,20 @@ class UnifiedLLMClient:
         
         try:
             response = self.provider.parse(system=system, user=user, schema=schema)
+            
+            # Track token usage if provider supports it
+            if hasattr(self.provider, 'get_last_token_usage'):
+                token_usage = self.provider.get_last_token_usage()
+                if token_usage:
+                    tracker = get_token_tracker()
+                    tracker.track_usage(
+                        provider=self.provider.provider_name,
+                        model=self.model,
+                        input_tokens=token_usage.get('input_tokens', 0),
+                        output_tokens=token_usage.get('output_tokens', 0),
+                        profile=self.profile
+                    )
+            
             return response
         except Exception as e:
             error = str(e)
@@ -147,6 +162,20 @@ class UnifiedLLMClient:
         
         try:
             response = self.provider.raw(system=system, user=user)
+            
+            # Track token usage if provider supports it
+            if hasattr(self.provider, 'get_last_token_usage'):
+                token_usage = self.provider.get_last_token_usage()
+                if token_usage:
+                    tracker = get_token_tracker()
+                    tracker.track_usage(
+                        provider=self.provider.provider_name,
+                        model=self.model,
+                        input_tokens=token_usage.get('input_tokens', 0),
+                        output_tokens=token_usage.get('output_tokens', 0),
+                        profile=self.profile
+                    )
+            
             return response
         except Exception as e:
             error = str(e)

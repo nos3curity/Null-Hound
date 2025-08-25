@@ -53,6 +53,7 @@ class GeminiProvider(BaseLLMProvider):
         self.backoff_max = backoff_max
         self.thinking_enabled = thinking_enabled
         self.thinking_budget = thinking_budget
+        self._last_token_usage = None
         
         # Get API key from environment
         api_key_env = config.get("gemini", {}).get("api_key_env", "GOOGLE_API_KEY")
@@ -141,6 +142,14 @@ class GeminiProvider(BaseLLMProvider):
                 # Log response details
                 response_time = time.time() - attempt_start
                 
+                # Track token usage if available
+                if hasattr(response, 'usage_metadata'):
+                    self._last_token_usage = {
+                        'input_tokens': getattr(response.usage_metadata, 'prompt_token_count', 0),
+                        'output_tokens': getattr(response.usage_metadata, 'candidates_token_count', 0),
+                        'total_tokens': getattr(response.usage_metadata, 'total_token_count', 0)
+                    }
+                
                 # Check if response was blocked
                 if response.candidates:
                     candidate = response.candidates[0]
@@ -208,6 +217,14 @@ class GeminiProvider(BaseLLMProvider):
                     request_options={"timeout": self.timeout}
                 )
                 
+                # Track token usage if available
+                if hasattr(response, 'usage_metadata'):
+                    self._last_token_usage = {
+                        'input_tokens': getattr(response.usage_metadata, 'prompt_token_count', 0),
+                        'output_tokens': getattr(response.usage_metadata, 'candidates_token_count', 0),
+                        'total_tokens': getattr(response.usage_metadata, 'total_token_count', 0)
+                    }
+                
                 return response.text
                 
             except Exception as e:
@@ -227,3 +244,7 @@ class GeminiProvider(BaseLLMProvider):
     def supports_thinking(self) -> bool:
         """Gemini 2.5 models support thinking mode."""
         return "2.5" in self.model_name
+    
+    def get_last_token_usage(self) -> Optional[Dict[str, int]]:
+        """Return token usage from the last call if available."""
+        return self._last_token_usage
