@@ -111,11 +111,8 @@ class AutonomousAgent:
                 profile="guidance",
                 debug_logger=self.debug_logger
             )
-            print(f"[DEBUG] Guidance model initialized successfully")
-        except Exception as e:
+        except Exception:
             # If guidance model not configured, fall back to agent model
-            print(f"[WARNING] Could not initialize guidance model: {e}")
-            print(f"[WARNING] Falling back to agent model for deep thinking")
             self.guidance_client = self.llm
 
         # Use the agent model itself for context compression
@@ -1647,13 +1644,19 @@ DO NOT include any text before or after the JSON object."""
             
             # Build hypotheses summary for context
             existing_hypotheses = ""
-            if self.hypothesis_store and hasattr(self.hypothesis_store, 'hypotheses'):
-                hyp_list = []
-                for hyp in self.hypothesis_store.hypotheses[:10]:  # Show first 10
-                    if hasattr(hyp, 'description'):
-                        hyp_list.append(f"- {hyp.description} (confidence: {getattr(hyp, 'confidence', 0):.0%})")
-                if hyp_list:
-                    existing_hypotheses = "\n".join(hyp_list)
+            try:
+                current_data = self.hypothesis_store._load_data()
+                hypotheses_dict = current_data.get('hypotheses', {})
+                if hypotheses_dict:
+                    hyp_list = []
+                    for hyp_id, hyp in list(hypotheses_dict.items())[:10]:  # Show first 10
+                        desc = hyp.get('description', hyp.get('title', 'Unknown'))
+                        conf = hyp.get('confidence', 0)
+                        hyp_list.append(f"- {desc} (confidence: {conf:.0%})")
+                    if hyp_list:
+                        existing_hypotheses = "\n".join(hyp_list)
+            except Exception:
+                pass  # Silently continue if can't load
             
             # Prepare prompt for guidance model
             system_prompt = """You are a deep thinking security analysis model.
@@ -1710,15 +1713,23 @@ Analyze the RECENT exploration steps for vulnerabilities. What security issues d
                 # Parse and process the guidance
                 # Track hypotheses formed before and after
                 try:
-                    initial_hyp_count = len(self.hypothesis_store.hypotheses)
+                    # Load current hypotheses from the store
+                    current_data = self.hypothesis_store._load_data()
+                    initial_hyp_count = len(current_data.get('hypotheses', {}))
+                    
                     self._process_guidance_response(response)
-                    new_hyp_count = len(self.hypothesis_store.hypotheses)
+                    
+                    # Reload to get updated count
+                    updated_data = self.hypothesis_store._load_data()
+                    new_hyp_count = len(updated_data.get('hypotheses', {}))
                     hypotheses_formed = new_hyp_count - initial_hyp_count
                     
                     # Get the newly formed hypotheses
                     new_hypotheses = []
                     if hypotheses_formed > 0:
-                        new_hypotheses = self.hypothesis_store.hypotheses[-hypotheses_formed:]
+                        # Get the latest hypotheses from the store
+                        all_hyps = list(updated_data.get('hypotheses', {}).values())
+                        new_hypotheses = all_hyps[-hypotheses_formed:] if all_hyps else []
                 except Exception as proc_error:
                     # Even if hypothesis processing fails, return the guidance
                     return {
@@ -1759,14 +1770,31 @@ Analyze the RECENT exploration steps for vulnerabilities. What security issues d
         Process the guidance response to extract and form hypotheses.
         """
         try:
-            # Look for HYPOTHESES section
-            if 'HYPOTHESES:' in response:
+            # The model is returning numbered vulnerabilities, not a HYPOTHESES: section
+            # Look for lines with pipe separators anywhere in the response
+            lines = response.split('\n')
+            found_hypotheses = False
+            
+            for line in lines:
+                line = line.strip()
+                # Look for lines with the pipe format we specified
+                if '|' in line and 'Title |' in line and 'Type |' in line:
+                    # This is the header line, skip it but mark that we found the format
+                    found_hypotheses = True
+                    continue
+                elif '|' in line and line.count('|') >= 7:  # Our format has 8 pipes
+                    # This looks like a hypothesis line
+                    self._form_hypothesis_from_guidance(line)
+                    found_hypotheses = True
+            
+            # Also try the original parsing in case format changes
+            if not found_hypotheses and 'HYPOTHESES:' in response:
                 # Extract hypotheses section
                 hyp_section = response.split('HYPOTHESES:')[1]
-                if 'EXPLORATION STRATEGY:' in hyp_section:
-                    hyp_section = hyp_section.split('EXPLORATION STRATEGY:')[0]
+                if 'EXPLORATION STRATEGY' in hyp_section:
+                    hyp_section = hyp_section.split('EXPLORATION STRATEGY')[0]
                 elif 'EXPLORE' in hyp_section:
-                    # Handle variations
+                    # Handle variations  
                     for keyword in ['EXPLORE', 'EXPLORATION', 'NEXT']:
                         if keyword in hyp_section:
                             hyp_section = hyp_section.split(keyword)[0]
@@ -1777,17 +1805,14 @@ Analyze the RECENT exploration steps for vulnerabilities. What security issues d
                 for line in lines:
                     line = line.strip()
                     # Skip empty lines, headers, and examples
-                    if not line or 'Example:' in line or 'Title |' in line:
+                    if not line or 'Example:' in line or 'Title |' in line or line.startswith('['):
                         continue
                     # Process lines with pipe separators
                     if '|' in line:
                         self._form_hypothesis_from_guidance(line)
                         
-        except Exception as e:
-            # Log but don't fail - guidance is still useful
-            print(f"[WARNING] Failed to parse hypotheses: {e}")
-            import traceback
-            traceback.print_exc()
+        except Exception:
+            # Silently continue - guidance is still useful even if parsing fails
             pass
     
     def _form_hypothesis_from_guidance(self, vulnerability_text: str):
@@ -1802,8 +1827,7 @@ Analyze the RECENT exploration steps for vulnerabilities. What security issues d
             parts = [p.strip() for p in vulnerability_text.split('|')]
             
             if len(parts) < 8:
-                print(f"[WARNING] Invalid hypothesis format (need 9 parts, got {len(parts)}): {vulnerability_text}")
-                return
+                return  # Skip invalid format silently
             
             title = parts[0]
             vuln_type = parts[1] if len(parts) > 1 else "security_issue"
@@ -1868,15 +1892,12 @@ Technical Details: {reasoning}"""
             result = self._form_hypothesis(params)
             
             if result.get('status') == 'success':
-                print(f"[INFO] Added hypothesis: {title} (severity: {severity}, nodes: {', '.join(node_refs)})")
-            else:
-                print(f"[WARNING] Failed to add hypothesis: {result.get('summary', 'Unknown error')}")
+                # Just show the title of the added hypothesis
+                print(f"✓ Added hypothesis: {title}")
             
-        except Exception as e:
-            print(f"[WARNING] Failed to create hypothesis from: {vulnerability_text}")
-            print(f"[WARNING] Error: {e}")
-            import traceback
-            traceback.print_exc()
+        except Exception:
+            # Silently continue if a single hypothesis fails
+            pass
     
     def _guess_vuln_type(self, text: str) -> str:
         """Guess vulnerability type from description."""
