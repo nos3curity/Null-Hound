@@ -1385,24 +1385,13 @@ DO NOT include any text before or after the JSON object."""
                     seen.add(cid)
                     base_ids.append(cid)
 
-            # Expand to all cards from referenced files
-            expanded_ids = list(base_ids)
-            if self._file_to_cards and self._card_index:
-                rels = set()
-                for cid in base_ids:
-                    c = self._card_index.get(cid)
-                    if c and c.get('relpath'):
-                        rels.add(c['relpath'])
-                for rel in rels:
-                    for cid2 in self._file_to_cards.get(rel, []) or []:
-                        if cid2 not in seen:
-                            seen.add(cid2)
-                            expanded_ids.append(cid2)
-
+            # DO NOT expand - use only the specific cards referenced by the node
+            # This prevents loading entire files when only specific functions are needed
+            
             # Resolve cards ordered by relpath + char_start
             node_cards: List[Dict[str, Any]] = []
             ordered = []
-            for cid in expanded_ids:
+            for cid in base_ids:
                 c = self._card_index.get(cid)
                 if c:
                     ordered.append(c)
