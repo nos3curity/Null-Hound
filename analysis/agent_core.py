@@ -111,8 +111,11 @@ class AutonomousAgent:
                 profile="guidance",
                 debug_logger=self.debug_logger
             )
-        except Exception:
+            print(f"[DEBUG] Guidance model initialized successfully")
+        except Exception as e:
             # If guidance model not configured, fall back to agent model
+            print(f"[WARNING] Could not initialize guidance model: {e}")
+            print(f"[WARNING] Falling back to agent model for deep thinking")
             self.guidance_client = self.llm
 
         # Use the agent model itself for context compression
@@ -1632,64 +1635,101 @@ DO NOT include any text before or after the JSON object."""
         Passes the entire context to analyze for vulnerabilities and get guidance.
         """
         try:
+            # Check if guidance client is available
+            if not self.guidance_client:
+                return {
+                    'status': 'error',
+                    'error': 'Guidance model not initialized'
+                }
+            
             # Build full context (same as agent sees)
             context = self._build_context()
             
+            # Build hypotheses summary for context
+            existing_hypotheses = ""
+            if self.hypothesis_store and hasattr(self.hypothesis_store, 'hypotheses'):
+                hyp_list = []
+                for hyp in self.hypothesis_store.hypotheses[:10]:  # Show first 10
+                    if hasattr(hyp, 'description'):
+                        hyp_list.append(f"- {hyp.description} (confidence: {getattr(hyp, 'confidence', 0):.0%})")
+                if hyp_list:
+                    existing_hypotheses = "\n".join(hyp_list)
+            
             # Prepare prompt for guidance model
             system_prompt = """You are a deep thinking security analysis model.
-Your role is to analyze the agent's RECENT exploration and identify vulnerabilities.
+Analyze the agent's RECENT exploration to find vulnerabilities.
 
-FOCUS ON THE RECENT ACTIONS SECTION - these show what the agent just discovered.
-Look for security issues in the code that was recently loaded and analyzed.
+Return a COMPACT but COMPLETE analysis:
 
-Your tasks:
-1. Identify vulnerabilities in the RECENTLY EXPLORED CODE
-2. Form concrete hypotheses about security issues you detected
-3. Guide the agent to explore related attack vectors
+HYPOTHESES:
+[For each NEW vulnerability (not already in existing hypotheses), provide ONE LINE with ALL elements separated by |]
+Title | Type | Root Cause | Attack Vector | Affected Nodes | Affected Code/Files | Severity | Confidence | Reasoning
+Example:
+Reentrancy in withdraw | reentrancy | No CEI pattern | Callback drains funds | func_withdraw,Vault | VaultManager.sol:145 | critical | high | External call before state update allows reentrant attack
+Access control bypass | access_control | Missing modifier | Direct call | func_setOwner,AdminPanel | AdminPanel.sol:23 | high | medium | No onlyOwner modifier on critical function
 
-Analyze the recent discoveries for:
-- Missing security checks in recently loaded functions
-- Dangerous patterns in the code just examined
-- Attack vectors suggested by recent observations
-- Connections between recently explored nodes that create vulnerabilities
+Required fields:
+- Title: Short descriptive name
+- Type: reentrancy/access_control/integer_overflow/dos/injection/logic_error/other
+- Root Cause: Technical reason for vulnerability
+- Attack Vector: How to exploit
+- Affected Nodes: Comma-separated node IDs from the graphs (func_X, Contract_Y, etc.)
+- Affected Code/Files: File:line or Contract.function() format
+- Severity: critical/high/medium/low
+- Confidence: high/medium/low
+- Reasoning: Brief explanation of why this is vulnerable
 
-Format your response as:
-VULNERABILITIES FOUND:
-[List vulnerabilities found in the RECENT explorations with specific details]
-- Include exact function names and line numbers if visible
-- Describe the exploit scenario
-- Rate confidence (high/medium/low)
+EXPLORATION STRATEGY:
+[One paragraph - what patterns to look for next and why]
+Focus on areas not yet explored. Suggest specific node IDs or code patterns to examine based on vulnerabilities found.
 
-STRATEGIC GUIDANCE:
-[What specific nodes/functions should the agent explore next based on findings]
-
-PRIORITY AREAS:
-[Most critical areas to investigate next]"""
+Keep responses COMPACT but include ALL required fields."""
             
             user_prompt = f"""Security audit context (FOCUS ON 'RECENT ACTIONS' section):
 
 {context}
 
+EXISTING HYPOTHESES (don't duplicate these):
+{existing_hypotheses if existing_hypotheses else "None yet"}
+
 Analyze the RECENT exploration steps for vulnerabilities. What security issues do you see in the recently loaded code?"""
             
             # Call guidance model
-            response = self.guidance_client.raw(
-                system=system_prompt,
-                user=user_prompt
-            )
+            try:
+                response = self.guidance_client.raw(
+                    system=system_prompt,
+                    user=user_prompt
+                )
+            except Exception as llm_error:
+                return {
+                    'status': 'error',
+                    'error': f'LLM call failed: {str(llm_error)}'
+                }
             
             if response:
                 # Parse and process the guidance
                 # Track hypotheses formed before and after
-                initial_hyp_count = len(self.hypotheses_store.hypotheses)
-                self._process_guidance_response(response)
-                new_hyp_count = len(self.hypotheses_store.hypotheses)
-                hypotheses_formed = new_hyp_count - initial_hyp_count
-                
-                # Get the newly formed hypotheses
-                new_hypotheses = []
-                if hypotheses_formed > 0:
-                    new_hypotheses = self.hypotheses_store.hypotheses[-hypotheses_formed:]
+                try:
+                    initial_hyp_count = len(self.hypothesis_store.hypotheses)
+                    self._process_guidance_response(response)
+                    new_hyp_count = len(self.hypothesis_store.hypotheses)
+                    hypotheses_formed = new_hyp_count - initial_hyp_count
+                    
+                    # Get the newly formed hypotheses
+                    new_hypotheses = []
+                    if hypotheses_formed > 0:
+                        new_hypotheses = self.hypothesis_store.hypotheses[-hypotheses_formed:]
+                except Exception as proc_error:
+                    # Even if hypothesis processing fails, return the guidance
+                    return {
+                        'status': 'success',  # Still success because we got guidance
+                        'summary': 'Deep analysis complete - guidance provided (hypothesis formation failed)',
+                        'full_response': response,
+                        'guidance': response[:500],
+                        'hypotheses_formed': 0,
+                        'new_hypotheses': [],
+                        'processing_error': str(proc_error)
+                    }
                 
                 return {
                     'status': 'success',
@@ -1706,9 +1746,12 @@ Analyze the RECENT exploration steps for vulnerabilities. What security issues d
                 }
                 
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
             return {
                 'status': 'error',
-                'error': f'Deep think failed: {str(e)}'
+                'error': f'Deep think failed: {str(e)}',
+                'traceback': error_details[:500]  # Include first 500 chars of traceback
             }
     
     def _process_guidance_response(self, response: str):
@@ -1716,60 +1759,140 @@ Analyze the RECENT exploration steps for vulnerabilities. What security issues d
         Process the guidance response to extract and form hypotheses.
         """
         try:
-            # Look for vulnerability sections in the response
-            if 'VULNERABILITIES FOUND:' in response:
-                # Extract vulnerabilities section
-                vuln_section = response.split('VULNERABILITIES FOUND:')[1]
-                if 'STRATEGIC GUIDANCE:' in vuln_section:
-                    vuln_section = vuln_section.split('STRATEGIC GUIDANCE:')[0]
+            # Look for HYPOTHESES section
+            if 'HYPOTHESES:' in response:
+                # Extract hypotheses section
+                hyp_section = response.split('HYPOTHESES:')[1]
+                if 'EXPLORATION STRATEGY:' in hyp_section:
+                    hyp_section = hyp_section.split('EXPLORATION STRATEGY:')[0]
+                elif 'EXPLORE' in hyp_section:
+                    # Handle variations
+                    for keyword in ['EXPLORE', 'EXPLORATION', 'NEXT']:
+                        if keyword in hyp_section:
+                            hyp_section = hyp_section.split(keyword)[0]
+                            break
                 
-                # Parse each vulnerability and form hypothesis
-                lines = vuln_section.strip().split('\n')
+                # Parse each hypothesis line
+                lines = hyp_section.strip().split('\n')
                 for line in lines:
                     line = line.strip()
-                    if line and not line.startswith('[') and line != 'None':
-                        # Try to extract vulnerability details
-                        # Format expected: "Description at location with confidence"
-                        # For now, create a basic hypothesis
+                    # Skip empty lines, headers, and examples
+                    if not line or 'Example:' in line or 'Title |' in line:
+                        continue
+                    # Process lines with pipe separators
+                    if '|' in line:
                         self._form_hypothesis_from_guidance(line)
                         
-        except Exception:
-            # If parsing fails, that's okay - the guidance is still shown to agent
+        except Exception as e:
+            # Log but don't fail - guidance is still useful
+            print(f"[WARNING] Failed to parse hypotheses: {e}")
+            import traceback
+            traceback.print_exc()
             pass
     
     def _form_hypothesis_from_guidance(self, vulnerability_text: str):
         """
         Form a hypothesis from guidance model's vulnerability finding.
+        Format: Title | Type | Root Cause | Attack Vector | Affected Nodes | Affected Code/Files | Severity | Confidence | Reasoning
         """
         try:
-            # Parse the vulnerability text to extract details
-            # This is a simplified version - could be enhanced with better parsing
+            import re
             
-            # Try to extract confidence if mentioned
-            confidence = 0.8  # Default confidence
-            if 'high confidence' in vulnerability_text.lower():
+            # Parse the pipe-separated format
+            parts = [p.strip() for p in vulnerability_text.split('|')]
+            
+            if len(parts) < 8:
+                print(f"[WARNING] Invalid hypothesis format (need 9 parts, got {len(parts)}): {vulnerability_text}")
+                return
+            
+            title = parts[0]
+            vuln_type = parts[1] if len(parts) > 1 else "security_issue"
+            root_cause = parts[2] if len(parts) > 2 else ""
+            attack_vector = parts[3] if len(parts) > 3 else ""
+            affected_nodes = parts[4] if len(parts) > 4 else ""
+            affected_code = parts[5] if len(parts) > 5 else ""
+            severity = parts[6].lower() if len(parts) > 6 else "medium"
+            confidence_str = parts[7].lower() if len(parts) > 7 else "medium"
+            reasoning = parts[8] if len(parts) > 8 else ""
+            
+            # Parse confidence
+            confidence = 0.8  # default
+            if 'high' in confidence_str:
                 confidence = 0.9
-            elif 'medium confidence' in vulnerability_text.lower():
+            elif 'medium' in confidence_str:
                 confidence = 0.6
-            elif 'low confidence' in vulnerability_text.lower():
+            elif 'low' in confidence_str:
                 confidence = 0.4
             
-            # Create a simplified hypothesis
-            # In production, this would parse the text more carefully
+            # Validate severity
+            if severity not in ['critical', 'high', 'medium', 'low']:
+                severity = 'medium'
+            
+            # Parse node IDs from the affected nodes field
+            node_refs = []
+            if affected_nodes:
+                # Split by comma and clean up
+                node_refs = [n.strip() for n in affected_nodes.split(',') if n.strip()]
+            
+            # Default to system if no nodes found
+            if not node_refs:
+                node_refs = ['system']
+            
+            # Build detailed description with all information
+            details = f"""VULNERABILITY TYPE: {vuln_type}
+ROOT CAUSE: {root_cause}
+ATTACK VECTOR: {attack_vector}
+AFFECTED NODES: {', '.join(node_refs)}
+AFFECTED CODE: {affected_code}
+SEVERITY: {severity}
+REASONING: {reasoning}
+
+This vulnerability was identified through deep analysis of the recently explored code.
+The issue allows an attacker to {attack_vector.lower()} due to {root_cause.lower()}.
+Location: {affected_code}
+Technical Details: {reasoning}"""
+            
+            # Build params for the existing _form_hypothesis method
             params = {
-                'description': vulnerability_text[:60],  # First 60 chars
-                'details': vulnerability_text,
-                'vulnerability_type': 'security_issue',  # Generic type
+                'description': title,  # Compact title
+                'details': details,  # Full details with all information
+                'vulnerability_type': vuln_type,
+                'severity': severity,
                 'confidence': confidence,
-                'node_ids': ['system']  # Default to system-level
+                'node_ids': node_refs,  # Proper node IDs from the model
+                'reasoning': reasoning,
+                'graph_name': 'SystemArchitecture'  # Could extract from context
             }
             
-            # Use the existing form_hypothesis method
-            self._form_hypothesis(params)
+            # Use the existing _form_hypothesis method which handles all storage properly
+            result = self._form_hypothesis(params)
             
-        except Exception:
-            # If we can't parse it into a hypothesis, that's okay
-            pass
+            if result.get('status') == 'success':
+                print(f"[INFO] Added hypothesis: {title} (severity: {severity}, nodes: {', '.join(node_refs)})")
+            else:
+                print(f"[WARNING] Failed to add hypothesis: {result.get('summary', 'Unknown error')}")
+            
+        except Exception as e:
+            print(f"[WARNING] Failed to create hypothesis from: {vulnerability_text}")
+            print(f"[WARNING] Error: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _guess_vuln_type(self, text: str) -> str:
+        """Guess vulnerability type from description."""
+        text_lower = text.lower()
+        if 'reentran' in text_lower:
+            return 'reentrancy'
+        elif 'overflow' in text_lower or 'underflow' in text_lower:
+            return 'integer_overflow'
+        elif 'auth' in text_lower or 'access' in text_lower or 'permission' in text_lower:
+            return 'access_control'
+        elif 'dos' in text_lower or 'denial' in text_lower:
+            return 'denial_of_service'
+        elif 'inject' in text_lower:
+            return 'injection'
+        else:
+            return 'security_issue'
     
     def _form_hypothesis(self, params: Dict) -> Dict:
         """Form a new hypothesis."""

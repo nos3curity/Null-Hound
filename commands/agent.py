@@ -949,41 +949,26 @@ class AgentRunner:
                 action = info.get('action', '')
                 result = info.get('result', {})
                 
-                if action == 'deep_think' and result.get('status') == 'success':
-                    console.print(f"\n[bold magenta]═══ DEEP THINK ANALYSIS ═══[/bold magenta]")
-                    
-                    # Show the full guidance response
-                    full_response = result.get('full_response', '')
-                    if full_response:
-                        # Parse and display sections
-                        if 'VULNERABILITIES FOUND:' in full_response:
-                            vuln_section = full_response.split('VULNERABILITIES FOUND:')[1]
-                            if 'STRATEGIC GUIDANCE:' in vuln_section:
-                                vuln_text = vuln_section.split('STRATEGIC GUIDANCE:')[0].strip()
-                                console.print("\n[bold red]Vulnerabilities Found:[/bold red]")
-                                console.print(Panel(vuln_text, border_style="red"))
+                if action == 'deep_think':
+                    if result.get('status') == 'success':
+                        console.print(f"\n[bold magenta]═══ DEEP THINK ANALYSIS ═══[/bold magenta]")
                         
-                        if 'STRATEGIC GUIDANCE:' in full_response:
-                            guidance_section = full_response.split('STRATEGIC GUIDANCE:')[1]
-                            if 'PRIORITY AREAS:' in guidance_section:
-                                guidance_text = guidance_section.split('PRIORITY AREAS:')[0].strip()
-                                console.print("\n[bold yellow]Strategic Guidance:[/bold yellow]")
-                                console.print(Panel(guidance_text, border_style="yellow"))
+                        # Show the compact response
+                        full_response = result.get('full_response', '')
+                        if full_response:
+                            # Simply display the compact output
+                            console.print(Panel(full_response, border_style="magenta"))
                         
-                        if 'PRIORITY AREAS:' in full_response:
-                            priority_text = full_response.split('PRIORITY AREAS:')[1].strip()
-                            console.print("\n[bold cyan]Priority Areas:[/bold cyan]")
-                            console.print(Panel(priority_text, border_style="cyan"))
-                    
-                    # Show hypotheses formed
-                    hypotheses_formed = result.get('hypotheses_formed', 0)
-                    if hypotheses_formed > 0:
-                        console.print(f"\n[bold green]✓ Formed {hypotheses_formed} new hypothesis(es)[/bold green]")
-                        new_hyps = result.get('new_hypotheses', [])
-                        for hyp in new_hyps[:3]:  # Show first 3
-                            if hasattr(hyp, 'description'):
-                                console.print(f"  • {hyp.description}")
-                    console.print()
+                        # Show hypotheses formed count
+                        hypotheses_formed = result.get('hypotheses_formed', 0)
+                        if hypotheses_formed > 0:
+                            console.print(f"[bold green]✓ Added {hypotheses_formed} hypothesis(es) to global store[/bold green]")
+                        console.print()
+                    else:
+                        # Deep think failed - show the error
+                        error_msg = result.get('error', 'Unknown error')
+                        console.print(f"\n[bold red]❌ Deep Think Error:[/bold red] {error_msg}")
+                        console.print("[yellow]Continuing with agent exploration...[/yellow]")
                 else:
                     console.print(f"[dim]Iter {it} {status}:[/dim] {msg}")
             elif status in { 'analyzing', 'executing', 'hypothesis_formed' }:
