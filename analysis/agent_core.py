@@ -1876,6 +1876,11 @@ The issue allows an attacker to {attack_vector.lower()} due to {root_cause.lower
 Location: {affected_code}
 Technical Details: {reasoning}"""
             
+            # Get guidance model info if available
+            guidance_model_info = None
+            if hasattr(self, 'guidance_client') and self.guidance_client:
+                guidance_model_info = f"{self.guidance_client.provider_name}:{self.guidance_client.model}"
+            
             # Build params for the existing _form_hypothesis method
             params = {
                 'description': title,  # Compact title
@@ -1885,7 +1890,8 @@ Technical Details: {reasoning}"""
                 'confidence': confidence,
                 'node_ids': node_refs,  # Proper node IDs from the model
                 'reasoning': reasoning,
-                'graph_name': 'SystemArchitecture'  # Could extract from context
+                'graph_name': 'SystemArchitecture',  # Could extract from context
+                'guidance_model': guidance_model_info  # Pass guidance model for senior_model field
             }
             
             # Use the existing _form_hypothesis method which handles all storage properly
@@ -1931,6 +1937,10 @@ Technical Details: {reasoning}"""
         # Get model information
         model_info = f"{self.llm.provider_name}:{self.llm.model}"
         
+        # Check if this is from deep_think (params will have guidance_model set)
+        junior_model = model_info  # Default to agent model
+        senior_model = params.get('guidance_model')  # Set if from deep_think
+        
         # Create hypothesis object with compact title but detailed description
         # The title is compact but the description must be COMPLETE
         hypothesis = Hypothesis(
@@ -1942,7 +1952,9 @@ Technical Details: {reasoning}"""
             node_refs=node_ids,
             reasoning=params.get('reasoning', ''),
             created_by=self.agent_id,
-            reported_by_model=model_info
+            reported_by_model=senior_model or junior_model,  # Legacy field for backward compatibility
+            junior_model=junior_model,
+            senior_model=senior_model
         )
         
         # Extract source files from nodes

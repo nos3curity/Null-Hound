@@ -91,7 +91,7 @@ def project_hypotheses(
 @agent_app.command("audit")
 def agent_audit(
     target: str = typer.Argument(None, help="Project name or path (optional with --project)"),
-    iterations: int = typer.Option(20, "--iterations", help="Maximum iterations per investigation (default: 20)"),
+    iterations: int = typer.Option(30, "--iterations", help="Maximum iterations per investigation (default: 20)"),
     plan_n: int = typer.Option(5, "--plan-n", help="Number of investigations to plan per batch (default: 5)"),
     time_limit: int = typer.Option(None, "--time-limit", help="Time limit in minutes"),
     config: str = typer.Option(None, "--config", help="Configuration file"),

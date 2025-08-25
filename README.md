@@ -3,7 +3,7 @@
   
   # Hound
   
-  **Advanced autonomous agent for code security auditing with dynamic knowledge graph generation**
+  **Autonomous agents for code security auditing**
   
   [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
   [![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/downloads/)
@@ -17,7 +17,7 @@
 
 ## Overview
 
-Hound is a language-agnostic framework for code security reviews that replicates how expert auditors think and collaborate. Its agents build and refine cognitive models of a system and update them as new insights emerge. This process mirrors real audit teams: cumulative understanding, targeted hypotheses, and professional reports that surface deep logic flaws. Features:
+Hound is a language-agnostic framework for code security reviews that replicates how expert auditors think and collaborate. Its agents build and refine cognitive models of a system and update them as new insights emerge. This process mirrors real audit teams: cumulative understanding, targeted hypotheses, and professional reports that surface deep logic flaws.
 
 - Dynamic modeling of any codebase to find logic bugs
 - Model relationships between abstract and concrete concepts across granularities
@@ -26,7 +26,7 @@ Hound is a language-agnostic framework for code security reviews that replicates
 - Orchestrate multiple agents serially and in parallel
 - Create complete audit reports with exec summary and system overview
 
-**This is an unoptimized research prototype. Use at your own risk, I do not provide user support.**
+ See the [tech overview]{tech.md) for details.
 
 ## Installation
 
@@ -57,6 +57,9 @@ cp config.yaml.example config.yaml
 # Create a new project from source code
 python hound.py project create my_audit /path/to/source/code
 
+# Filter by main projet files (useful to skip tests and interfaces)
+python hound.py project create my_audit /path/to/source/code --files "file1,file2"
+
 # View project details
 python hound.py project info my_audit
 ```
@@ -74,8 +77,8 @@ python hound.py graph export my_audit --output graphs.html
 ### 5. Run security audit
 
 ```bash
-# Perform initial investigation to identify potential vulnerabilities
-python hound.py agent audit my_project
+# Explore and investigate the codebase
+python hound.py agent audit my_audit --time-limit 30
 
 # The audit agent will:
 # - Analyze the knowledge graphs
@@ -88,7 +91,7 @@ python hound.py agent audit my_project
 
 ```bash
 # Review and confirm high-confidence hypotheses
-python hound.py agent finalize my_project
+python hound.py agent finalize my_audit
 
 # This step:
 # - Reviews hypotheses with confidence >= 0.7
@@ -101,7 +104,7 @@ python hound.py agent finalize my_project
 
 ```bash
 # Create security audit report
-python hound.py report my_project --output report.html
+python hound.py report my_audit --output report.html
 
 # The report includes:
 # - Executive summary
@@ -119,10 +122,10 @@ python hound.py graph add-custom --project my_project \
 
 # Investigate specific questions
 python hound.py agent investigate "Check for SQL injection vulnerabilities" \
-    --project my_project --iterations 10
+    --project my_audit --iterations 10
 
 # View project hypotheses with confidence ratings
-python hound.py project hypotheses my_project
+python hound.py project hypotheses my_audit
 ```
 
 ## Commands

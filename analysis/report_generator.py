@@ -369,15 +369,29 @@ class ReportGenerator:
         total_investigations = len(self.hypotheses)
         confirmed_count = len(confirmed_findings)
         
-        # Models used in analysis from hypotheses (reported_by_model) and finalization model from config
-        raw_models = sorted({
-            (h.get('reported_by_model') or 'unknown')
-            for h in self.hypotheses.values()
-            if isinstance(h, dict)
-        })
-        models_used = [self._format_model_name(m) for m in raw_models if m and m != 'unknown']
-        if not models_used:
-            models_used = ['unspecified']
+        # Extract junior and senior models from hypotheses
+        junior_models = set()
+        senior_models = set()
+        
+        for h in self.hypotheses.values():
+            if isinstance(h, dict):
+                # Use new fields if available, fall back to legacy field
+                if h.get('junior_model'):
+                    junior_models.add(h.get('junior_model'))
+                elif h.get('reported_by_model'):  # Legacy support
+                    junior_models.add(h.get('reported_by_model'))
+                    
+                if h.get('senior_model'):
+                    senior_models.add(h.get('senior_model'))
+        
+        # Format model names
+        junior_auditors = [self._format_model_name(m) for m in sorted(junior_models) if m and m != 'unknown']
+        senior_auditors = [self._format_model_name(m) for m in sorted(senior_models) if m and m != 'unknown']
+        
+        # Combine for lead auditors list (deduplicated)
+        all_auditors = sorted(set(junior_auditors + senior_auditors))
+        if not all_auditors:
+            all_auditors = ['unspecified']
         
         # Get finalization model from config
         finalize_model_raw = self.config.get('models', {}).get('finalize', {}).get('model', '')
@@ -393,7 +407,8 @@ System Characteristics (from architecture analysis):
 
 Audit Team and Process:
 - The audit was conducted by the Hound security team
-- Lead auditors: {', '.join(models_used) if models_used else 'Senior security engineers'}
+- Junior auditors (initial discovery): {', '.join(junior_auditors) if junior_auditors else 'Security analysts'}
+- Senior auditors (deep analysis): {', '.join(senior_auditors) if senior_auditors else 'Senior security engineers'}
 - Quality assurance and validation: {finalize_model if finalize_model else 'Senior review team'}
 
 Audit Statistics:
@@ -560,7 +575,9 @@ and systematic vulnerability assessment across all identified attack surfaces.""
                     'description': hyp.get('description', ''),
                     'confidence': hyp.get('confidence', 0),
                     'affected': hyp.get('node_refs', []),
-                    'reported_by_model': hyp.get('reported_by_model', 'unknown'),
+                    'reported_by_model': hyp.get('senior_model') or hyp.get('junior_model') or hyp.get('reported_by_model', 'unknown'),
+                    'junior_model': hyp.get('junior_model'),
+                    'senior_model': hyp.get('senior_model'),
                     'supporting_evidence': hyp.get('supporting_evidence', []),
                     'properties': hyp.get('properties', {})
                 }
@@ -588,7 +605,9 @@ and systematic vulnerability assessment across all identified attack surfaces.""
                 'status': hyp.get('status', 'proposed'),
                 'confidence': hyp.get('confidence', 0),
                 'nodes': hyp.get('node_refs', []),
-                'reported_by_model': hyp.get('reported_by_model', 'unknown')
+                'reported_by_model': hyp.get('senior_model') or hyp.get('junior_model') or hyp.get('reported_by_model', 'unknown'),
+                'junior_model': hyp.get('junior_model'),
+                'senior_model': hyp.get('senior_model')
             })
         
         # Sort by confidence
@@ -1283,7 +1302,7 @@ External dependencies are limited and clearly defined."""
                 <p><strong>Type:</strong> {finding['type']}</p>
                 <p>{finding['description']}</p>
                 <p><strong>Affected Components:</strong> {', '.join(finding['affected'][:3])}</p>
-                <p><strong>Discovered by:</strong> {finding.get('reported_by_model', 'Hound team member')}</p>
+                <p><strong>Discovered by:</strong> Junior: {finding.get('junior_model', 'N/A')}{', Senior: ' + finding.get('senior_model') if finding.get('senior_model') else ''}</p>
                 {code_html}
             </div>
             ''')
@@ -1395,7 +1414,7 @@ The audit employed a comprehensive security assessment methodology including:
 
 **Type:** {finding['type']}  
 **Affected:** {', '.join(finding['affected'][:3])}  
-**Detected by:** {finding.get('reported_by_model', 'unknown')}
+**Detected by:** Junior: {finding.get('junior_model', 'N/A')}{', Senior: ' + finding.get('senior_model') if finding.get('senior_model') else ''}
 
 {finding['description']}
 

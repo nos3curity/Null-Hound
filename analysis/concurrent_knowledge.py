@@ -131,7 +131,9 @@ class Hypothesis:
     reasoning: str = ""
     properties: Dict[str, Any] = field(default_factory=dict)  # Store graph name, etc.
     created_by: Optional[str] = None
-    reported_by_model: Optional[str] = None  # Track which LLM model first reported this
+    reported_by_model: Optional[str] = None  # Legacy field for backward compatibility
+    junior_model: Optional[str] = None  # The agent model that discovered the vulnerability
+    senior_model: Optional[str] = None  # The guidance/deep think model that analyzed it
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     id: str = ""
     
