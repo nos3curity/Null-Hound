@@ -26,7 +26,7 @@ Hound is a language-agnostic framework for code security reviews that replicates
 - Orchestrate multiple agents serially and in parallel
 - Create complete audit reports with exec summary and system overview
 
- See the [tech overview]{tech.md) for details.
+ See the [tech overview](tech.md) for details.
 
 ## Installation
 
