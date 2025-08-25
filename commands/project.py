@@ -462,7 +462,8 @@ def delete(name: str, force: bool):
 
 @project.command()
 @click.argument('name')
-def hypotheses(name: str):
+@click.option('--details', '-d', is_flag=True, help='Show full descriptions without abbreviation')
+def hypotheses(name: str, details: bool = False):
     """List all hypotheses for a project with confidence ratings."""
     manager = ProjectManager()
     project = manager.get_project(name)
@@ -493,13 +494,26 @@ def hypotheses(name: str):
     from rich.table import Table
     
     table = Table(show_header=True, header_style="bold cyan", title=f"Hypotheses for {name}")
-    table.add_column("ID", style="dim", width=16)
-    table.add_column("Title", width=50, overflow="fold")  # Allow full title with wrapping
-    table.add_column("Type", style="cyan", width=18)
-    table.add_column("Model", style="dim", width=20, overflow="ellipsis")  # Add model column
-    table.add_column("Confidence", justify="center", width=10)
-    table.add_column("Status", justify="center", width=14)
-    table.add_column("Severity", justify="center", width=10)
+    
+    if details:
+        # Detailed view with full descriptions
+        table.add_column("ID", style="dim", width=16)
+        table.add_column("Title", overflow="fold")  # No width limit, allow full wrapping
+        table.add_column("Description", overflow="fold")  # Add description column
+        table.add_column("Type", style="cyan", width=18)
+        table.add_column("Model", style="dim", overflow="fold")  # Allow model to wrap
+        table.add_column("Confidence", justify="center", width=10)
+        table.add_column("Status", justify="center", width=14)
+        table.add_column("Severity", justify="center", width=10)
+    else:
+        # Compact view
+        table.add_column("ID", style="dim", width=16)
+        table.add_column("Title", width=50, overflow="fold")  # Allow full title with wrapping
+        table.add_column("Type", style="cyan", width=18)
+        table.add_column("Model", style="dim", width=20, overflow="ellipsis")  # Add model column
+        table.add_column("Confidence", justify="center", width=10)
+        table.add_column("Status", justify="center", width=14)
+        table.add_column("Severity", justify="center", width=10)
     
     # Sort by confidence (highest first)
     sorted_hyps = sorted(
@@ -549,15 +563,30 @@ def hypotheses(name: str):
         # Get model info
         model = hyp.get("reported_by_model", "unknown")
         
-        table.add_row(
-            hyp_id[:16],
-            hyp.get("title", "Unknown"),  # Show full title, let Rich handle wrapping
-            hyp.get("vulnerability_type", "unknown"),
-            model,  # Add model column
-            conf_str,
-            status_str,
-            sev_str
-        )
+        if details:
+            # Include full description in detailed view
+            description = hyp.get("description", "No description available")
+            table.add_row(
+                hyp_id[:16],
+                hyp.get("title", "Unknown"),
+                description,  # Full description
+                hyp.get("vulnerability_type", "unknown"),
+                model,
+                conf_str,
+                status_str,
+                sev_str
+            )
+        else:
+            # Compact view without description
+            table.add_row(
+                hyp_id[:16],
+                hyp.get("title", "Unknown"),  # Show full title, let Rich handle wrapping
+                hyp.get("vulnerability_type", "unknown"),
+                model,  # Add model column
+                conf_str,
+                status_str,
+                sev_str
+            )
     
     console.print(table)
     

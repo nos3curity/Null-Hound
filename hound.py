@@ -77,13 +77,14 @@ def project_delete(
 
 @project_app.command("hypotheses")
 def project_hypotheses(
-    name: str = typer.Argument(..., help="Project name")
+    name: str = typer.Argument(..., help="Project name"),
+    details: bool = typer.Option(False, "--details", "-d", help="Show full descriptions without abbreviation")
 ):
     """List all hypotheses for a project with confidence ratings."""
     from commands.project import hypotheses
     import click
     ctx = click.Context(hypotheses)
-    ctx.params = {'name': name}
+    ctx.params = {'name': name, 'details': details}
     hypotheses.invoke(ctx)
 
 # Agent audit subcommand
