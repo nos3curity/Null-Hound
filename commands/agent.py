@@ -698,7 +698,7 @@ class AgentRunner:
                 description=f"List of exactly {n} investigation items to plan"
             )
 
-        llm = UnifiedLLMClient(cfg=self.config, profile="agent")
+        llm = UnifiedLLMClient(cfg=self.config, profile="guidance")
 
         system = (
             "You are a senior smart-contract security auditor planning an audit roadmap.\n"
