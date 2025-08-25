@@ -275,8 +275,9 @@ class AutonomousAgent:
                     'evidence': [e.get('description') for e in hyp.get('evidence', [])]
                 })
             
-            if len(self.loaded_data['hypotheses']) > 0:
-                print(f"[*] Loaded {len(self.loaded_data['hypotheses'])} existing hypotheses")
+            # Only print on first load, not every refresh
+            # if len(self.loaded_data['hypotheses']) > 0:
+            #     print(f"[*] Loaded {len(self.loaded_data['hypotheses'])} existing hypotheses")
         except Exception as e:
             print(f"[!] Failed to load existing hypotheses: {e}")
     
@@ -1223,11 +1224,11 @@ DO NOT include any text before or after the JSON object."""
                         for cid, card in store.items():
                             if cid and isinstance(card, dict):
                                 self._card_index[cid] = card
-                if self.debug:
-                    print(f"[DEBUG] Loaded {len(self._card_index)} cards from card_store.json")
-        except Exception as e:
-            if self.debug:
-                print(f"[DEBUG] Failed to load card_store.json: {e}")
+                # Debug logging removed - too noisy
+                pass
+        except Exception:
+            # Silently continue if card store not found
+            pass
         # Also load manifest cards
         manifest_file = self.manifest_path / "cards.jsonl"
         if manifest_file.exists():
@@ -1356,12 +1357,9 @@ DO NOT include any text before or after the JSON object."""
             
             chosen_id = req_id
             
-            # Warn about loading large nodes
+            # Track large nodes for warning in display, but don't print here
             source_refs = ndata.get('source_refs', []) or []
-            if len(source_refs) > 6:
-                if self.debug:
-                    print(f"[WARNING] Loading large node {chosen_id} with {len(source_refs)} code cards!")
-                # Could add to display_lines later if needed
+            # Will show warning in display_lines instead of printing
 
             # Collect evidence cards from node and its incident edges
             # We already have graph_edges from the specified graph
@@ -1370,10 +1368,7 @@ DO NOT include any text before or after the JSON object."""
             if isinstance(node_refs, list):
                 card_ids.extend([str(x) for x in node_refs])
             
-            # Debug logging for ProxyAdmin
-            if chosen_id == 'ProxyAdmin' and self.debug:
-                print(f"[DEBUG] ProxyAdmin source_refs: {node_refs}")
-                print(f"[DEBUG] Card IDs to load: {card_ids}")
+            # Debug logging removed - too noisy
             for e in graph_edges:
                 src = e.get('source_id') or e.get('source') or e.get('src')
                 dst = e.get('target_id') or e.get('target') or e.get('dst')
@@ -1411,24 +1406,17 @@ DO NOT include any text before or after the JSON object."""
                 c = self._card_index.get(cid)
                 if c:
                     ordered.append(c)
-                # Debug for ProxyAdmin
-                elif chosen_id == 'ProxyAdmin' and self.debug:
-                    print(f"[DEBUG] Card {cid} not found in index")
+                # Card not found - continue silently
+                pass
             
-            # Debug for ProxyAdmin
-            if chosen_id == 'ProxyAdmin' and self.debug:
-                print(f"[DEBUG] Found {len(ordered)} cards for ProxyAdmin")
-                if ordered:
-                    print(f"[DEBUG] First card: {ordered[0].get('id')} at {ordered[0].get('relpath')}")
+            # Debug logging removed
             
             ordered.sort(key=lambda x: (x.get('relpath') or '', x.get('char_start') or 0))
             for c in ordered:
                 cid = c.get('id')
                 content = self._extract_card_content(c)
                 
-                # Debug for ProxyAdmin
-                if chosen_id == 'ProxyAdmin' and self.debug:
-                    print(f"[DEBUG] Card {cid} content length: {len(content)}")
+                # Debug logging removed
                 
                 node_cards.append({
                     'card_id': cid,
@@ -1443,8 +1431,6 @@ DO NOT include any text before or after the JSON object."""
 
             # NO FALLBACK - if node has no explicit source_refs, it has no code
             # This prevents loading entire files when agent requests non-existent nodes
-            if not node_cards and self.debug:
-                print(f"[DEBUG] Node {chosen_id} has no source_refs and no cards found")
 
             node_copy = ndata.copy()
             if node_cards:
