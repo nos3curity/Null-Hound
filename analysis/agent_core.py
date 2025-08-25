@@ -458,16 +458,18 @@ class AutonomousAgent:
         
         nodes = graph_data.get('nodes', [])
         edges = graph_data.get('edges', [])
-        lines.append(f"Total: {len(nodes)} nodes, {len(edges)} edges\n")
+        lines.append(f"Total: {len(nodes)} nodes, {len(edges)} edges")
+        lines.append("⚠️ USE EXACT NODE IDS AS SHOWN BELOW - NO VARIATIONS!\n")
         
         # Show ALL nodes with top observations/assumptions
         if nodes:
-            lines.append("NODES:")
+            lines.append("AVAILABLE NODES (use these EXACT IDs with load_nodes):")
             for node in nodes:
                 node_id = node.get('id', 'unknown')
                 node_label = node.get('label', node_id)
                 node_type = node.get('type', 'unknown')
-                lines.append(f"  {node_id} | {node_label} | {node_type}")
+                # Make node IDs stand out more
+                lines.append(f"  [{node_id}] → {node_label} ({node_type})")
                 
                 # Show top 3 observations
                 observations = node.get('observations', [])
@@ -564,9 +566,10 @@ class AutonomousAgent:
         
         # Available graphs (show all)
         context_parts.append("=== AVAILABLE GRAPHS ===")
+        context_parts.append("Use EXACT graph names as shown below:")
         for name in self.available_graphs.keys():
             if self.loaded_data['system_graph'] and name == self.loaded_data['system_graph']['name']:
-                context_parts.append(f"• {name} [SYSTEM - AUTO-LOADED]")
+                context_parts.append(f"• {name} [SYSTEM - AUTO-LOADED, see nodes below]")
             else:
                 context_parts.append(f"• {name}")
         context_parts.append("")
@@ -861,6 +864,13 @@ class AutonomousAgent:
 
 Your task is to investigate the system and identify potential vulnerabilities. The system architecture graph is automatically loaded and visible. You can see all available graphs and which are loaded.
 
+🔴 CRITICAL RULES FOR NODE AND GRAPH NAMES:
+- ALWAYS use EXACT node IDs as shown in the graphs (in square brackets like [node_id])
+- NEVER guess, modify, or create node names
+- NEVER add prefixes like "func_" or "node_" unless they're already there
+- If a node doesn't exist in the graph, DON'T try variations - it doesn't exist!
+- Check the graph FIRST to see what nodes actually exist before requesting them
+
 IMPORTANT DISTINCTION:
 - Graph observations/assumptions: Facts about HOW the system works (invariants, behaviors, constraints)
 - Hypotheses: Suspected SECURITY ISSUES or vulnerabilities
@@ -880,13 +890,15 @@ AVAILABLE ACTIONS - USE EXACT PARAMETERS AS SHOWN:
    EXAMPLE: {"graph_name": "DataFlowDiagram"}
    ⚠️ ONLY SEND: graph_name - NOTHING ELSE!
 
-2. load_nodes — Load source code for specific nodes
-   PARAMETERS: {"node_ids": ["node1", "node2"]}
-   EXAMPLE: {"node_ids": ["ProxyAdmin", "StakingManagerProxy"]}
-   EXAMPLE: {"node_ids": ["func_updatePrice", "PRICE_UPDATER_ROLE"]}
-   ⚠️ ONLY SEND: node_ids array - NOTHING ELSE!
-   Note: Use exact node IDs from the graphs you see
-   Extract targeted, small functions or subsystems rather than whole files, classes or contracts
+2. load_nodes — Load source code for specific nodes from a specific graph
+   PARAMETERS: {"graph_name": "ExactGraphName", "node_ids": ["exact_node_id_from_brackets"]}
+   ⚠️ REQUIRED: graph_name (string) AND node_ids (array)
+   ⚠️ COPY THE EXACT NODE IDs from the square brackets [like_this] in the graph display
+   
+   CORRECT EXAMPLE: {"graph_name": "SystemArchitecture", "node_ids": ["contract_Agent", "func_AIToken_mint"]}
+   WRONG EXAMPLE: {"graph_name": "System", "node_ids": ["Agent", "mint", "func_Agent_transfer"]}
+   
+   The node IDs are shown in square brackets in the graph. Copy them EXACTLY!
 
 3. update_node — Add observations/assumptions about ONE node
    PARAMETERS: {"node_id": "node", "observations": [...], "assumptions": [...]}
@@ -916,10 +928,12 @@ AVAILABLE ACTIONS - USE EXACT PARAMETERS AS SHOWN:
    ⚠️ Send empty object {} - NO PARAMETERS!
 
 EXPLORATION STRATEGY:
-1. START by exploring: load graphs, load nodes, make observations
-2. After 3-5 exploration actions, call deep_think to analyze what you found
-3. Follow the guidance from deep_think to explore related areas
-4. Repeat: explore → deep_think → explore → deep_think
+1. LOOK at the graph to see what nodes exist (they're in square brackets)
+2. COPY exact node IDs when using load_nodes - no guessing!
+3. START by exploring: load graphs, load nodes, make observations
+4. After 3-5 exploration actions, call deep_think to analyze what you found
+5. Follow the guidance from deep_think to explore related areas
+6. Repeat: explore → deep_think → explore → deep_think
 
 COMPLETION CRITERIA (WHEN TO CALL complete):
 1. You have explored key areas AND deep_think has analyzed them for vulnerabilities, OR
@@ -1062,8 +1076,10 @@ DO NOT include any text before or after the JSON object."""
                 graph_name = graph_name.strip().rstrip("'}").rstrip('"').rstrip("'")
             return self._load_graph(graph_name)
         elif action == 'load_nodes':
-            # Extract node_ids
-            return self._load_nodes(params.get('node_ids', []))
+            # Extract graph_name and node_ids
+            graph_name = params.get('graph_name')
+            node_ids = params.get('node_ids', [])
+            return self._load_nodes(node_ids, graph_name)
         elif action == 'update_node':
             # Pass only relevant parameters
             clean_params = {
@@ -1254,75 +1270,67 @@ DO NOT include any text before or after the JSON object."""
         
         Args:
             node_ids: List of node IDs to load
-            graph_name: Optional graph name to search in. If not specified, searches all graphs.
+            graph_name: REQUIRED - The specific graph to load nodes from
         """
-        if not node_ids:
-            # Agent must specify which nodes to load
+        if not graph_name:
             return {
                 'status': 'error',
-                'error': 'No node IDs specified. Please specify which nodes to load based on the graph.'
+                'error': 'graph_name is REQUIRED. Please specify which graph contains the nodes you want to load.'
+            }
+            
+        if not node_ids:
+            return {
+                'status': 'error',
+                'error': 'No node IDs specified. Please specify which nodes to load from the graph.'
             }
         
         self._ensure_card_index()
-        # Build indices across all graphs
-        def _norm(s: str) -> str:
-            import re
-            return re.sub(r"[^a-z0-9]", "", s.lower())
-
-        # Index nodes and edges from system + loaded graphs
+        
+        # First check if the graph exists and is loaded
+        graph_data = None
+        graph_edges = []
+        
+        # Check system graph
+        if self.loaded_data.get('system_graph') and self.loaded_data['system_graph']['name'] == graph_name:
+            graph_data = self.loaded_data['system_graph']['data']
+        # Check loaded graphs
+        elif graph_name in (self.loaded_data.get('graphs') or {}):
+            graph_data = self.loaded_data['graphs'][graph_name]
+        else:
+            # Graph not loaded - provide helpful error
+            available = []
+            if self.loaded_data.get('system_graph'):
+                available.append(self.loaded_data['system_graph']['name'])
+            available.extend(self.loaded_data.get('graphs', {}).keys())
+            return {
+                'status': 'error',
+                'error': f'Graph "{graph_name}" is not loaded. Available graphs: {", ".join(available) if available else "none"}. Use load_graph first if needed.'
+            }
+        
+        # Build index for ONLY the specified graph
         node_by_id: Dict[str, Dict[str, Any]] = {}
-        node_graph: Dict[str, str] = {}
-        norm_to_id: Dict[str, str] = {}
-        label_to_id: Dict[str, str] = {}
-        edges_by_graph: Dict[str, List[Dict[str, Any]]] = {}
-
-        for gname, gdata in self._iter_graphs():
-            nodes = gdata.get('nodes', [])
-            edges_by_graph[gname] = gdata.get('edges', [])
-            for n in nodes:
-                nid = n.get('id')
-                if not nid:
-                    continue
+        graph_edges = graph_data.get('edges', [])
+        
+        for n in graph_data.get('nodes', []):
+            nid = n.get('id')
+            if nid:
                 node_by_id[nid] = n
-                node_graph[nid] = gname
-                norm_to_id[_norm(nid)] = nid
-                lbl = n.get('label') or ''
-                if lbl:
-                    label_to_id[_norm(lbl)] = nid
 
         not_found: List[str] = []
+        loaded_nodes = []
 
         for req_id in node_ids:
-            chosen_id = None
+            # EXACT match only - no fuzzy matching
             ndata = node_by_id.get(req_id)
-            if ndata:
-                chosen_id = req_id
-            else:
-                # Try normalization and simple variants
-                candidates = [req_id]
-                if req_id.startswith('node_'):
-                    candidates.append(req_id[len('node_'):])
-                found_id = None
-                for c in candidates:
-                    nid = norm_to_id.get(_norm(c))
-                    if nid:
-                        found_id = nid
-                        break
-                    nid = label_to_id.get(_norm(c))
-                    if nid:
-                        found_id = nid
-                        break
-                if found_id:
-                    chosen_id = found_id
-                    ndata = node_by_id.get(found_id)
-
-            if not ndata or not chosen_id:
+            
+            if not ndata:
                 not_found.append(req_id)
                 continue
+            
+            chosen_id = req_id
 
-            # Collect evidence cards from node and its incident edges in its graph
-            gname = node_graph.get(chosen_id, '')
-            graph_edges = edges_by_graph.get(gname, [])
+            # Collect evidence cards from node and its incident edges
+            # We already have graph_edges from the specified graph
             card_ids: List[str] = []
             node_refs = ndata.get('source_refs', []) or ndata.get('refs', []) or []
             if isinstance(node_refs, list):
@@ -1399,54 +1407,29 @@ DO NOT include any text before or after the JSON object."""
                     }
                 })
 
-            # Fallback: if no cards resolved, try inferring by filename match (contract/function names)
-            if not node_cards and self._file_to_cards:
-                import os, re
-                def _norm(s: str) -> str:
-                    return re.sub(r"[^a-z0-9]", "", (s or '').lower())
-                base_candidates = set()
-                base_id = _norm(chosen_id)
-                base_label = _norm(ndata.get('label') or '')
-                for rel in self._file_to_cards.keys():
-                    base = os.path.splitext(os.path.basename(rel))[0]
-                    base_norm = _norm(base)
-                    if (base_id and (base_id in base_norm or base_norm in base_id)) or (
-                        base_label and (base_label in base_norm or base_norm in base_label)
-                    ):
-                        base_candidates.add(rel)
-                for rel in sorted(base_candidates):
-                    for cid2 in self._file_to_cards.get(rel, []) or []:
-                        c = self._card_index.get(cid2)
-                        if not c:
-                            continue
-                        node_cards.append({
-                            'card_id': cid2,
-                            'type': c.get('type', 'code'),
-                            'content': self._extract_card_content(c),
-                            'metadata': {
-                                k: c.get(k) for k in (
-                                    'relpath','char_start','char_end','line_start','line_end'
-                                ) if k in c
-                            }
-                        })
+            # NO FALLBACK - if node has no explicit source_refs, it has no code
+            # This prevents loading entire files when agent requests non-existent nodes
+            if not node_cards and self.debug:
+                print(f"[DEBUG] Node {chosen_id} has no source_refs and no cards found")
 
             node_copy = ndata.copy()
             if node_cards:
                 node_copy['cards'] = node_cards
                 self.loaded_data['code'][chosen_id] = '\n\n'.join(c['content'] for c in node_cards)
             self.loaded_data['nodes'][chosen_id] = node_copy
+            loaded_nodes.append(chosen_id)
 
         # Count only the nodes from this request
-        current_request_nodes = [nid for nid in node_ids if nid not in not_found and nid in self.loaded_data['nodes']]
-        current_loaded_count = len(current_request_nodes)
-        current_code_count = len([nid for nid in current_request_nodes if 'cards' in self.loaded_data['nodes'][nid]])
+        current_request_nodes = loaded_nodes
+        current_loaded_count = len(loaded_nodes)
+        current_code_count = len([nid for nid in loaded_nodes if 'cards' in self.loaded_data['nodes'][nid]])
         
         # Total across all previous loads (for context)
         total_loaded_count = len(self.loaded_data['nodes'])
         
         # Format loaded nodes for display
         display_lines = []
-        display_lines.append(f"\n=== LOADED NODE DETAILS ===")
+        display_lines.append(f"\n=== LOADED NODE DETAILS FROM {graph_name} ===")
         display_lines.append(f"This request: {current_loaded_count} nodes ({current_code_count} with code)")
         if total_loaded_count > current_loaded_count:
             display_lines.append(f"Total cached: {total_loaded_count} nodes\n")
@@ -1506,7 +1489,15 @@ DO NOT include any text before or after the JSON object."""
             display_lines.append("")  # Empty line between nodes
         
         if not_found:
-            display_lines.append(f"Not found: {', '.join(not_found)}")
+            display_lines.append(f"\n⚠️ ERROR - These nodes do not exist in {graph_name}: {', '.join(not_found)}")
+            display_lines.append(f"Available nodes in {graph_name}:")
+            # Show first 10 available nodes as examples
+            available_nodes = list(node_by_id.keys())[:10]
+            for node_id in available_nodes:
+                display_lines.append(f"  • {node_id}")
+            if len(node_by_id) > 10:
+                display_lines.append(f"  ... and {len(node_by_id) - 10} more")
+            display_lines.append("\nUse EXACT node IDs as shown above. Do not guess or modify node names!")
         
         nodes_display = '\n'.join(display_lines)
         

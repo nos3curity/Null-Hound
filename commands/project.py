@@ -560,8 +560,21 @@ def hypotheses(name: str, details: bool = False):
         else:
             sev_str = "[dim]unknown[/dim]"
         
-        # Get model info
-        model = hyp.get("reported_by_model", "unknown")
+        # Get model info - show both junior and senior if available
+        junior = hyp.get("junior_model")
+        senior = hyp.get("senior_model")
+        
+        if junior and senior:
+            model = f"J:{junior.split(':')[-1]} S:{senior.split(':')[-1]}"
+        elif junior:
+            model = f"J:{junior.split(':')[-1]}"
+        elif senior:
+            model = f"S:{senior.split(':')[-1]}"
+        else:
+            # Fallback to legacy field
+            model = hyp.get("reported_by_model", "unknown")
+            if ':' in model:
+                model = model.split(':')[-1]
         
         if details:
             # Include full description in detailed view
