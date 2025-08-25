@@ -51,18 +51,22 @@ def run_investigation(project_path: str, prompt: str, iterations: Optional[int] 
     
     # If no config was loaded but platform/model were provided, create minimal config
     if not config and (platform or model):
-        config = {'llm': {}}
+        config = {'models': {'agent': {}}}
     
     # Override platform and model if provided
     if config and (platform or model):
-        if 'llm' not in config:
-            config['llm'] = {}
+        # Ensure the models.agent structure exists
+        if 'models' not in config:
+            config['models'] = {}
+        if 'agent' not in config['models']:
+            config['models']['agent'] = {}
+        
         if platform:
-            config['llm']['platform'] = platform
-            console.print(f"[cyan]Overriding platform: {platform}[/cyan]")
+            config['models']['agent']['provider'] = platform
+            console.print(f"[cyan]Overriding agent provider: {platform}[/cyan]")
         if model:
-            config['llm']['model'] = model
-            console.print(f"[cyan]Overriding model: {model}[/cyan]")
+            config['models']['agent']['model'] = model
+            console.print(f"[cyan]Overriding agent model: {model}[/cyan]")
     
     # Resolve project path
     if '/' in project_path or Path(project_path).exists():
@@ -620,14 +624,18 @@ class AgentRunner:
         
         # Override platform and model if provided
         if self.platform or self.model:
-            if 'llm' not in config:
-                config['llm'] = {}
+            # Ensure the models.agent structure exists
+            if 'models' not in config:
+                config['models'] = {}
+            if 'agent' not in config['models']:
+                config['models']['agent'] = {}
+            
             if self.platform:
-                config['llm']['platform'] = self.platform
-                console.print(f"[cyan]Overriding platform: {self.platform}[/cyan]")
+                config['models']['agent']['provider'] = self.platform
+                console.print(f"[cyan]Overriding agent provider: {self.platform}[/cyan]")
             if self.model:
-                config['llm']['model'] = self.model
-                console.print(f"[cyan]Overriding model: {self.model}[/cyan]")
+                config['models']['agent']['model'] = self.model
+                console.print(f"[cyan]Overriding agent model: {self.model}[/cyan]")
         
         # Keep config for planning
         self.config = config
@@ -876,9 +884,18 @@ class AgentRunner:
     def run(self, plan_n: int = 5):
         """Run the agent using the unified autonomous flow."""
         # Display configuration (omit context window; not available in unified client)
+        # Get the actual model being used
+        model_info = "default"
+        if self.config and 'models' in self.config and 'agent' in self.config['models']:
+            agent_config = self.config['models']['agent']
+            provider = agent_config.get('provider', 'unknown')
+            model = agent_config.get('model', 'unknown')
+            model_info = f"{provider}/{model}"
+        
         config_text = (
             f"[bold cyan]AUTONOMOUS SECURITY AGENT[/bold cyan]\n"
             f"Project: [yellow]{self.project_id}[/yellow]\n"
+            f"Model: [magenta]{model_info}[/magenta]\n"
             f"Max Iterations: [green]{self.agent.max_iterations}[/green]"
         )
         if self.time_limit_minutes:

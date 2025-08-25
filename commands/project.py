@@ -144,13 +144,56 @@ class ProjectManager:
         if not config_file.exists():
             return None
         
-        with open(config_file, 'r') as f:
-            config = json.load(f)
+        import time
+        import fcntl
         
-        # Update last accessed
-        config["last_accessed"] = datetime.now().isoformat()
-        with open(config_file, 'w') as f:
-            json.dump(config, f, indent=2)
+        # Retry logic for reading JSON with file locking
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                with open(config_file, 'r') as f:
+                    # Try to get a shared lock for reading
+                    try:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
+                        content = f.read()
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                    except IOError:
+                        # If we can't get lock, just read anyway
+                        content = f.read()
+                    
+                    if not content:
+                        # Empty file, retry
+                        if attempt < max_retries - 1:
+                            time.sleep(0.1 * (attempt + 1))
+                            continue
+                        else:
+                            return None
+                    
+                    config = json.loads(content)
+                    break
+            except (json.JSONDecodeError, IOError) as e:
+                if attempt < max_retries - 1:
+                    time.sleep(0.1 * (attempt + 1))
+                    continue
+                else:
+                    # After all retries, return None
+                    return None
+        
+        # Update last accessed with file locking
+        try:
+            config["last_accessed"] = datetime.now().isoformat()
+            with open(config_file, 'w') as f:
+                # Try to get exclusive lock for writing
+                try:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    json.dump(config, f, indent=2)
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                except IOError:
+                    # If we can't get lock, skip updating last_accessed
+                    pass
+        except Exception:
+            # If update fails, continue anyway - it's not critical
+            pass
         
         config["path"] = str(project_dir)
         return config
