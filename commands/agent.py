@@ -884,18 +884,30 @@ class AgentRunner:
     def run(self, plan_n: int = 5):
         """Run the agent using the unified autonomous flow."""
         # Display configuration (omit context window; not available in unified client)
-        # Get the actual model being used
-        model_info = "default"
-        if self.config and 'models' in self.config and 'agent' in self.config['models']:
-            agent_config = self.config['models']['agent']
-            provider = agent_config.get('provider', 'unknown')
-            model = agent_config.get('model', 'unknown')
-            model_info = f"{provider}/{model}"
+        # Get the actual models being used
+        agent_model_info = "default"
+        guidance_model_info = "default"
+        
+        if self.config and 'models' in self.config:
+            # Get agent model
+            if 'agent' in self.config['models']:
+                agent_config = self.config['models']['agent']
+                provider = agent_config.get('provider', 'unknown')
+                model = agent_config.get('model', 'unknown')
+                agent_model_info = f"{provider}/{model}"
+            
+            # Get guidance model
+            if 'guidance' in self.config['models']:
+                guidance_config = self.config['models']['guidance']
+                provider = guidance_config.get('provider', 'unknown')
+                model = guidance_config.get('model', 'unknown')
+                guidance_model_info = f"{provider}/{model}"
         
         config_text = (
             f"[bold cyan]AUTONOMOUS SECURITY AGENT[/bold cyan]\n"
             f"Project: [yellow]{self.project_id}[/yellow]\n"
-            f"Model: [magenta]{model_info}[/magenta]\n"
+            f"Agent Model: [magenta]{agent_model_info}[/magenta]\n"
+            f"Guidance Model: [cyan]{guidance_model_info}[/cyan]\n"
             f"Max Iterations: [green]{self.agent.max_iterations}[/green]"
         )
         if self.time_limit_minutes:
@@ -916,16 +928,65 @@ class AgentRunner:
                 act = info.get('action', '-')
                 reasoning = info.get('reasoning', '')
                 params = info.get('parameters', {}) or {}
-                console.print(f"[cyan]Iter {it} decision:[/cyan] {act}")
-                if reasoning:
-                    console.print(f"  [dim]Thought:[/dim] {reasoning}")  # Don't abbreviate thoughts
-                if params:
-                    try:
-                        import json as _json
-                        console.print(f"  [dim]Params:[/dim] {_short(_json.dumps(params, separators=(',', ':')))}")
-                    except Exception:
-                        pass
-            elif status in { 'analyzing', 'executing', 'result', 'hypothesis_formed' }:
+                
+                # Special formatting for deep_think
+                if act == 'deep_think':
+                    console.print(f"\n[bold magenta]🧠 Iter {it}: Calling Deep Think Model[/bold magenta]")
+                    if reasoning:
+                        console.print(f"  [yellow]Reason:[/yellow] {reasoning}")
+                else:
+                    console.print(f"[cyan]Iter {it} decision:[/cyan] {act}")
+                    if reasoning:
+                        console.print(f"  [dim]Thought:[/dim] {reasoning}")  # Don't abbreviate thoughts
+                    if params:
+                        try:
+                            import json as _json
+                            console.print(f"  [dim]Params:[/dim] {_short(_json.dumps(params, separators=(',', ':')))}")
+                        except Exception:
+                            pass
+            elif status == 'result':
+                # Special handling for deep_think results
+                action = info.get('action', '')
+                result = info.get('result', {})
+                
+                if action == 'deep_think' and result.get('status') == 'success':
+                    console.print(f"\n[bold magenta]═══ DEEP THINK ANALYSIS ═══[/bold magenta]")
+                    
+                    # Show the full guidance response
+                    full_response = result.get('full_response', '')
+                    if full_response:
+                        # Parse and display sections
+                        if 'VULNERABILITIES FOUND:' in full_response:
+                            vuln_section = full_response.split('VULNERABILITIES FOUND:')[1]
+                            if 'STRATEGIC GUIDANCE:' in vuln_section:
+                                vuln_text = vuln_section.split('STRATEGIC GUIDANCE:')[0].strip()
+                                console.print("\n[bold red]Vulnerabilities Found:[/bold red]")
+                                console.print(Panel(vuln_text, border_style="red"))
+                        
+                        if 'STRATEGIC GUIDANCE:' in full_response:
+                            guidance_section = full_response.split('STRATEGIC GUIDANCE:')[1]
+                            if 'PRIORITY AREAS:' in guidance_section:
+                                guidance_text = guidance_section.split('PRIORITY AREAS:')[0].strip()
+                                console.print("\n[bold yellow]Strategic Guidance:[/bold yellow]")
+                                console.print(Panel(guidance_text, border_style="yellow"))
+                        
+                        if 'PRIORITY AREAS:' in full_response:
+                            priority_text = full_response.split('PRIORITY AREAS:')[1].strip()
+                            console.print("\n[bold cyan]Priority Areas:[/bold cyan]")
+                            console.print(Panel(priority_text, border_style="cyan"))
+                    
+                    # Show hypotheses formed
+                    hypotheses_formed = result.get('hypotheses_formed', 0)
+                    if hypotheses_formed > 0:
+                        console.print(f"\n[bold green]✓ Formed {hypotheses_formed} new hypothesis(es)[/bold green]")
+                        new_hyps = result.get('new_hypotheses', [])
+                        for hyp in new_hyps[:3]:  # Show first 3
+                            if hasattr(hyp, 'description'):
+                                console.print(f"  • {hyp.description}")
+                    console.print()
+                else:
+                    console.print(f"[dim]Iter {it} {status}:[/dim] {msg}")
+            elif status in { 'analyzing', 'executing', 'hypothesis_formed' }:
                 console.print(f"[dim]Iter {it} {status}:[/dim] {msg}")
 
         # Compose audit prompt

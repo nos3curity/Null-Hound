@@ -66,6 +66,13 @@ models:
     provider: anthropic
     model: claude-3-5-sonnet-20241022
     
+  # Profile for deep thinking/guidance model (used by agent's deep_think action)
+  # This model analyzes the agent's context to identify vulnerabilities
+  guidance:
+    provider: openai
+    model: o1-mini               # Strong reasoning model for deep analysis
+    # reasoning_effort: high      # Uncomment for o1 models to increase reasoning effort
+    
   # Alternative configuration with Gemini thinking mode
   # agent:
   #   provider: gemini

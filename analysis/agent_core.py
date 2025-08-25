@@ -103,6 +103,17 @@ class AutonomousAgent:
             profile="agent",
             debug_logger=self.debug_logger
         )
+        
+        # Initialize guidance model for deep thinking
+        try:
+            self.guidance_client = UnifiedLLMClient(
+                cfg=config,
+                profile="guidance",
+                debug_logger=self.debug_logger
+            )
+        except Exception:
+            # If guidance model not configured, fall back to agent model
+            self.guidance_client = self.llm
 
         # Use the agent model itself for context compression
         # This ensures consistency and leverages the same model's understanding
@@ -885,45 +896,40 @@ AVAILABLE ACTIONS - USE EXACT PARAMETERS AS SHOWN:
    ⚠️ DO NOT SEND: Empty arrays [] - omit the field instead
    Keep observations/assumptions VERY SHORT (2-4 words each)
 
-4. form_hypothesis — Report a potential vulnerability
-   PARAMETERS: {"description": "short", "details": "full", "vulnerability_type": "type", "confidence": 0.0-1.0, "node_ids": [...]}
-   EXAMPLE: {
-     "description": "Reentrancy in withdraw",
-     "details": "The withdraw function in Vault.sol line 145 lacks reentrancy protection...",
-     "vulnerability_type": "reentrancy",
-     "confidence": 0.8,
-     "node_ids": ["func_withdraw"]
-   }
-   ⚠️ ONLY SEND: The fields shown above (severity is optional)
-   STRICT REQUIREMENTS:
-  - Description MUST be COMPACT (<60 chars): "reentrancy in withdraw", "missing nonce check", "unchecked return value"
-  - Details MUST include PRECISE LOCATION and FULL DESCRIPTION for reproduction:
-    * Exact function name and contract
-    * Line numbers or specific code patterns if known
-    * Complete attack scenario or vulnerability mechanism
-    * Example: "In VaultManager.withdraw() at lines 45-52, external call to untrusted contract before state update allows reentrancy attack to drain funds"
-  - CHECK EXISTING HYPOTHESES FIRST - DO NOT CREATE DUPLICATES!
-  - MUST include at least one node_id (the affected function/contract)
-  - Include graph_name if not from system graph
-  - Use specific vulnerability_type: reentrancy, integer_overflow, access_control, etc.
-  - Do not create hypotheses about issues that require administrative privileges
-  - All hypotheses must have a concrete attack path and impact!
-    * No "missing input validation" with no effect etc.
-
-5. update_hypothesis — Update existing hypothesis with new evidence
+4. update_hypothesis — Update existing hypothesis with new evidence
    PARAMETERS: {"hypothesis_index": 0, "new_confidence": 0.5, "evidence": "..."}
    EXAMPLE: {"hypothesis_index": 0, "new_confidence": 0.9, "evidence": "Confirmed by analyzing implementation"}
    ⚠️ ONLY SEND: hypothesis_index, new_confidence, evidence - NOTHING ELSE!
+
+5. deep_think — Analyze recent exploration for vulnerabilities (use after exploring)
+   PARAMETERS: {}
+   EXAMPLE: {}
+   ⚠️ Send empty object {} - NO PARAMETERS!
+   IMPORTANT: Use this ONLY after you have explored code (loaded nodes, made observations)
+   - Call after every 3-5 exploration actions
+   - Analyzes your recent discoveries for vulnerabilities
+   - Provides strategic guidance on what to explore next
 
 6. complete — Finish the current investigation
    PARAMETERS: {}
    EXAMPLE: {}
    ⚠️ Send empty object {} - NO PARAMETERS!
 
+EXPLORATION STRATEGY:
+1. START by exploring: load graphs, load nodes, make observations
+2. After 3-5 exploration actions, call deep_think to analyze what you found
+3. Follow the guidance from deep_think to explore related areas
+4. Repeat: explore → deep_think → explore → deep_think
+
 COMPLETION CRITERIA (WHEN TO CALL complete):
-1. You have formed and refined concrete hypotheses for the most promising risks, OR
-2. Further actions are unlikely to change conclusions materially (coverage achieved), OR
-3. No promising next steps remain.
+1. You have explored key areas AND deep_think has analyzed them for vulnerabilities, OR
+2. Further exploration is unlikely to reveal new important information, OR
+3. No promising exploration paths remain.
+
+IMPORTANT: 
+- Do NOT form hypotheses directly - that's deep_think's job
+- ALWAYS explore first (load nodes, observe) before calling deep_think
+- Deep_think analyzes YOUR discoveries to find vulnerabilities
 
 EXPECTATIONS:
 - Choose nodes at the most informative granularity (functions/storage) when available.
@@ -1045,7 +1051,10 @@ DO NOT include any text before or after the JSON object."""
         action = decision.action
         params = decision.parameters  # Now a dict
         
-        if action == 'load_graph':
+        if action == 'deep_think':
+            # Execute deep thinking analysis
+            return self._deep_think()
+        elif action == 'load_graph':
             # Extract graph_name
             graph_name = params.get('graph_name', '')
             if isinstance(graph_name, str):
@@ -1616,6 +1625,151 @@ DO NOT include any text before or after the JSON object."""
             'summary': f"Updated node {node_id}: {obs_count} observations, {assum_count} assumptions",
             'graphs_updated': updated_graphs
         }
+    
+    def _deep_think(self) -> Dict:
+        """
+        Execute deep thinking analysis using the guidance model.
+        Passes the entire context to analyze for vulnerabilities and get guidance.
+        """
+        try:
+            # Build full context (same as agent sees)
+            context = self._build_context()
+            
+            # Prepare prompt for guidance model
+            system_prompt = """You are a deep thinking security analysis model.
+Your role is to analyze the agent's RECENT exploration and identify vulnerabilities.
+
+FOCUS ON THE RECENT ACTIONS SECTION - these show what the agent just discovered.
+Look for security issues in the code that was recently loaded and analyzed.
+
+Your tasks:
+1. Identify vulnerabilities in the RECENTLY EXPLORED CODE
+2. Form concrete hypotheses about security issues you detected
+3. Guide the agent to explore related attack vectors
+
+Analyze the recent discoveries for:
+- Missing security checks in recently loaded functions
+- Dangerous patterns in the code just examined
+- Attack vectors suggested by recent observations
+- Connections between recently explored nodes that create vulnerabilities
+
+Format your response as:
+VULNERABILITIES FOUND:
+[List vulnerabilities found in the RECENT explorations with specific details]
+- Include exact function names and line numbers if visible
+- Describe the exploit scenario
+- Rate confidence (high/medium/low)
+
+STRATEGIC GUIDANCE:
+[What specific nodes/functions should the agent explore next based on findings]
+
+PRIORITY AREAS:
+[Most critical areas to investigate next]"""
+            
+            user_prompt = f"""Security audit context (FOCUS ON 'RECENT ACTIONS' section):
+
+{context}
+
+Analyze the RECENT exploration steps for vulnerabilities. What security issues do you see in the recently loaded code?"""
+            
+            # Call guidance model
+            response = self.guidance_client.raw(
+                system=system_prompt,
+                user=user_prompt
+            )
+            
+            if response:
+                # Parse and process the guidance
+                # Track hypotheses formed before and after
+                initial_hyp_count = len(self.hypotheses_store.hypotheses)
+                self._process_guidance_response(response)
+                new_hyp_count = len(self.hypotheses_store.hypotheses)
+                hypotheses_formed = new_hyp_count - initial_hyp_count
+                
+                # Get the newly formed hypotheses
+                new_hypotheses = []
+                if hypotheses_formed > 0:
+                    new_hypotheses = self.hypotheses_store.hypotheses[-hypotheses_formed:]
+                
+                return {
+                    'status': 'success',
+                    'summary': 'Deep analysis complete - vulnerabilities analyzed and guidance provided',
+                    'full_response': response,  # Return full response for display
+                    'guidance': response[:500],  # Keep short version too
+                    'hypotheses_formed': hypotheses_formed,
+                    'new_hypotheses': new_hypotheses
+                }
+            else:
+                return {
+                    'status': 'error',
+                    'error': 'No response from guidance model'
+                }
+                
+        except Exception as e:
+            return {
+                'status': 'error',
+                'error': f'Deep think failed: {str(e)}'
+            }
+    
+    def _process_guidance_response(self, response: str):
+        """
+        Process the guidance response to extract and form hypotheses.
+        """
+        try:
+            # Look for vulnerability sections in the response
+            if 'VULNERABILITIES FOUND:' in response:
+                # Extract vulnerabilities section
+                vuln_section = response.split('VULNERABILITIES FOUND:')[1]
+                if 'STRATEGIC GUIDANCE:' in vuln_section:
+                    vuln_section = vuln_section.split('STRATEGIC GUIDANCE:')[0]
+                
+                # Parse each vulnerability and form hypothesis
+                lines = vuln_section.strip().split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if line and not line.startswith('[') and line != 'None':
+                        # Try to extract vulnerability details
+                        # Format expected: "Description at location with confidence"
+                        # For now, create a basic hypothesis
+                        self._form_hypothesis_from_guidance(line)
+                        
+        except Exception:
+            # If parsing fails, that's okay - the guidance is still shown to agent
+            pass
+    
+    def _form_hypothesis_from_guidance(self, vulnerability_text: str):
+        """
+        Form a hypothesis from guidance model's vulnerability finding.
+        """
+        try:
+            # Parse the vulnerability text to extract details
+            # This is a simplified version - could be enhanced with better parsing
+            
+            # Try to extract confidence if mentioned
+            confidence = 0.8  # Default confidence
+            if 'high confidence' in vulnerability_text.lower():
+                confidence = 0.9
+            elif 'medium confidence' in vulnerability_text.lower():
+                confidence = 0.6
+            elif 'low confidence' in vulnerability_text.lower():
+                confidence = 0.4
+            
+            # Create a simplified hypothesis
+            # In production, this would parse the text more carefully
+            params = {
+                'description': vulnerability_text[:60],  # First 60 chars
+                'details': vulnerability_text,
+                'vulnerability_type': 'security_issue',  # Generic type
+                'confidence': confidence,
+                'node_ids': ['system']  # Default to system-level
+            }
+            
+            # Use the existing form_hypothesis method
+            self._form_hypothesis(params)
+            
+        except Exception:
+            # If we can't parse it into a hypothesis, that's okay
+            pass
     
     def _form_hypothesis(self, params: Dict) -> Dict:
         """Form a new hypothesis."""

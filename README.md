@@ -17,7 +17,14 @@
 
 ## Overview
 
-Hound is a language-agnostic framework for code security reviews that replicates how expert auditors think and collaborate. Its agents build and refine cognitive models of a system and update them as new insights emerge. This process mirrors real audit teams: cumulative understanding, targeted hypotheses, and professional reports that surface deep logic flaws.
+Hound is a language-agnostic framework for code security reviews that replicates how expert auditors think and collaborate. Its agents build and refine cognitive models of a system and update them as new insights emerge. This process mirrors real audit teams: cumulative understanding, targeted hypotheses, and professional reports that surface deep logic flaws. Features:
+
+- Dynamic modeling of any codebase to find logic bugs
+- Model relationships between abstract and concrete concepts across granularities
+- Code understanding accumulates in knowledge graphs
+- Dynamic model switching (use larger models for guidance and hypotheses formation)
+- Orchestrate multiple agents serially and in parallel
+- Create complete audit reports with exec summary and system overview
 
 ## Installation
 
