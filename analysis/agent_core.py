@@ -428,7 +428,7 @@ class AutonomousAgent:
                         progress_callback({
                             'status': 'code_loaded',
                             'iteration': iterations,
-                            'message': f"Loaded {result.get('nodes_loaded', 0)} nodes"
+                            'message': result.get('summary', 'Loaded nodes')
                         })
                         
             except Exception as e:

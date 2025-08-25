@@ -195,17 +195,17 @@ class GraphBuilder:
         self.config = config
         self.debug = debug
         
-        # Initialize LLM clients - agent for discovery, graph for building
+        # Initialize LLM clients - guidance for discovery, graph for building
         # Graph model for building graphs
         self.llm = LLMClient(config, profile="graph")
         if debug:
             graph_model = config.get("models", {}).get("graph", {}).get("model", "unknown")
             print(f"[*] Graph model: {graph_model}")
         
-        # Agent model for initial discovery (heavier reasoning)
-        self.llm_agent = LLMClient(config, profile="agent")
+        # Guidance model for initial discovery (heavier reasoning)
+        self.llm_agent = LLMClient(config, profile="guidance")
         if debug:
-            agent_model = config.get("models", {}).get("agent", {}).get("model", "unknown")
+            agent_model = config.get("models", {}).get("guidance", {}).get("model", "unknown")
             print(f"[*] Agent model: {agent_model} (for discovery)")
         
         # Knowledge graphs storage
