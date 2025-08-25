@@ -52,6 +52,10 @@ models:
   finalize:
     provider: openai
     model: gpt-5
+
+  reporting:
+    provider: openai
+    model: gpt-5-nano
     
   # Gemini config (example)
   # agent:
