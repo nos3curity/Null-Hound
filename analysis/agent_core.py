@@ -883,7 +883,7 @@ class AutonomousAgent:
 
 Your task is to investigate the system and identify potential vulnerabilities. The system architecture graph is automatically loaded and visible. You can see all available graphs and which are loaded.
 
-🔴 CRITICAL RULES FOR NODE AND GRAPH NAMES:
+CRITICAL RULES FOR NODE AND GRAPH NAMES:
 - ALWAYS use EXACT node IDs as shown in the graphs (in square brackets like [node_id])
 - NEVER guess, modify, or create node names
 - NEVER add prefixes like "func_" or "node_" unless they're already there
@@ -907,14 +907,14 @@ AVAILABLE ACTIONS - USE EXACT PARAMETERS AS SHOWN:
    PARAMETERS: {"graph_name": "GraphName"}
    EXAMPLE: {"graph_name": "AuthorizationRoles"}
    EXAMPLE: {"graph_name": "DataFlowDiagram"}
-   ⚠️ ONLY SEND: graph_name - NOTHING ELSE!
+   ONLY SEND: graph_name - NOTHING ELSE!
 
 2. load_nodes — Load source code for specific nodes from a specific graph
    PARAMETERS: {"graph_name": "ExactGraphName", "node_ids": ["exact_node_id_from_brackets"]}
-   ⚠️ REQUIRED: graph_name (string) AND node_ids (array)
-   ⚠️ COPY THE EXACT NODE IDs from the square brackets [like_this] in the graph display
+   REQUIRED: graph_name (string) AND node_ids (array)
+   COPY THE EXACT NODE IDs from the square brackets [like_this] in the graph display
    
-   🎯 LOADING STRATEGY:
+   LOADING STRATEGY:
    - PRIORITIZE nodes marked [S] (small) and [M] (medium) - these are targeted functions
    - AVOID nodes marked [L:n] (large) - these are entire contracts with many code blocks
    - Load specific functions (func_*) rather than entire contracts (contract_*)
@@ -929,19 +929,19 @@ AVAILABLE ACTIONS - USE EXACT PARAMETERS AS SHOWN:
    PARAMETERS: {"node_id": "node", "observations": [...], "assumptions": [...]}
    EXAMPLE: {"node_id": "ProxyAdmin", "observations": ["single admin", "no timelock"]}
    EXAMPLE: {"node_id": "func_transfer", "assumptions": ["checks balance"]}
-   ⚠️ ONLY SEND: node_id (required), observations (optional), assumptions (optional)
-   ⚠️ DO NOT SEND: Empty arrays [] - omit the field instead
+   ONLY SEND: node_id (required), observations (optional), assumptions (optional)
+   DO NOT SEND: Empty arrays [] - omit the field instead
    Keep observations/assumptions VERY SHORT (2-4 words each)
 
 4. update_hypothesis — Update existing hypothesis with new evidence
    PARAMETERS: {"hypothesis_index": 0, "new_confidence": 0.5, "evidence": "..."}
    EXAMPLE: {"hypothesis_index": 0, "new_confidence": 0.9, "evidence": "Confirmed by analyzing implementation"}
-   ⚠️ ONLY SEND: hypothesis_index, new_confidence, evidence - NOTHING ELSE!
+   ONLY SEND: hypothesis_index, new_confidence, evidence - NOTHING ELSE!
 
 5. deep_think — Analyze recent exploration for vulnerabilities (use after exploring)
    PARAMETERS: {}
    EXAMPLE: {}
-   ⚠️ Send empty object {} - NO PARAMETERS!
+   Send empty object {} - NO PARAMETERS!
    IMPORTANT: Use this ONLY after you have explored code (loaded nodes, made observations)
    - Call after every 3-5 exploration actions
    - Analyzes your recent discoveries for vulnerabilities
@@ -950,7 +950,7 @@ AVAILABLE ACTIONS - USE EXACT PARAMETERS AS SHOWN:
 6. complete — Finish the current investigation
    PARAMETERS: {}
    EXAMPLE: {}
-   ⚠️ Send empty object {} - NO PARAMETERS!
+   Send empty object {} - NO PARAMETERS!
 
 EXPLORATION STRATEGY:
 1. LOOK at the graph to see what nodes exist (check size indicators!)
@@ -1385,9 +1385,6 @@ DO NOT include any text before or after the JSON object."""
                     seen.add(cid)
                     base_ids.append(cid)
 
-            # DO NOT expand - use only the specific cards referenced by the node
-            # This prevents loading entire files when only specific functions are needed
-            
             # Resolve cards ordered by relpath + char_start
             node_cards: List[Dict[str, Any]] = []
             ordered = []
@@ -1697,7 +1694,7 @@ Required fields:
 EXPLORATION STRATEGY:
 [One paragraph - what patterns to look for next and why]
 Focus on areas not yet explored. Suggest specific node IDs or code patterns to examine based on vulnerabilities found.
-
+If you have a hypothesis but need more code to confirm it, let the agent know in thois section!
 Keep responses COMPACT but include ALL required fields."""
             
             user_prompt = f"""Security audit context (FOCUS ON 'RECENT ACTIONS' section):
