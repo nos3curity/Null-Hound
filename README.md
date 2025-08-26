@@ -32,8 +32,6 @@ Agents reason across **abstract business logic and concrete code details**, capt
 
 Hound is designed to scale with both **time and resources**: a one-hour run gives quick coverage, while a days-long review provide more detailed results.
 
- See the [tech overview](tech.md) for details.
-
 ## Installation
 
 ```bash
