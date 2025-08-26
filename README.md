@@ -97,7 +97,7 @@ python hound.py agent audit my_audit --time-limit 3
 
 ```bash
 # Review and confirm high-confidence hypotheses
-python hound.py agent finalize my_audit
+python hound.py finalize my_audit
 
 # This step:
 # - Reviews hypotheses with confidence >= 0.7
