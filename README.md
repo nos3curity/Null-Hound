@@ -17,7 +17,7 @@
 
 ## Overview
 
-**Hound** is a research framework for **AI-driven code security auditing** that mirrors how expert auditors actually think, learn, and collaborate. Instead of spamming shallow hypotheses or rigidly parsing syntax trees, Hound builds **flexible cognitive models** of a system that accumulate, adapt, and get refined over time.  
+**Hound** is a research framework for **AI-driven code security auditing** that mirrors how expert auditors actually think, learn, and collaborate. Instead of spamming shallow hypotheses or rigidly parsing syntax trees, Hound builds **flexible cognitive models** of a system that accumulate, adapt, and get refined over time (see the [blog post](https://muellerberndt.medium.com/unleashing-the-hound-how-ai-agents-find-deep-logic-bugs-in-any-codebase-64c2110e3a6f) for details).
 
 Agents reason across **abstract business logic and concrete code details**, capturing assumptions, invariants, and observations into evolving **knowledge graphs**. These graphs are dynamic relational models that change as the audit deepens. The process mirrors real audit teams: weeks of cumulative understanding, targeted hypotheses, and collaborative review that surface **deep, business-logic vulnerabilities** missed by pattern-matching tools.
 
