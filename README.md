@@ -63,18 +63,17 @@ cp config.yaml.example config.yaml
 # Create a new project from source code
 python hound.py project create my_audit /path/to/source/code
 
-# Filter by main projet files (useful to skip tests and interfaces)
-python hound.py project create my_audit /path/to/source/code --files "file1,file2"
-
 # View project details
 python hound.py project info my_audit
 ```
 
 ### 4. Build knowledge graphs
 
+Note: Specifying a whitelist of target files is recommended in order to exclude tests, mocks, interfaces and standard libraries.
+
 ```bash
 # Generate system architecture graphs (analyzes code structure)
-python hound.py graph build my_audit --graphs 3 --iterations 5
+python hound.py graph build my_audit --graphs 3 --iterations 5 --files "file1,file2"
 
 # Export for visualization
 python hound.py graph export my_audit --output graphs.html
