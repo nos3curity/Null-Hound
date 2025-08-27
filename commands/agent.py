@@ -12,6 +12,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 from rich.progress import Progress, SpinnerColumn, TextColumn
+import random
 from rich.syntax import Syntax
 from datetime import datetime, timedelta
 import sys
@@ -99,7 +100,13 @@ def run_investigation(project_path: str, prompt: str, iterations: Optional[int] 
             json.dump({'graphs': graphs_dict}, f, indent=2)
     
     # Initialize agent
-    console.print("[cyan]Initializing agent...[/cyan]")
+    console.print("[bright_cyan]Initializing agent...[/bright_cyan]")
+    from random import choice as _choice
+    console.print(_choice([
+        "[white]Exquisite move — you’re not just asking a question, you’re summoning a code sleuth.[/white]",
+        "[white]Peak form — you’re not just kicking off an investigation, you’re launching a mini-epic.[/white]",
+        "[white]Glorious — you’re not just curious, you’re operationalizing curiosity.[/white]",
+    ]))
     agent = AutonomousAgent(
         graphs_metadata_path=knowledge_graphs_path,
         manifest_path=manifest_dir,
@@ -134,6 +141,11 @@ def run_investigation(project_path: str, prompt: str, iterations: Optional[int] 
         content = "\n".join(lines) if lines else "Initializing investigation..."
         return Panel(content, title="[bold cyan]Investigation Progress[/bold cyan]", border_style="cyan")
     
+    # Narrative model names
+    models = (config or {}).get('models', {}) if config else {}
+    agent_model = (models.get('agent') or {}).get('model') or 'Agent-Model'
+    guidance_model = (models.get('guidance') or {}).get('model') or 'Guidance-Model'
+
     def update_progress(info):
         """Update the live display with current status and reasoning."""
         status = info.get('status', '')
@@ -142,29 +154,39 @@ def run_investigation(project_path: str, prompt: str, iterations: Optional[int] 
         now = datetime.now().strftime('%H:%M:%S')
         
         if status == 'analyzing':
-            event_log.append(f"[yellow]{now}[/yellow] [bold]Iter {iteration}[/bold] [yellow]Analyzing[/yellow]: {message}")
+            prefix = random.choice([
+                f"🧑‍🔧 {agent_model} pokes at code",
+                f"🧑‍💻 {agent_model} combs through the lines",
+                "Analyzing",
+            ])
+            event_log.append(f"[bright_yellow]{now}[/bright_yellow] [bold]Iter {iteration}[/bold] [bright_yellow]{prefix}[/bright_yellow]: {message}")
         elif status == 'decision':
             action = info.get('action', '-')
             reasoning = info.get('reasoning', '')  # Don't abbreviate thoughts
             params = _format_params(info.get('parameters', {}))
-            event_log.append(
-                f"[cyan]{now}[/cyan] [bold]Iter {iteration}[/bold] [cyan]Decision[/cyan]: action={action}\n"
-                f"  [dim]Thought:[/dim] {reasoning}\n  [dim]Params:[/dim] {params}"
-            )
+            tag = random.choice(["Decision", f"{agent_model} plots next move", "Game plan"])
+            event_log.append(f"[bright_cyan]{now}[/bright_cyan] [bold]Iter {iteration}[/bold] [bright_cyan]{tag}[/bright_cyan]: action={action}\n"
+                             f"  [dim]Thought:[/dim] {reasoning}\n  [dim]Params:[/dim] {params}")
         elif status == 'executing':
-            event_log.append(f"[blue]{now}[/blue] [bold]Iter {iteration}[/bold] [blue]Executing[/blue]: {message}")
+            tag = random.choice(["Executing", f"{agent_model} does the thing", "On it"])
+            event_log.append(f"[bright_blue]{now}[/bright_blue] [bold]Iter {iteration}[/bold] [bright_blue]{tag}[/bright_blue]: {message}")
         elif status == 'result':
             res = info.get('result', {}) or {}
             summary = res.get('summary') or res.get('status') or message
-            event_log.append(f"[green]{now}[/green] [bold]Iter {iteration}[/bold] [green]Result[/green]: {_shorten(summary, 160)}")
+            tag = random.choice(["Result", f"{agent_model} reports back", "Outcome"])
+            event_log.append(f"[bright_green]{now}[/bright_green] [bold]Iter {iteration}[/bold] [bright_green]{tag}[/bright_green]: {_shorten(summary, 160)}")
         elif status == 'hypothesis_formed':
-            event_log.append(f"[green]{now}[/green] [bold]Iter {iteration}[/bold] [green]Hypothesis[/green]: {message}")
+            tag = random.choice(["Hypothesis", f"{agent_model} has a hunch", "Lead"])
+            event_log.append(f"[bright_green]{now}[/bright_green] [bold]Iter {iteration}[/bold] [bright_green]{tag}[/bright_green]: {message}")
         elif status == 'code_loaded':
-            event_log.append(f"[blue]{now}[/blue] [bold]Iter {iteration}[/bold] [blue]Code Loaded[/blue]: {message}")
+            tag = random.choice(["Code Loaded", f"{agent_model} stacks more context", "More code in"])
+            event_log.append(f"[bright_blue]{now}[/bright_blue] [bold]Iter {iteration}[/bold] [bright_blue]{tag}[/bright_blue]: {message}")
         elif status == 'generating_report':
-            event_log.append(f"[magenta]{now}[/magenta] [bold]Iter {iteration}[/bold] [magenta]Report[/magenta]: {message}")
+            tag = random.choice(["Report", f"{guidance_model} whispers advice", "Notes"])
+            event_log.append(f"[bright_magenta]{now}[/bright_magenta] [bold]Iter {iteration}[/bold] [bright_magenta]{tag}[/bright_magenta]: {message}")
         elif status == 'complete':
-            event_log.append(f"[bold green]{now}[/bold green] [bold]Iter {iteration}[/bold] [bold green]Complete[/bold green]: {message}")
+            tag = random.choice(["Complete", f"{guidance_model} signs off", "All done"])
+            event_log.append(f"[bold bright_green]{now}[/bold bright_green] [bold]Iter {iteration}[/bold] [bold bright_green]{tag}[/bold bright_green]: {message}")
         else:
             event_log.append(f"[white]{now}[/white] [bold]Iter {iteration}[/bold] [white]{status or 'Working'}[/white]: {message}")
         
@@ -1047,10 +1069,33 @@ class AgentRunner:
                 console.print(f"  [ ] {it.goal}  ({meta})")
 
             for idx, inv in enumerate(items):
+                # Check time limit before starting each investigation
+                if self.time_limit_minutes:
+                    elapsed_minutes = (time.time() - start_overall) / 60.0
+                    remaining_minutes = self.time_limit_minutes - elapsed_minutes
+                    if remaining_minutes <= 0:
+                        console.print(f"\n[yellow]⏰ Time limit reached ({self.time_limit_minutes} minutes) — stopping audit[/yellow]")
+                        break
+                    # Warn if less than 2 minutes remaining
+                    if remaining_minutes < 2:
+                        console.print(f"[yellow]⚠️  Only {remaining_minutes:.1f} minutes remaining[/yellow]")
+                
                 console.print(f"\n[bold blue]→ Investigating:[/bold blue] {inv.goal}")
                 max_iters = self.agent.max_iterations if self.agent.max_iterations else 5
+                
+                # Reduce iterations if we're running low on time
+                if self.time_limit_minutes:
+                    elapsed_minutes = (time.time() - start_overall) / 60.0
+                    remaining_minutes = self.time_limit_minutes - elapsed_minutes
+                    # Estimate 1-2 minutes per iteration, reduce if needed
+                    safe_iters = max(1, int(remaining_minutes / 1.5))  # 1.5 minutes per iteration estimate
+                    if safe_iters < max_iters:
+                        console.print(f"[yellow]Reducing iterations from {max_iters} to {safe_iters} due to time limit[/yellow]")
+                        max_iters = safe_iters
+                
                 self.start_time = time.time()
                 try:
+                    # TODO: Pass remaining_time to investigate() when that feature is added
                     report = self.agent.investigate(inv.goal, max_iterations=max_iters, progress_callback=progress_cb)
                     results.append((inv, report))
                     # Track completed investigation

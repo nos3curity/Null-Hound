@@ -19,6 +19,7 @@ from rich import box
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from analysis.graph_builder import GraphBuilder
+import random
 from ingest.manifest import RepositoryManifest
 from ingest.bundles import AdaptiveBundler
 from visualization.dynamic_graph_viz import generate_dynamic_visualization
@@ -66,11 +67,18 @@ def build(
     
     # Header
     console.print(Panel.fit(
-        f"[bold cyan]Building Knowledge Graphs[/bold cyan]\n"
+        f"[bold bright_cyan]Building Knowledge Graphs[/bold bright_cyan]\n"
         f"Repository: [white]{repo_path.name}[/white]\n"
         f"Graphs: [white]{max_graphs}[/white] | Iterations: [white]{max_iterations}[/white]",
         box=box.ROUNDED
     ))
+    # A little hype for the journey
+    from random import choice
+    console.print(choice([
+        "[white]What a glorious choice — you’re not just building graphs, you’re charting destiny.[/white]",
+        "[white]Elite move. You’re not just running a command, you’re commissioning a cartographer.[/white]",
+        "[white]Chef’s kiss. You’re not just analyzing code, you’re forging a legend map.[/white]",
+    ]))
     
     files_to_include = [f.strip() for f in file_filter.split(",")] if file_filter else None
     if files_to_include and debug:
@@ -103,9 +111,9 @@ def build(
         def log_line(kind: str, msg: str):
             now = datetime.now().strftime('%H:%M:%S')
             colors = {
-                'ingest': 'yellow', 'build': 'cyan', 'discover': 'magenta', 'graph': 'cyan',
-                'sample': 'white', 'update': 'green', 'warn': 'red', 'save': 'green', 'phase': 'blue',
-                'stats': 'white', 'start': 'white', 'complete': 'green'
+                'ingest': 'bright_yellow', 'build': 'bright_cyan', 'discover': 'bright_magenta', 'graph': 'bright_cyan',
+                'sample': 'bright_white', 'update': 'bright_green', 'warn': 'bright_red', 'save': 'bright_green', 'phase': 'bright_blue',
+                'stats': 'bright_white', 'start': 'bright_white', 'complete': 'bright_green'
             }
             color = colors.get(kind, 'white')
             line = f"[{color}]{now}[/{color}] {msg}"
@@ -135,6 +143,10 @@ def build(
 
     builder = GraphBuilder(config, debug=debug)
 
+    # Narrative model names
+    models = (config or {}).get('models', {})
+    graph_model = (models.get('graph') or {}).get('model') or 'Graph-Model'
+
     # Animated progress bar during graph construction
     iteration_total = max_iterations
     if progress_console.is_terminal and not quiet:
@@ -153,21 +165,52 @@ def build(
                 if isinstance(info, dict):
                     msg = info.get('message', '')
                     kind = info.get('status', 'build')
-                    log_line(kind, msg)
-                    # Try to parse iteration updates like "iteration X/Y"
-                    import re
-                    m = re.search(r"iteration\s+(\d+)/(\d+)", msg)
-                    if m:
-                        cur = int(m.group(1))
-                        total = int(m.group(2))
-                        if total != progress.tasks[task].total:
-                            progress.update(task, total=total)
-                        # ensure non-decreasing
-                        completed = min(max(cur, progress.tasks[task].completed or 0), total)
-                        progress.update(task, completed=completed, description=f"Constructing graphs (iteration {cur}/{total})...")
+                    # Narrative seasoning + progress description
+                    if kind == 'discover':
+                        line = random.choice([
+                            f"🧑‍🏭 {graph_model} scouts the terrain: {msg}",
+                            f"🧑‍🏭 Our junior cartographer {graph_model} surveys the codebase — bold move!",
+                            msg,
+                        ])
+                        log_line(kind, line)
+                        progress.update(task, description=_short(line, 80))
+                    elif kind in ('graph_build', 'building'):
+                        line = random.choice([
+                            f"🗺️  {graph_model} sketches connections — {msg}",
+                            msg,
+                        ])
+                        log_line(kind, line)
+                        progress.update(task, description=_short(line, 80))
+                    elif kind == 'update':
+                        line = random.choice([
+                            f"🔧 {graph_model} chisels the graph: {msg}",
+                            msg,
+                        ])
+                        log_line(kind, line)
+                        progress.update(task, description=_short(line, 80))
+                    elif kind == 'save':
+                        line = random.choice([
+                            f"💾 {graph_model} files the maps: {msg}",
+                            msg,
+                        ])
+                        log_line(kind, line)
+                        progress.update(task, description=_short(line, 80))
                     else:
-                        # update description only
-                        progress.update(task, description=_short(msg, 80))
+                        log_line(kind, msg)
+                        # Try to parse iteration updates like "iteration X/Y"
+                        import re
+                        m = re.search(r"iteration\s+(\d+)/(\d+)", msg)
+                        if m:
+                            cur = int(m.group(1))
+                            total = int(m.group(2))
+                            if total != progress.tasks[task].total:
+                                progress.update(task, total=total)
+                            # ensure non-decreasing
+                            completed = min(max(cur, progress.tasks[task].completed or 0), total)
+                            progress.update(task, completed=completed, description=f"Constructing graphs (iteration {cur}/{total})...")
+                        else:
+                            # update description only
+                            progress.update(task, description=_short(msg, 80))
                 else:
                     text = str(info)
                     progress.update(task, description=_short(text, 80))
@@ -188,7 +231,14 @@ def build(
                 msg = info.get('message', '')
                 kind = info.get('status', 'build')
                 if not quiet:
-                    log_line(kind, msg)
+                    if kind == 'discover':
+                        log_line(kind, f"🧑‍🏭 {graph_model} scouts the terrain: {msg}")
+                    elif kind in ('graph_build','building'):
+                        log_line(kind, f"🗺️  {graph_model} sketches connections — {msg}")
+                    elif kind == 'update':
+                        log_line(kind, f"🔧 {graph_model} chisels the graph: {msg}")
+                    else:
+                        log_line(kind, msg)
             else:
                 if not quiet:
                     log_line('build', str(info))

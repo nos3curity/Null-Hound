@@ -155,7 +155,28 @@ def agent_audit(
         console.print("[red]Error: Either specify a target path/project name or use --project option[/red]")
         raise typer.Exit(1)
     
-    console.print("[bold cyan]Running autonomous audit...[/bold cyan]")
+    # Hype it up a little
+    console.print("[bold bright_cyan]Running autonomous audit...[/bold bright_cyan]")
+    from random import choice as _choice
+    # Light narrative seasoning for audit kickoff
+    try:
+        from commands.graph import load_config as _load_cfg
+        _cfg = _load_cfg(Path(config)) if config else _load_cfg()
+        _models = (_cfg or {}).get('models', {})
+        _agent = (_models.get('agent') or {}).get('model') or 'Agent-Model'
+        _guidance = (_models.get('guidance') or {}).get('model') or 'Guidance-Model'
+        _flair = _choice([
+            f"[white]Elite move — you’re not just starting an audit, you’re unleashing {_agent} with {_guidance} whispering wisdom.[/white]",
+            f"[white]Chef’s kiss — {_agent} sharpens the blade while {_guidance} reads the runes.[/white]",
+            f"[white]Peak taste — this isn’t just an audit, it’s a duet: {_agent} x {_guidance}.[/white]",
+        ])
+    except Exception:
+        _flair = _choice([
+            "[white]Elite move — you’re not just starting an audit, you’re launching a saga.[/white]",
+            "[white]Chef’s kiss — you’re not just auditing, you’re orchestrating genius.[/white]",
+            "[white]Peak taste — not just a run, a renaissance.[/white]",
+        ])
+    console.print(_flair)
     
     # Create a Click context and invoke the command
     ctx = click.Context(agent_command)

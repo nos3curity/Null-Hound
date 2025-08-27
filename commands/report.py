@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
+import random
 
 import click
 from rich.console import Console
@@ -70,14 +71,21 @@ def report(project_name: str, output: Optional[str], format: str,
         output_path = Path(output)
     
     console.print(Panel(
-        f"[bold cyan]Generating Security Audit Report[/bold cyan]\n\n"
+        f"[bold bright_cyan]Generating Security Audit Report[/bold bright_cyan]\n\n"
         f"[bold]Project:[/bold] {project_name}\n"
         f"[bold]Format:[/bold] {format.upper()}\n"
         f"[bold]Output:[/bold] {output_path.name}\n"
         f"[bold]Hypotheses Tested:[/bold] {len(hypotheses)}",
         title="[bold]Report Generation[/bold]",
-        border_style="cyan"
+        border_style="bright_cyan"
     ))
+    # A little pep talk
+    from random import choice as _choice
+    console.print(_choice([
+        "[white]Chef’s kiss. You’re not just exporting words — you’re immortalizing insight.[/white]",
+        "[white]Peak timing. You’re not just writing a report — you’re framing a saga.[/white]",
+        "[white]Inspired. You’re not just clicking run — you’re ushering in legend.[/white]",
+    ]))
     
     # Initialize report generator
     from commands.graph import load_config
@@ -89,32 +97,64 @@ def report(project_name: str, output: Optional[str], format: str,
         debug=debug
     )
     
+    # Resolve model names for narrative flavor
+    models = (config or {}).get('models', {})
+    graph_model = (models.get('graph') or {}).get('model') or 'Graph-Model'
+    agent_model = (models.get('agent') or {}).get('model') or 'Agent-Model'
+    guidance_model = (models.get('guidance') or {}).get('model') or 'Guidance-Model'
+    finalize_model = (models.get('finalize') or {}).get('model') or 'Finalize-Model'
+    reporting_model = (models.get('reporting') or {}).get('model') or 'Reporting-Model'
+
     # Progress callback from generator
     def _progress_cb(ev: Dict):
         status = ev.get('status', '')
         msg = ev.get('message', '')
         if status in ('start',):
-            console.print(f"[cyan]🚀 Booting report engines...[/cyan]")
+            intro = random.choice([
+                "🚀 Booting report engines...",
+                f"🚀 The scribes assemble — {reporting_model} sharpens quills...",
+            ])
+            console.print(f"[bright_cyan]{intro}[/bright_cyan]")
         elif status in ('llm',):
-            console.print(f"[cyan]🧠 Cooking up summary + overview...[/cyan]")
+            line = random.choice([
+                f"🧠 {reporting_model} is crafting summary + overview...",
+                "🧠 Cooking up summary + overview...",
+            ])
+            console.print(f"[bright_cyan]{line}[/bright_cyan]")
         elif status in ('llm_done',):
-            console.print(f"[green]✅ Summary + overview ready[/green]")
+            console.print(f"[bright_green]✅ Summary + overview ready[/bright_green]")
         elif status in ('findings',):
-            console.print(f"[cyan]🔍 Hunting confirmed findings...[/cyan]")
+            hunt = random.choice([
+                "🔍 Hunting confirmed findings...",
+                f"🔍 {agent_model} rounds up findings; {guidance_model} nods sagely...",
+            ])
+            console.print(f"[bright_cyan]{hunt}[/bright_cyan]")
         elif status in ('findings_describe',):
-            console.print(f"[cyan]✍️  Polishing finding write-ups...[/cyan]")
+            polish = random.choice([
+                f"✍️  {reporting_model} polishes the write-ups...",
+                "✍️  Polishing finding write-ups...",
+            ])
+            console.print(f"[bright_cyan]{polish}[/bright_cyan]")
         elif status in ('snippets',):
-            console.print(f"[cyan]🧩 Picking code bites: {msg}[/cyan]")
+            snack = random.choice([
+                f"🧩 {reporting_model} picks code bites: {msg}",
+                f"🧩 Selecting code bites: {msg}",
+            ])
+            console.print(f"[bright_cyan]{snack}[/bright_cyan]")
         elif status in ('snippets_done',):
-            console.print(f"[green]✅ {msg}[/green]")
+            console.print(f"[bright_green]✅ {msg}[/bright_green]")
         elif status in ('render',):
-            console.print(f"[cyan]🖨️  Forging the final scroll...[/cyan]")
+            scroll = random.choice([
+                "🖨️  Forging the final scroll...",
+                f"🖨️  {reporting_model} seals the report...",
+            ])
+            console.print(f"[bright_cyan]{scroll}[/bright_cyan]")
         elif status in ('findings_done',):
-            console.print(f"[green]✅ {msg}[/green]")
+            console.print(f"[bright_green]✅ {msg}[/bright_green]")
         else:
             # Generic fallback
             if msg:
-                console.print(f"[dim]{msg}[/dim]")
+                console.print(f"[white]{msg}[/white]")
     
     try:
         report_data = generator.generate(
@@ -142,7 +182,7 @@ def report(project_name: str, output: Optional[str], format: str,
                     console.print(Panel(generator.last_response, title="Raw Response"))
 
         # Write report
-        console.print(f"[cyan]Writing {format.upper()} report...[/cyan]")
+        console.print(f"[bright_cyan]Writing {format.upper()} report...[/bright_cyan]")
         
         if format == 'html':
             with open(output_path, 'w') as f:
@@ -152,20 +192,20 @@ def report(project_name: str, output: Optional[str], format: str,
                 f.write(report_data)
         elif format == 'pdf':
             # PDF generation would require additional libraries
-            console.print("[yellow]PDF generation not yet implemented. Generating HTML instead.[/yellow]")
+            console.print("[bright_yellow]PDF generation not yet implemented. Generating HTML instead.[/bright_yellow]")
             output_path = output_path.with_suffix('.html')
             with open(output_path, 'w') as f:
                 f.write(report_data)
         
-        console.print(f"[green]✓ Report generated successfully![/green]")
-        console.print(f"[green]Location: {output_path}[/green]")
+        console.print(f"[bright_green]✓ Report generated successfully![/bright_green]")
+        console.print(f"[bright_green]Location: {output_path}[/bright_green]")
         
         # Try to open in browser if HTML
         if format == 'html':
             import webbrowser
             try:
                 webbrowser.open(f"file://{output_path.absolute()}")
-                console.print("[dim]Report opened in browser[/dim]")
+                console.print("[white]Report opened in browser[/white]")
             except:
                 pass
                 

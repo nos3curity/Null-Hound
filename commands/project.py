@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Optional, Dict, List
 import click
 from rich.console import Console
+import random
 from rich.table import Table
 from rich.panel import Panel
 from rich.prompt import Confirm
@@ -259,14 +260,19 @@ def create(name: str, source_path: str, description: Optional[str], auto_name: b
     try:
         config = manager.create_project(name, source_path, description, auto_name)
         
+        flair = random.choice([
+            "🎉 Fresh canvas ready!",
+            "🧰 Workshop set up!",
+            "🗂️  New case file opened!",
+        ])
         console.print(Panel(
-            f"[green]✓ Project created successfully![/green]\n\n"
+            f"[bright_green]✓ Project created[/bright_green] — {flair}\n\n"
             f"[bold]Name:[/bold] {config['name']}\n"
             f"[bold]Source:[/bold] {config['source_path']}\n"
             f"[bold]Description:[/bold] {config['description']}\n\n"
             f"[dim]Project directory: {manager.projects_dir / config['name']}[/dim]",
-            title="[bold cyan]New Project[/bold cyan]",
-            border_style="green"
+            title="[bold bright_cyan]New Project[/bold bright_cyan]",
+            border_style="bright_green"
         ))
         
         # Get the actual command used to run this script
@@ -300,7 +306,10 @@ def list_projects_cmd(output_json: bool):
         return
     
     if not projects:
-        console.print("[yellow]No projects found.[/yellow]")
+        console.print(random.choice([
+            "[bright_yellow]No projects yet — spotless desk![/bright_yellow]",
+            "[bright_yellow]No projects found. Time to spin one up![/bright_yellow]",
+        ]))
         console.print("\n[cyan]Create a project with:[/cyan]")
         # Get the actual command used to run this script
         cli_cmd = os.path.basename(sys.argv[0]) if sys.argv else "hound"
@@ -313,7 +322,7 @@ def list_projects_cmd(output_json: bool):
         return
     
     # Create table
-    table = Table(title="[bold cyan]Hound Projects[/bold cyan]")
+    table = Table(title="[bold bright_cyan]Hound Projects[/bold bright_cyan]")
     table.add_column("Name", style="cyan")
     table.add_column("Source", style="white")
     table.add_column("Description", style="dim")
@@ -335,7 +344,12 @@ def list_projects_cmd(output_json: bool):
         )
     
     console.print(table)
-    console.print(f"\n[dim]Total projects: {len(projects)}[/dim]")
+    from random import choice as _choice
+    console.print(_choice([
+        f"\n[white]Curator mode: you’re not just listing {len(projects)} projects — you’re surveying a gallery.[/white]",
+        f"\n[white]Elite selection — {len(projects)} worthy quests await.[/white]",
+        f"\n[white]{len(projects)} projects — and your taste is immaculate.[/white]",
+    ]))
 
 
 @project.command()
@@ -372,8 +386,9 @@ def info(name: str):
             pass
     
     # Display info
+    tag = random.choice(["📁", "🗂️", "📜"]) 
     console.print(Panel(
-        f"[bold cyan]{project['name']}[/bold cyan]\n\n"
+        f"[bold bright_cyan]{tag} {project['name']}[/bold bright_cyan]\n\n"
         f"[bold]Source:[/bold] {project['source_path']}\n"
         f"[bold]Description:[/bold] {project['description']}\n"
         f"[bold]Created:[/bold] {project['created_at']}\n"
@@ -387,8 +402,8 @@ def info(name: str):
         f" ([green]{hypothesis_stats['confirmed']} confirmed[/green],"
         f" [yellow]{hypothesis_stats['high_confidence']} high-confidence[/yellow])\n\n"
         f"[dim]Project directory: {project_dir}[/dim]",
-        title="[bold]Project Information[/bold]",
-        border_style="cyan"
+        title="[bold bright_cyan]Project Information[/bold bright_cyan]",
+        border_style="bright_cyan"
     ))
     
     if graphs_files:
@@ -454,7 +469,11 @@ def delete(name: str, force: bool):
     manager = ProjectManager()
     
     if manager.delete_project(name, force):
-        console.print(f"[green]✓ Project '{name}' deleted successfully.[/green]")
+        console.print(f"[bright_green]✓ Project '{name}' deleted successfully.[/bright_green]")
+        console.print(random.choice([
+            "[white]Clean slate energy — you’re not just deleting, you’re decluttering destiny.[/white]",
+            "[white]Poised and decisive — you’re not just pruning, you’re shaping the bonsai.[/white]",
+        ]))
     else:
         console.print(f"[red]Failed to delete project '{name}'.[/red]")
         raise click.Exit(1)
@@ -602,6 +621,11 @@ def hypotheses(name: str, details: bool = False):
             )
     
     console.print(table)
+    from random import choice as _choice
+    console.print(_choice([
+        "[dim]Curiosity weaponized — you’re not just listing hypotheses, you’re mapping the unknown.[/dim]",
+        "[dim]Impeccable — you’re not just browsing, you’re conducting triage like a maestro.[/dim]",
+    ]))
     
     # Summary stats
     metadata = hyp_data.get("metadata", {})

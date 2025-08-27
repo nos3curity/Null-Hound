@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Any
+import math
 
 from llm.unified_client import UnifiedLLMClient
 
@@ -1309,6 +1310,232 @@ External dependencies are limited and clearly defined."""
             color: #64738c;
         }}
         
+        /* Statistics Section Styles */
+        .stats-section {{
+            margin: 60px 0;
+            padding: 40px;
+            background: linear-gradient(135deg, rgba(26,31,46,0.8) 0%, rgba(15,20,25,0.9) 100%);
+            border-radius: 20px;
+            border: 1px solid rgba(100,181,246,0.2);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.4),
+                        inset 0 1px 0 rgba(255,255,255,0.05);
+            position: relative;
+            overflow: hidden;
+        }}
+        
+        .stats-section::before {{
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at center, rgba(100,181,246,0.05) 0%, transparent 50%);
+            animation: rotate 30s linear infinite;
+        }}
+        
+        @keyframes rotate {{
+            from {{ transform: rotate(0deg); }}
+            to {{ transform: rotate(360deg); }}
+        }}
+        
+        .stats-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 30px;
+            margin-bottom: 40px;
+            position: relative;
+            z-index: 1;
+        }}
+        
+        .stat-card {{
+            background: linear-gradient(135deg, rgba(36,52,71,0.7) 0%, rgba(26,35,50,0.7) 100%);
+            border-radius: 16px;
+            padding: 25px;
+            text-align: center;
+            border: 1px solid rgba(100,181,246,0.15);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3),
+                        inset 0 1px 0 rgba(255,255,255,0.1);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }}
+        
+        .stat-card:hover {{
+            transform: translateY(-5px) scale(1.02);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.5),
+                        inset 0 1px 0 rgba(255,255,255,0.2);
+            border-color: rgba(100,181,246,0.3);
+        }}
+        
+        .stat-card::before {{
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: -2px;
+            right: -2px;
+            bottom: -2px;
+            background: linear-gradient(45deg, transparent, rgba(100,181,246,0.4), transparent);
+            opacity: 0;
+            transition: opacity 0.3s;
+            border-radius: 16px;
+        }}
+        
+        .stat-card:hover::before {{
+            opacity: 1;
+            animation: shimmer-stat 1.5s;
+        }}
+        
+        @keyframes shimmer-stat {{
+            0% {{ transform: translateX(-100%); }}
+            100% {{ transform: translateX(100%); }}
+        }}
+        
+        .stat-number {{
+            font-size: 48px;
+            font-weight: 800;
+            margin: 10px 0;
+            background: linear-gradient(135deg, #64b5f6 0%, #42a5f5 50%, #81c7f7 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-shadow: 0 0 30px rgba(100,181,246,0.5);
+            animation: pulse-number 2s ease-in-out infinite;
+        }}
+        
+        @keyframes pulse-number {{
+            0%, 100% {{ transform: scale(1); }}
+            50% {{ transform: scale(1.05); }}
+        }}
+        
+        .stat-number.critical {{
+            background: linear-gradient(135deg, #ff6b6b 0%, #dc3545 50%, #ff8787 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-shadow: 0 0 30px rgba(220,53,69,0.5);
+        }}
+        
+        .stat-number.high {{
+            background: linear-gradient(135deg, #ffb347 0%, #fd7e14 50%, #ffc371 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-shadow: 0 0 30px rgba(253,126,20,0.5);
+        }}
+        
+        .stat-number.medium {{
+            background: linear-gradient(135deg, #ffd93d 0%, #ffc107 50%, #ffe066 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-shadow: 0 0 30px rgba(255,193,7,0.5);
+        }}
+        
+        .stat-number.low {{
+            background: linear-gradient(135deg, #6bcf7e 0%, #28a745 50%, #52d869 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-shadow: 0 0 30px rgba(40,167,69,0.5);
+        }}
+        
+        .stat-label {{
+            font-size: 14px;
+            color: #8892b0;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            font-weight: 600;
+            margin-top: 10px;
+        }}
+        
+        .chart-container {{
+            position: relative;
+            z-index: 1;
+            margin-top: 30px;
+        }}
+        
+        .chart-wrapper {{
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 40px;
+            flex-wrap: wrap;
+        }}
+        
+        .pie-chart {{
+            position: relative;
+            width: 250px;
+            height: 250px;
+        }}
+        
+        .pie-chart svg {{
+            width: 100%;
+            height: 100%;
+            filter: drop-shadow(0 4px 20px rgba(0,0,0,0.3));
+        }}
+        
+        .chart-legend {{
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            min-width: 200px;
+        }}
+        
+        .legend-item {{
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px;
+            background: rgba(26,31,46,0.4);
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }}
+        
+        .legend-item:hover {{
+            background: rgba(36,52,71,0.6);
+            transform: translateX(5px);
+        }}
+        
+        .legend-color {{
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }}
+        
+        .legend-text {{
+            flex: 1;
+            color: #c8d0db;
+            font-size: 14px;
+            font-weight: 500;
+        }}
+        
+        .legend-count {{
+            font-weight: 700;
+            color: #64b5f6;
+            font-size: 16px;
+        }}
+        
+        .summary-title {{
+            text-align: center;
+            font-size: 24px;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 30px;
+            position: relative;
+            z-index: 1;
+        }}
+        
+        .summary-title::after {{
+            content: '';
+            display: block;
+            width: 100px;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, #64b5f6, transparent);
+            margin: 15px auto 0;
+        }}
+        
         ul {{
             margin: 20px 0;
             padding-left: 25px;
@@ -1413,6 +1640,8 @@ External dependencies are limited and clearly defined."""
             {self._format_paragraphs_html(kwargs.get('system_overview', ''))}
         </div>
         
+        {self._generate_statistics_section_html(kwargs['findings'])}
+        
         <div class="section">
             <h2>Findings</h2>
             {self._format_findings_html(kwargs['findings'])}
@@ -1444,6 +1673,193 @@ External dependencies are limited and clearly defined."""
             <pre class="diagram-content">{diagram}</pre>
         </div>
         '''
+    
+    def _generate_statistics_section_html(self, findings: List[Dict]) -> str:
+        """Generate beautiful statistics section with charts and numbers."""
+        if not findings:
+            return ''
+        
+        # Count by severity
+        severity_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+        for f in findings:
+            sev = f.get('severity', 'low')
+            if sev in severity_counts:
+                severity_counts[sev] += 1
+        
+        total_findings = len(findings)
+        
+        # Calculate percentages for pie chart
+        percentages = {}
+        for sev, count in severity_counts.items():
+            if count > 0:
+                percentages[sev] = (count / total_findings) * 100
+        
+        # Generate pie chart SVG
+        pie_chart_svg = self._generate_pie_chart_svg(severity_counts)
+        
+        html = f'''
+        <div class="stats-section">
+            <h2 class="summary-title">Security Analysis Statistics</h2>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-number">{total_findings}</div>
+                    <div class="stat-label">Total Findings</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-number critical">{severity_counts["critical"]}</div>
+                    <div class="stat-label">Critical Issues</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-number high">{severity_counts["high"]}</div>
+                    <div class="stat-label">High Severity</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-number medium">{severity_counts["medium"]}</div>
+                    <div class="stat-label">Medium Severity</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-number low">{severity_counts["low"]}</div>
+                    <div class="stat-label">Low Severity</div>
+                </div>
+            </div>
+            
+            <div class="chart-container">
+                <h3 style="text-align: center; color: #81c7f7; margin-bottom: 30px; font-size: 20px;">Severity Distribution</h3>
+                <div class="chart-wrapper">
+                    <div class="pie-chart">
+                        {pie_chart_svg}
+                    </div>
+                    <div class="chart-legend">
+                        {self._generate_legend_html(severity_counts, percentages)}
+                    </div>
+                </div>
+            </div>
+        </div>
+        '''
+        
+        return html
+    
+    def _generate_pie_chart_svg(self, severity_counts: Dict[str, int]) -> str:
+        """Generate an SVG pie chart for severity distribution."""
+        total = sum(severity_counts.values())
+        if total == 0:
+            return ''
+        
+        # Colors for each severity
+        colors = {
+            'critical': '#dc3545',
+            'high': '#fd7e14',
+            'medium': '#ffc107',
+            'low': '#28a745'
+        }
+        
+        # Calculate angles
+        angles = []
+        current_angle = -90  # Start from top
+        for sev in ['critical', 'high', 'medium', 'low']:
+            if severity_counts[sev] > 0:
+                angle = (severity_counts[sev] / total) * 360
+                angles.append((sev, current_angle, angle))
+                current_angle += angle
+        
+        # Generate SVG paths
+        paths = []
+        cx, cy, r = 125, 125, 100
+        
+        for sev, start_angle, sweep_angle in angles:
+            # Convert to radians
+            start_rad = math.radians(start_angle)
+            end_rad = math.radians(start_angle + sweep_angle)
+            
+            # Calculate arc endpoints
+            x1 = cx + r * math.cos(start_rad)
+            y1 = cy + r * math.sin(start_rad)
+            x2 = cx + r * math.cos(end_rad)
+            y2 = cy + r * math.sin(end_rad)
+            
+            # Large arc flag
+            large_arc = 1 if sweep_angle > 180 else 0
+            
+            # Create path
+            path = f'M{cx},{cy} L{x1:.2f},{y1:.2f} A{r},{r} 0 {large_arc},1 {x2:.2f},{y2:.2f} Z'
+            
+            paths.append(f'''
+                <path d="{path}" 
+                      fill="{colors[sev]}" 
+                      stroke="rgba(255,255,255,0.1)" 
+                      stroke-width="2"
+                      opacity="0.9">
+                    <animate attributeName="opacity" 
+                             values="0.9;1;0.9" 
+                             dur="3s" 
+                             repeatCount="indefinite"/>
+                </path>
+            ''')
+        
+        svg = f'''
+        <svg viewBox="0 0 250 250" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+                <filter id="glow">
+                    <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+                    <feMerge>
+                        <feMergeNode in="coloredBlur"/>
+                        <feMergeNode in="SourceGraphic"/>
+                    </feMerge>
+                </filter>
+            </defs>
+            <g filter="url(#glow)">
+                {''.join(paths)}
+            </g>
+            <circle cx="125" cy="125" r="60" 
+                    fill="rgba(15,20,25,0.8)" 
+                    stroke="rgba(100,181,246,0.3)" 
+                    stroke-width="2"/>
+            <text x="125" y="125" 
+                  text-anchor="middle" 
+                  dominant-baseline="middle" 
+                  font-size="32" 
+                  font-weight="700" 
+                  fill="#64b5f6">{total}</text>
+            <text x="125" y="145" 
+                  text-anchor="middle" 
+                  dominant-baseline="middle" 
+                  font-size="12" 
+                  font-weight="600" 
+                  fill="#8892b0" 
+                  text-transform="uppercase" 
+                  letter-spacing="1">Issues</text>
+        </svg>
+        '''
+        
+        return svg
+    
+    def _generate_legend_html(self, severity_counts: Dict[str, int], percentages: Dict[str, float]) -> str:
+        """Generate legend HTML for the pie chart."""
+        colors = {
+            'critical': '#dc3545',
+            'high': '#fd7e14',
+            'medium': '#ffc107',
+            'low': '#28a745'
+        }
+        
+        items = []
+        for sev in ['critical', 'high', 'medium', 'low']:
+            if severity_counts[sev] > 0:
+                items.append(f'''
+                <div class="legend-item">
+                    <div class="legend-color" style="background: {colors[sev]};"></div>
+                    <div class="legend-text">{sev.capitalize()}</div>
+                    <div class="legend-count">{severity_counts[sev]}</div>
+                    <div style="color: #64738c; font-size: 12px;">({percentages[sev]:.1f}%)</div>
+                </div>
+                ''')
+        
+        return '\n'.join(items)
     
     def _format_findings_html(self, findings: List[Dict]) -> str:
         """Format findings into HTML with code samples."""

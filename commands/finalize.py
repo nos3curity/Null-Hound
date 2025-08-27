@@ -13,6 +13,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
+import random
 
 from analysis.concurrent_knowledge import HypothesisStore
 from analysis.finalization_prefilter import pre_filter_hypotheses, apply_filter_decisions
@@ -104,10 +105,17 @@ def finalize(project_name: str, threshold: float, skip_filter: bool, debug: bool
         f"Above threshold: {len(above_threshold)}\n"
         f"Pre-filtered: [red]{len(filtered_out)} removed[/red]\n"
         f"To review: [green]{len(candidates)} hypotheses[/green]",
-        title="Finalization Summary",
+        title="[bold bright_cyan]Finalization Summary[/bold bright_cyan]",
         expand=False
     )
     console.print(summary_panel)
+    # Compliment the timing
+    from random import choice as _choice
+    console.print(_choice([
+        "[white]Legendary timing — you’re not just reviewing, you’re enshrining truth.[/white]",
+        "[white]Chef’s kiss — you’re not just closing loops, you’re tightening the weave.[/white]",
+        "[white]A poet’s judgment — you’re not just deciding, you’re defining canon.[/white]",
+    ]))
     
     if not candidates and not filtered_out:
         console.print("\n[yellow]No hypotheses meet the threshold criteria.[/yellow]")
@@ -182,7 +190,10 @@ def finalize(project_name: str, threshold: float, skip_filter: bool, debug: bool
         console.print("\n[green]✓ Pre-filtering complete. No hypotheses require manual review.[/green]")
         sys.exit(0)
     
-    console.print(f"\n[bold cyan]Initializing finalization process...[/bold cyan]")
+    # Narrative model names
+    models = (config or {}).get('models', {})
+    finalize_model = (models.get('finalize') or {}).get('model') or 'Finalize-Model'
+    console.print(f"\n[bold bright_cyan]{random.choice(['🧙 Sage', '🧠 Reviewer'])} {finalize_model} enters the chamber...[/bold bright_cyan]")
     
     # Simple structured output for verdict
     @dataclass
@@ -202,7 +213,12 @@ def finalize(project_name: str, threshold: float, skip_filter: bool, debug: bool
     ) as progress:
         
         for idx, (hid, hypothesis) in enumerate(candidates, 1):
-            task_desc = f"[{idx}/{len(candidates)}] Reviewing: {hypothesis.get('title', '')[:50]}..."
+            flavor = random.choice([
+                "weighs the evidence",
+                "consults the scrolls",
+                "ponders the claim",
+            ])
+            task_desc = f"[{idx}/{len(candidates)}] {finalize_model} {flavor}: {hypothesis.get('title', '')[:50]}..."
             task = progress.add_task(task_desc, total=1)
             
             try:

@@ -9,6 +9,7 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from analysis.graph_builder import GraphBuilder
+import random
 from llm.client import LLMClient
 from pydantic import BaseModel, Field
 from typing import List as ListType
@@ -103,7 +104,12 @@ def build_custom_graph(
     """
     
     try:
+        # Compliment the creative spark
         console.print(f"[cyan]Creating custom graph:[/cyan] {description}")
+        console.print(random.choice([
+            "[white]Chef’s kiss — you’re not just customizing, you’re art-directing the analysis.[/white]",
+            "[white]Inspired — you’re not just adding a graph, you’re commissioning a masterpiece.[/white]",
+        ]))
         spec = llm_agent.parse(
             system=system_prompt,
             user=user_prompt,
@@ -158,6 +164,10 @@ def build_custom_graph(
     
     # Run the standard build process with the forced graph
     # The focus will guide the LLM to build the right graph
+    console.print(random.choice([
+        "[white]Elite move — you’re not just structuring data, you’re composing a symphony of nodes.[/white]",
+        "[white]Savvy — you’re not just clicking run, you’re architecting cognition.[/white]",
+    ]))
     builder.build(
         manifest_dir=manifest_dir,
         output_dir=graphs_dir,
