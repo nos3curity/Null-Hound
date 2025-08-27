@@ -5,3 +5,5 @@ __pycache__
 .hound_cache
 graph_results
 config.yaml
+*.egg-info/
+*.egg
