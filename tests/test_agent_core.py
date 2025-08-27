@@ -162,8 +162,9 @@ class TestAgentGraphLoading(unittest.TestCase):
         
         self.assertEqual(result["status"], "success")
         self.assertIn("Loaded AuthorizationRolesActions", result["summary"])
-        self.assertEqual(result["nodes_count"], 3)
-        self.assertEqual(result["edges_count"], 2)
+        # Check that summary contains node and edge counts
+        self.assertIn("3 nodes", result["summary"])
+        self.assertIn("2 edges", result["summary"])
         
         # Verify graph is in loaded data
         self.assertIn("AuthorizationRolesActions", agent.loaded_data["graphs"])
@@ -240,7 +241,8 @@ class TestAgentGraphLoading(unittest.TestCase):
         # Load the graph in new agent
         result = agent2._load_graph("DataFlow")
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["nodes_count"], 4)  # Should have the new node
+        # Check that summary contains the updated node count
+        self.assertIn("4 nodes", result["summary"])  # Should have the new node
     
     def test_concurrent_graph_access(self):
         """Test that concurrent access to graphs works correctly."""
@@ -421,11 +423,12 @@ class TestAgentNodeOperations(unittest.TestCase):
         # Load the test graph first
         agent._load_graph("TestGraph")
         
-        # Load nodes
-        result = agent._load_nodes(["node1", "node2"])
+        # Load nodes - now requires graph_name parameter
+        result = agent._load_nodes(["node1", "node2"], graph_name="TestGraph")
         
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["nodes_loaded"], 2)
+        # Check that summary mentions loading 2 nodes
+        self.assertIn("Loaded 2 nodes", result["summary"])
         self.assertIn("node1", agent.loaded_data["nodes"])
         self.assertIn("node2", agent.loaded_data["nodes"])
     
@@ -434,8 +437,8 @@ class TestAgentNodeOperations(unittest.TestCase):
         agent = self.create_agent()
         
         # TestGraph is auto-loaded as system graph since it's the only one
-        # Load the node first
-        agent._load_nodes(["node2"])
+        # Load the node first - now requires graph_name parameter
+        agent._load_nodes(["node2"], graph_name="TestGraph")
         
         # Update node
         params = {

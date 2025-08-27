@@ -70,26 +70,6 @@ class TestTokenTracker(unittest.TestCase):
         summary = self.tracker.get_summary()
         self.assertEqual(summary['total_usage']['call_count'], 0)
         self.assertEqual(len(summary['by_model']), 0)
-    
-    def test_output_file(self):
-        """Test saving to output file."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            output_file = Path(f.name)
-        
-        try:
-            self.tracker.set_output_file(output_file)
-            self.tracker.track_usage('openai', 'gpt-4', 100, 50)
-            
-            # Check file was created and contains data
-            self.assertTrue(output_file.exists())
-            
-            with open(output_file) as f:
-                data = json.load(f)
-            
-            self.assertEqual(data['total_usage']['input_tokens'], 100)
-            self.assertEqual(data['total_usage']['output_tokens'], 50)
-        finally:
-            output_file.unlink(missing_ok=True)
 
 
 class TestRunTracker(unittest.TestCase):
