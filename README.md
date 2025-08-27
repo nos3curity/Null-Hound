@@ -24,6 +24,8 @@ Agents reason across abstract business logic and concrete code. They capture ass
 
 The workflow uses a junior/senior agent pattern. A fast exploration model gathers evidence and annotations; a stronger reasoning model designs the investigation and mints focused hypotheses. Hound persists graphs and evidence between runs, enabling cumulative audits and generating professional reports from confirmed findings.
 
+**Note that this is a research prototype that has only been tested on small codebases. It does not replace a human expert!**
+
 ### Key innovations
 
 - **Dynamic modeling** of any codebase, from small libraries to complex protocols  
