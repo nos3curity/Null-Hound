@@ -5,3 +5,9 @@ __pycache__
 .hound_cache
 graph_results
 config.yaml
+
+# Poetry
+poetry.lock
+
+# IDE
+.vscode/

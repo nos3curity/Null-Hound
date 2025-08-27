@@ -681,12 +681,16 @@ class AutonomousAgent:
         
         return '\n'.join(context_parts)
 
-    def _approx_tokens(self, text: str) -> int:
-        """Rough estimate of tokens from characters (~4 chars per token)."""
+    def _count_tokens(self, text: str) -> int:
+        """Count tokens using accurate tokenization when available."""
         try:
-            return max(1, len(text) // 4)
-        except Exception:
-            return 0
+            from llm.tokenization import count_tokens
+            return count_tokens(text, self.llm.provider_name, self.llm.model)
+        except Exception as e:
+            try:
+                return max(1, len(text) // 4)
+            except Exception:
+                return 0
 
     def _maybe_compress_history(self):
         """Compress older conversation into memory notes when near context limit.
@@ -706,10 +710,10 @@ class AutonomousAgent:
         compression_threshold = float(context_cfg.get('compression_threshold', 0.75))
         keep_recent = int(context_cfg.get('keep_recent_actions', 5))
         
-        # Calculate current context size
+        # Calculate current context size using accurate tokenization when available
         try:
             current_context = self._build_context()
-            current_tokens = self._approx_tokens(current_context)
+            current_tokens = self._count_tokens(current_context)
         except Exception:
             return
         
@@ -866,10 +870,10 @@ class AutonomousAgent:
         if graphs_cleared or nodes_cleared:
             print(f"[CONTEXT COMPRESSION] Cleared {graphs_cleared} old graphs and {nodes_cleared} old nodes from memory")
         
-        # Recalculate tokens after compression
+        # Recalculate tokens after compression using accurate counting
         try:
             new_context = self._build_context()
-            new_tokens = self._approx_tokens(new_context)
+            new_tokens = self._count_tokens(new_context)
             print(f"[CONTEXT COMPRESSION] New context size: {new_tokens}/{max_tokens} tokens ({new_tokens*100//max_tokens}% full)")
         except Exception:
             pass  # Don't fail if we can't calculate new size
