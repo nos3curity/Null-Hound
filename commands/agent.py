@@ -682,22 +682,39 @@ class AgentRunner:
         
         return True
     
-    def _graph_summary(self, max_nodes: int = 20) -> str:
-        """Create a compact summary of the system graph for planning."""
+    def _graph_summary(self) -> str:
+        """Create a compact summary of the system graph with annotations."""
         try:
             g = self.agent.loaded_data.get('system_graph', {}).get('data', {})
             nodes = g.get('nodes', [])
             edges = g.get('edges', [])
-            parts = [
-                f"Nodes: {len(nodes)}",
-                f"Edges: {len(edges)}"
-            ]
-            # List first N node labels/types
-            for n in nodes[:max_nodes]:
+            parts = [f"{len(nodes)} nodes, {len(edges)} edges\n"]
+            
+            # List all nodes compactly with inline annotations
+            for n in nodes:
                 nid = n.get('id', '')
                 lbl = n.get('label') or nid
-                typ = n.get('type', '')
-                parts.append(f"- {lbl} ({typ})")
+                typ = n.get('type', '')[:4]  # Abbreviate type
+                observations = n.get('observations', [])
+                assumptions = n.get('assumptions', [])
+                
+                # Build compact line
+                line = f"• {lbl} ({typ})"
+                
+                # Add inline annotations using abbreviated labels
+                annotations = []
+                if observations:
+                    obs_str = '; '.join(observations[:3])  # Limit to 3
+                    annotations.append(f"obs:{obs_str}")
+                if assumptions:
+                    assum_str = '; '.join(assumptions[:3])  # Limit to 3
+                    annotations.append(f"asm:{assum_str}")
+                
+                if annotations:
+                    line += f" [{' | '.join(annotations)}]"
+                    
+                parts.append(line)
+                    
             return "\n".join(parts)
         except Exception:
             return "(no graph summary available)"
@@ -749,79 +766,6 @@ class AgentRunner:
             completed_str +
             f"\n\nPlan the top {n} NEW investigations (avoid repeating completed ones)."
         )
-        def _heuristic_plan(k: int) -> List[object]:
-            """Deterministic planner from system graph contents."""
-            g = (self.agent.loaded_data.get('system_graph') or {}).get('data') or {}
-            nodes = g.get('nodes', []) or []
-            # Build a flat list of (label, type)
-            labels = []
-            for n in nodes:
-                lbl = n.get('label') or n.get('id') or ''
-                typ = (n.get('type') or '').lower()
-                if lbl:
-                    labels.append((str(lbl), typ))
-            # Topics with keywords
-            topics = [
-                ("Authorization and roles", ["auth", "role", "owner", "only", "admin", "access", "permission", "authority"], 9, "high"),
-                ("Initialization and ownership transfer", ["init", "initialize", "constructor", "instantiate", "owner", "transfer"], 8, "high"),
-                ("Token mint/burn and supply", ["mint", "burn", "supply", "token"], 8, "high"),
-                ("External calls and reentrancy", ["call", "transfer", "send", "reentr", "callback", "hook"], 7, "high"),
-                ("Signature verification and nonces", ["signature", "sign", "verify", "ecdsa", "ed25519", "nonce"], 7, "high"),
-                ("Oracles and pricing", ["oracle", "price", "feed"], 6, "medium"),
-                ("Withdrawals/escrow and limits", ["withdraw", "escrow", "redeem", "claim"], 6, "high"),
-                ("Pause/emergency stops", ["pause", "paused", "guardian"], 5, "medium"),
-            ]
-            scored = []
-            import re
-            for title, keys, base_prio, impact in topics:
-                score = 0
-                matches = []
-                for lbl, typ in labels:
-                    l = lbl.lower()
-                    if any(k in l for k in keys):
-                        score += 1
-                        matches.append(lbl)
-                if score > 0:
-                    goal = f"Review {title.lower()} (focus on components: {', '.join(matches[:3])})"
-                    item = type('Inv', (), {
-                        'goal': goal,
-                        'focus_areas': [title],
-                        'priority': min(10, base_prio + min(score, 3)),
-                        'reasoning': f"Graph indicates relevant components: {', '.join(matches[:5])}",
-                        'category': 'aspect',
-                        'expected_impact': impact,
-                    })()
-                    scored.append((item.priority, item))
-            # Fallback generic if nothing matched
-            if not scored:
-                generic_titles = [
-                    ("Authorization and roles", 9, "high"),
-                    ("Initialization and ownership", 8, "high"),
-                    ("Token mint/burn and supply", 8, "high"),
-                    ("External calls and reentrancy", 7, "high"),
-                    ("Signature verification and nonces", 7, "high"),
-                ]
-                for title, pr, impact in generic_titles[:k]:
-                    goal = f"Review {title.lower()}"
-                    scored.append((pr, type('Inv', (), {
-                        'goal': goal,
-                        'focus_areas': [title],
-                        'priority': pr,
-                        'reasoning': 'Default high-impact area',
-                        'category': 'aspect',
-                        'expected_impact': impact,
-                    })()))
-            # Sort by priority desc, take top k unique by goal
-            scored.sort(key=lambda x: -x[0])
-            uniq = []
-            seen = set()
-            for _, it in scored:
-                if it.goal not in seen:
-                    seen.add(it.goal)
-                    uniq.append(it)
-                if len(uniq) >= k:
-                    break
-            return uniq
 
         try:
             if self.debug:
@@ -836,12 +780,11 @@ class AgentRunner:
                 for i, item in enumerate(items[:3]):
                     console.print(f"[dim]  {i+1}. {getattr(item, 'goal', 'No goal')}[/dim]")
             
-            # THIS SHOULD NOT HAPPEN - LLM should return n investigations
+            # Fail if LLM cannot generate enough investigations
             if len(items) < n:
-                console.print(f"[red]ERROR: LLM only returned {len(items)} investigations, requested {n}![/red]")
-                console.print(f"[yellow]This indicates a problem with the LLM call. Falling back to heuristics.[/yellow]")
-                fill = _heuristic_plan(n - len(items))
-                items.extend(fill)
+                error_msg = f"Failed to generate investigation plan: LLM only returned {len(items)} investigations, requested {n}"
+                console.print(f"[red]ERROR: {error_msg}[/red]")
+                raise RuntimeError(error_msg)
             # Filter out already completed investigations
             filtered_items = []
             for item in items:
@@ -858,38 +801,21 @@ class AgentRunner:
             # Sort by priority desc, then by goal
             filtered_items.sort(key=lambda x: (-(getattr(x, 'priority', 0) or 0), getattr(x, 'goal', '')))
             
-            # If we filtered too many, get more from heuristics
+            # If we filtered too many due to duplicates, fail the analysis
             if len(filtered_items) < n:
-                extra = _heuristic_plan(n * 2)  # Get extra to filter from
-                # Get existing goals to avoid duplicates
-                existing_goals = {getattr(item, 'goal', '').lower() for item in filtered_items}
-                
-                for item in extra:
-                    goal = getattr(item, 'goal', '')
-                    # Check if already in filtered items
-                    if goal.lower() in existing_goals:
-                        continue
-                    # Check if already completed
-                    is_duplicate = False
-                    for completed in self.completed_investigations:
-                        if goal.lower() in completed.lower() or completed.lower() in goal.lower():
-                            is_duplicate = True
-                            break
-                    if not is_duplicate:
-                        filtered_items.append(item)
-                        existing_goals.add(goal.lower())
-                        if len(filtered_items) >= n:
-                            break
+                error_msg = f"Cannot generate enough unique investigations: only {len(filtered_items)} unique investigations available after filtering duplicates (requested {n})"
+                console.print(f"[red]ERROR: {error_msg}[/red]")
+                console.print("[yellow]Consider reviewing fewer investigations or starting a new analysis session.[/yellow]")
+                raise RuntimeError(error_msg)
             
             return filtered_items[:n]
         except Exception as e:
-            console.print(f"[red]Error in LLM planning: {str(e)}[/red]")
-            console.print("[yellow]Falling back to heuristic planning[/yellow]")
+            console.print(f"[red]Error in investigation planning: {str(e)}[/red]")
             if self.debug:
                 import traceback
                 console.print(f"[dim]{traceback.format_exc()}[/dim]")
-            # Robust fallback: always return n items
-            return _heuristic_plan(n)
+            # Re-raise the exception to fail the analysis
+            raise
 
     def _render_checklist(self, items: List[object], completed_index: int = -1):
         """Render a simple checklist; items up to completed_index are checked."""

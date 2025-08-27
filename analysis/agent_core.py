@@ -490,12 +490,16 @@ class AutonomousAgent:
                 # Make node IDs stand out more
                 lines.append(f"  {size_indicator} [{node_id}] → {node_label} ({node_type})")
                 
-                # Show top 3 observations
+                # Show annotations inline for maximum compactness
                 observations = node.get('observations', [])
+                assumptions = node.get('assumptions', [])
+                
+                # Collect annotation strings
+                annots = []
                 if observations:
                     sorted_obs = sorted(observations, 
                                       key=lambda x: x.get('confidence', 1.0) if isinstance(x, dict) else 1.0, 
-                                      reverse=True)[:3]
+                                      reverse=True)[:2]  # Reduced to 2 for compactness
                     obs_strs = []
                     for obs in sorted_obs:
                         if isinstance(obs, dict):
@@ -504,14 +508,12 @@ class AutonomousAgent:
                         else:
                             obs_strs.append(str(obs))
                     if obs_strs:
-                        lines.append(f"    obs: {'; '.join(obs_strs)}")
+                        annots.append(f"obs:{'; '.join(obs_strs)}")
                 
-                # Show top 3 assumptions
-                assumptions = node.get('assumptions', [])
                 if assumptions:
                     sorted_assum = sorted(assumptions,
                                         key=lambda x: x.get('confidence', 0.5) if isinstance(x, dict) else 0.5,
-                                        reverse=True)[:3]
+                                        reverse=True)[:2]  # Reduced to 2 for compactness
                     assum_strs = []
                     for assum in sorted_assum:
                         if isinstance(assum, dict):
@@ -520,7 +522,11 @@ class AutonomousAgent:
                         else:
                             assum_strs.append(str(assum))
                     if assum_strs:
-                        lines.append(f"    assume: {'; '.join(assum_strs)}")
+                        annots.append(f"asm:{'; '.join(assum_strs)}")
+                
+                # Add annotations inline if present
+                if annots:
+                    lines.append(f"    [{' | '.join(annots)}]")
         
         # Show edge summary
         if edges:
@@ -538,18 +544,23 @@ class AutonomousAgent:
                 src = edge.get('source_id') or edge.get('source') or edge.get('src')
                 dst = edge.get('target_id') or edge.get('target') or edge.get('dst')
                 etype = edge.get('type', 'rel')
-                lines.append(f"  {etype} {src}->{dst}")
+                # Build edge line with inline annotations
+                edge_line = f"  {etype} {src}->{dst}"
                 
-                # Show edge observations/assumptions if present
+                # Show edge observations/assumptions inline for compactness
                 edge_obs = edge.get('observations', [])
                 edge_assum = edge.get('assumptions', [])
-                if edge_obs or edge_assum:
-                    if edge_obs:
-                        obs_str = '; '.join(str(o) for o in edge_obs[:2])
-                        lines.append(f"    obs: {obs_str}")
-                    if edge_assum:
-                        assum_str = '; '.join(str(a) for a in edge_assum[:2])
-                        lines.append(f"    assume: {assum_str}")
+                edge_annots = []
+                if edge_obs:
+                    obs_str = '; '.join(str(o) for o in edge_obs[:2])
+                    edge_annots.append(f"obs:{obs_str}")
+                if edge_assum:
+                    assum_str = '; '.join(str(a) for a in edge_assum[:2])
+                    edge_annots.append(f"asm:{assum_str}")
+                
+                if edge_annots:
+                    edge_line += f" [{' | '.join(edge_annots)}]"
+                lines.append(edge_line)
             
             if len(edges) > 50:
                 lines.append(f"  ... and {len(edges) - 50} more edges")
