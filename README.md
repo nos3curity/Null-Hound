@@ -17,11 +17,11 @@
 
 ## Overview
 
-Hound is a security audit automation pipeline for AI‑assisted code review that mirrors how expert auditors think, learn, and collaborate. Instead of spamming shallow checks or relying on rigid parse trees, Hound builds living knowledge graphs of the system that accumulate evidence, adapt as understanding improves, and stay grounded in the exact code spans they reference. See the blog post for a deeper tour: https://muellerberndt.medium.com/unleashing-the-hound-how-ai-agents-find-deep-logic-bugs-in-any-codebase-64c2110e3a6f
+Hound is a security audit automation pipeline for AI‑assisted code review that mirrors how expert auditors think, learn, and collaborate. Instead of spamming shallow checks or relying on rigid parse trees, Hound builds living knowledge graphs of the system that accumulate evidence, adapt as understanding improves, and stay grounded in the exact code spans they reference. See the [blog post]( https://muellerberndt.medium.com/unleashing-the-hound-how-ai-agents-find-deep-logic-bugs-in-any-codebase-64c2110e3a6f) for a deeper tour.
 
-Agents reason across abstract business logic and concrete code. They capture assumptions, invariants, and observations into evolving graphs that link roles, functions, storage, value flows, and inter‑contract calls back to specific source locations. Two advantages drive results: cross‑granularity reasoning (relating paths, components, and system‑level invariants), and targeted retrieval of the exact snippets relevant to a question. For example, when checking “only s2Admin can delist listings,” Hound pulls the delist guard and its source, all call paths into delisting, any equivalent state transitions that realize delisting, and the storage writes/events that define the state change—so contradictions stand out early.
+Agents reason across abstract business logic and concrete code. They capture assumptions, invariants, and observations into evolving graphs that link roles, functions, storage, value flows, and inter‑contract calls back to specific source locations. Two advantages drive results: cross‑granularity reasoning (relating paths, components, and system‑level invariants), and targeted retrieval of the exact code snippets relevant to an investigation.
 
-The workflow uses a junior/senior agent pattern. A fast exploration model gathers evidence and annotations; a stronger reasoning model designs the investigation and mints focused, falsifiable hypotheses. Hound persists graphs and evidence between runs, enabling cumulative audits and generating professional reports from confirmed findings.
+The workflow uses a junior/senior agent pattern. A fast exploration model gathers evidence and annotations; a stronger reasoning model designs the investigation and mints focused hypotheses. Hound persists graphs and evidence between runs, enabling cumulative audits and generating professional reports from confirmed findings.
 
 ### Key innovations
 
