@@ -125,6 +125,112 @@ class ReportGenerator:
         
         return result.title()
     
+    def _extract_audit_models(self) -> Dict[str, List[str]]:
+        """Extract all models involved in the audit process from various sources."""
+        junior_models = set()
+        senior_models = set()
+        
+        # Extract models from hypotheses - they have junior_model and senior_model fields
+        for h in self.hypotheses.values():
+            if isinstance(h, dict):
+                # Check for junior_model field
+                junior = h.get('junior_model', '')
+                if junior:
+                    # Remove provider prefix if present (e.g., "OpenAI:gpt-5" -> "gpt-5")
+                    if ':' in junior:
+                        junior = junior.split(':', 1)[1]
+                    junior_models.add(junior)
+                
+                # Check for senior_model field
+                senior = h.get('senior_model', '')
+                if senior:
+                    # Remove provider prefix if present
+                    if ':' in senior:
+                        senior = senior.split(':', 1)[1]
+                    senior_models.add(senior)
+                
+                # Fallback to reported_by_model for legacy data
+                if not junior and not senior:
+                    model = h.get('reported_by_model', '')
+                    if model:
+                        # Remove provider prefix if present
+                        if ':' in model:
+                            model = model.split(':', 1)[1]
+                        junior_models.add(model)
+        
+        # Get models from config as final fallback
+        graph_model = self.config.get('models', {}).get('graph', {}).get('model', '')
+        agent_model = self.config.get('models', {}).get('agent', {}).get('model', '')
+        guidance_model = self.config.get('models', {}).get('guidance', {}).get('model', '')
+        finalize_model = self.config.get('models', {}).get('finalize', {}).get('model', '')
+        reporting_model = self.config.get('models', {}).get('reporting', {}).get('model', '')
+        
+        # Use config models if no models found
+        if not junior_models:
+            if graph_model:
+                junior_models.add(graph_model)
+            if agent_model and agent_model != graph_model:
+                junior_models.add(agent_model)
+        
+        if not senior_models and guidance_model:
+            senior_models.add(guidance_model)
+        
+        # Deduplicate graph and agent models if they're the same
+        junior_list = sorted(list(junior_models))
+        if len(junior_list) == 2 and junior_list[0] == junior_list[1]:
+            junior_list = [junior_list[0]]
+        
+        return {
+            'junior': [self._format_model_name(m) for m in junior_list if m],
+            'senior': [self._format_model_name(m) for m in sorted(senior_models) if m],
+            'finalize': self._format_model_name(finalize_model) if finalize_model else '',
+            'reporting': self._format_model_name(reporting_model) if reporting_model else ''
+        }
+    
+    def _generate_models_table_html(self) -> str:
+        """Generate an HTML table showing all models involved in the audit."""
+        models = self._extract_audit_models()
+        
+        # Combine junior models if they're duplicates
+        junior_display = ', '.join(models['junior']) if models['junior'] else 'Not specified'
+        senior_display = ', '.join(models['senior']) if models['senior'] else 'Not specified'
+        
+        table_html = """
+            <table style="width: 100%; margin: 20px 0; border-collapse: collapse; background: rgba(26,31,46,0.4); border: 1px solid rgba(136,146,176,0.2); border-radius: 8px; overflow: hidden;">
+                <thead>
+                    <tr style="background: rgba(100,181,246,0.1); border-bottom: 1px solid rgba(136,146,176,0.2);">
+                        <th style="padding: 12px 16px; text-align: left; color: #64b5f6; font-weight: 600;">Audit Role</th>
+                        <th style="padding: 12px 16px; text-align: left; color: #64b5f6; font-weight: 600;">Model(s)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr style="border-bottom: 1px solid rgba(136,146,176,0.1);">
+                        <td style="padding: 12px 16px; color: #8892b0;">Junior Auditors</td>
+                        <td style="padding: 12px 16px; color: #e8ecf1;">{}</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid rgba(136,146,176,0.1);">
+                        <td style="padding: 12px 16px; color: #8892b0;">Senior Auditor</td>
+                        <td style="padding: 12px 16px; color: #e8ecf1;">{}</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid rgba(136,146,176,0.1);">
+                        <td style="padding: 12px 16px; color: #8892b0;">Quality Assurance</td>
+                        <td style="padding: 12px 16px; color: #e8ecf1;">{}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 12px 16px; color: #8892b0;">Report Writing</td>
+                        <td style="padding: 12px 16px; color: #e8ecf1;">{}</td>
+                    </tr>
+                </tbody>
+            </table>
+        """.format(
+            junior_display,
+            senior_display,
+            models['finalize'] or 'Not specified',
+            models['reporting'] or 'Not specified'
+        )
+        
+        return table_html
+    
     def _format_model_name(self, model_name: str) -> str:
         """Format model names to be more natural.
         Examples:
@@ -148,6 +254,7 @@ class ReportGenerator:
             'gpt-3.5-turbo': 'GPT-3.5',
             'gpt-5': 'GPT-5',
             'gpt-5-nano': 'GPT-5 Nano',
+            'gpt-5-mini': 'GPT-5 Mini',
             'claude-3-opus': 'Claude-3 Opus',
             'claude-3-sonnet': 'Claude-3 Sonnet',
             'claude-3-haiku': 'Claude-3 Haiku',
@@ -184,21 +291,18 @@ class ReportGenerator:
         # Get all graph names for scope description - format them nicely
         graph_names = [self._format_graph_name(name) for name in self.graphs.keys()]
         
-        # Get distinct models that found hypotheses and format them
-        raw_models = sorted(set(
-            h.get('reported_by_model', '') 
-            for h in self.hypotheses.values() 
-            if h.get('reported_by_model')
-        ))
-        analysis_models = [self._format_model_name(m) for m in raw_models if m]
+        # Use the new helper method to extract models
+        models = self._extract_audit_models()
+        junior_auditors = models['junior']
+        senior_auditors = models['senior']
+        finalize_model = models['finalize']
+        reporting_model = models['reporting'] or 'GPT-5'
         
-        # Get finalization model from config (since not in metadata)
-        finalize_model_raw = self.config.get('models', {}).get('finalize', {}).get('model', '')
-        finalize_model = self._format_model_name(finalize_model_raw) if finalize_model_raw else ''
-        
-        # Get reporting model from config
-        reporting_model_raw = self.config.get('models', {}).get('reporting', {}).get('model', '')
-        reporting_model = self._format_model_name(reporting_model_raw) if reporting_model_raw else 'GPT-5'
+        # Get all unique models for analysis_models
+        all_analysis_models = set()
+        all_analysis_models.update(junior_auditors)
+        all_analysis_models.update(senior_auditors)
+        analysis_models = sorted(list(all_analysis_models))
         
         # Provide full system graph and full hypotheses store
         hypotheses_payload = {
@@ -220,19 +324,19 @@ class ReportGenerator:
             "  \"system_overview\": string\n"
             "}\n\n"
             f"ACTUAL_TEAM_MEMBERS:\n"
-            f"- Analysis performed by: {', '.join(analysis_models) if analysis_models else 'No models found'}\n"
+            f"- Junior Auditors (Graph/Agent models): {', '.join(junior_auditors) if junior_auditors else 'Not specified'}\n"
+            f"- Senior Auditors (Guidance model): {', '.join(senior_auditors) if senior_auditors else 'Not specified'}\n"
             f"- Quality assurance by: {finalize_model if finalize_model else 'Not specified'}\n"
             f"- Report written by: {reporting_model}\n\n"
             "Guidance:\n"
             "- Application name: Provide the proper name of the application/protocol (e.g., 'Size Protocol', 'Aave Strategy Vault', etc.)\n"
-            "- Executive summary (3-4 paragraphs with good spacing):\n"
+            "- Executive summary (2-3 paragraphs with good spacing):\n"
             "  * First paragraph: State that the Hound security team conducted this comprehensive audit\n"
             "  * Second paragraph: List aspects from AUDIT_SCOPE_GRAPHS as readable prose, not class names\n"
-            "  * Third paragraph: ONLY mention the ACTUAL models from ACTUAL_TEAM_MEMBERS above\n"
-            "    - Example: 'GPT-4o performed the vulnerability analysis' (if GPT-4o is in the list)\n"
-            "    - DO NOT make up names like Alex, Jessica, etc.\n"
-            "    - ONLY use the exact model names provided in ACTUAL_TEAM_MEMBERS\n"
-            "  * Fourth paragraph: Mention quality assurance by the finalize model if specified\n"
+            "  * Third paragraph: Brief summary of findings and security posture\n"
+            "  * DO NOT mention specific model names in the text - these will be shown in a table below\n"
+            "  * DO NOT make up human names like Alex, Jessica, etc.\n"
+            "  * DO NOT duplicate model information that's shown in the table\n"
             "  * NEVER use: 'hypothesis', 'AI', 'model', 'automated', 'LLM', or made-up human names\n"
             "  * ALWAYS write as: 'The Hound team', 'our team', 'we'\n"
             "  * Use line breaks between paragraphs for readability\n"
@@ -274,28 +378,25 @@ class ReportGenerator:
         report_date = datetime.now().strftime("%B %d, %Y")
         
         # Build auditors display: Hound team members (AI models as named auditors)
-        # Get distinct analysis models from hypotheses and format them
-        raw_models = sorted({
-            (h.get('reported_by_model') or '').strip()
-            for h in self.hypotheses.values()
-            if isinstance(h, dict)
-        })
-        models_used = [self._format_model_name(m) for m in raw_models if m]
-        
-        # Get finalization model from config (since not always in metadata)
-        finalize_model_raw = self.config.get('models', {}).get('finalize', {}).get('model', '')
-        finalize_model = self._format_model_name(finalize_model_raw) if finalize_model_raw else ''
-        
-        # Get the reporting model
-        reporting_model_raw = self.config.get('models', {}).get('reporting', {}).get('model', '')
-        reporting_model = self._format_model_name(reporting_model_raw) if reporting_model_raw else ''
+        # Use the helper to extract models properly
+        models = self._extract_audit_models()
         
         # Build complete list of team members
-        auditor_models = models_used.copy()
+        auditor_models = []
+        auditor_models.extend(models['junior'])
+        auditor_models.extend(models['senior'])
+        
+        finalize_model = models['finalize']
+        reporting_model = models['reporting']
+        
         if finalize_model and finalize_model not in auditor_models:
             auditor_models.append(finalize_model)
         if reporting_model and reporting_model not in auditor_models:
             auditor_models.append(reporting_model)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        auditor_models = [x for x in auditor_models if not (x in seen or seen.add(x))]
         
         if not auditor_models:
             auditor_models = ['Hound Security Team']
@@ -369,33 +470,17 @@ class ReportGenerator:
         total_investigations = len(self.hypotheses)
         confirmed_count = len(confirmed_findings)
         
-        # Extract junior and senior models from hypotheses
-        junior_models = set()
-        senior_models = set()
-        
-        for h in self.hypotheses.values():
-            if isinstance(h, dict):
-                # Use new fields if available, fall back to legacy field
-                if h.get('junior_model'):
-                    junior_models.add(h.get('junior_model'))
-                elif h.get('reported_by_model'):  # Legacy support
-                    junior_models.add(h.get('reported_by_model'))
-                    
-                if h.get('senior_model'):
-                    senior_models.add(h.get('senior_model'))
-        
-        # Format model names
-        junior_auditors = [self._format_model_name(m) for m in sorted(junior_models) if m and m != 'unknown']
-        senior_auditors = [self._format_model_name(m) for m in sorted(senior_models) if m and m != 'unknown']
+        # Use the helper to extract models properly
+        models = self._extract_audit_models()
+        junior_auditors = models['junior']
+        senior_auditors = models['senior']
+        finalize_model = models['finalize'] or 'unspecified'
         
         # Combine for lead auditors list (deduplicated)
         all_auditors = sorted(set(junior_auditors + senior_auditors))
-        if not all_auditors:
-            all_auditors = ['unspecified']
-        
-        # Get finalization model from config
-        finalize_model_raw = self.config.get('models', {}).get('finalize', {}).get('model', '')
-        finalize_model = self._format_model_name(finalize_model_raw) if finalize_model_raw else 'unspecified'
+        models_used = all_auditors.copy()  # Define models_used here
+        if not models_used:
+            models_used = ['unspecified']
 
         prompt = f"""You are a senior security auditor writing the executive summary for a professional audit report.
 
@@ -405,33 +490,25 @@ Source: {project_source}
 System Characteristics (from architecture analysis):
 {graph_summary}
 
-Audit Team and Process:
-- The audit was conducted by the Hound security team
-- Junior auditors (initial discovery): {', '.join(junior_auditors) if junior_auditors else 'Security analysts'}
-- Senior auditors (deep analysis): {', '.join(senior_auditors) if senior_auditors else 'Senior security engineers'}
-- Quality assurance and validation: {finalize_model if finalize_model else 'Senior review team'}
-
 Audit Statistics:
 - Total security concerns investigated: {total_investigations}
 - Confirmed vulnerabilities: {confirmed_count}
 {findings_summary}
 
-Write a professional executive summary (3-4 paragraphs) that:
-1) States that the Hound team conducted this comprehensive security audit of {project_name}.
+Write a professional executive summary (2-3 paragraphs) that:
+1) States that the Hound security team conducted this comprehensive security audit of {project_name}.
 2) Describes WHAT the system does (type and core purpose) based on the components above.
-3) Mentions ONLY these actual team members who performed the analysis: {', '.join(models_used) if models_used else 'team members'}
-4) States that {finalize_model if finalize_model else 'the team'} performed quality assurance.
-5) Summarizes the security posture and any findings discovered.
+3) Summarizes the security posture and any findings discovered.
 
 CRITICAL INSTRUCTIONS:
-- ONLY use these exact model names: {', '.join(models_used) if models_used else 'none specified'}
+- DO NOT mention any specific model names (GPT-5, Claude, etc.) - a table below will show this
+- DO NOT discuss who did what parts of the analysis
 - DO NOT make up human names like Alex, Jessica, Sarah, etc.
-- DO NOT invent team members - only use the models listed above
-- Example: "{models_used[0] if models_used else 'The team'} identified..." or "{models_used[1] if len(models_used) > 1 else 'The auditor'}'s analysis revealed..."
 - Write as "The Hound team", "our team", "we" (first person plural)
+- Focus on the AUDIT RESULTS not the audit process
 - NEVER use: "hypothesis", "AI", "model", "automated", "LLM", or made-up names
-- ALWAYS use: "findings", "security concerns", "team member", "auditor", "analysis"
-- Present this as a professional human security audit by the Hound team"""
+- ALWAYS use: "findings", "security concerns", "team", "analysis"
+- Present this as a professional security audit by the Hound team"""
 
         try:
             summary = self.llm.raw(
@@ -565,6 +642,7 @@ and systematic vulnerability assessment across all identified attack surfaces.""
         """Get confirmed vulnerability findings."""
         findings = []
         
+        # First collect all confirmed findings
         for hyp_id, hyp in self.hypotheses.items():
             if hyp.get('status') == 'confirmed':
                 finding = {
@@ -581,12 +659,25 @@ and systematic vulnerability assessment across all identified attack surfaces.""
                     'supporting_evidence': hyp.get('supporting_evidence', []),
                     'properties': hyp.get('properties', {})
                 }
+                findings.append(finding)
+        
+        # Batch generate professional descriptions for all findings
+        if findings:
+            professional_results = self._batch_generate_vulnerability_descriptions(findings)
+            for i, finding in enumerate(findings):
+                result = professional_results.get(i, {})
+                
+                # Use LLM-generated description or fallback
+                finding['professional_description'] = result.get('description') or \
+                    self._clean_raw_description(finding['description'])
+                
+                # Use LLM-formatted component description or fallback
+                finding['affected_description'] = result.get('affected_components') or \
+                    self._describe_affected_components(finding.get('affected', []))
                 
                 # Extract code samples for this finding
                 code_samples = self._extract_code_for_finding(finding)
                 finding['code_samples'] = code_samples
-                
-                findings.append(finding)
         
         # Sort by severity
         severity_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
@@ -1233,6 +1324,9 @@ External dependencies are limited and clearly defined."""
         <div class="section">
             <h2>Executive Summary</h2>
             {self._format_paragraphs_html(kwargs['executive_summary'])}
+            
+            <h3 style="margin-top: 30px; color: #64b5f6;">Audit Team</h3>
+            {self._generate_models_table_html()}
         </div>
         
         <div class="section">
@@ -1299,15 +1393,184 @@ External dependencies are limited and clearly defined."""
             <div class="finding {severity}">
                 <span class="severity-badge severity-{severity}">{severity}</span>
                 <h3>{finding['title']}</h3>
-                <p><strong>Type:</strong> {finding['type']}</p>
-                <p>{finding['description']}</p>
-                <p><strong>Affected Components:</strong> {', '.join(finding['affected'][:3])}</p>
-                <p><strong>Discovered by:</strong> Junior: {finding.get('junior_model', 'N/A')}{', Senior: ' + finding.get('senior_model') if finding.get('senior_model') else ''}</p>
+                <div class="vulnerability-description">
+                    {self._format_paragraphs_html(finding.get('professional_description', finding['description']))}
+                </div>
+                <p><strong>Affected Components:</strong> {finding.get('affected_description', self._describe_affected_components(finding.get('affected', [])))}</p>
                 {code_html}
             </div>
             ''')
         
         return '\n'.join(html_parts)
+    
+    def _describe_affected_components(self, node_refs: List[str]) -> str:
+        """Generate human-readable descriptions of affected components."""
+        if not node_refs:
+            return "Various system components"
+        
+        # Just pass the raw node references to the LLM
+        return ', '.join(node_refs[:3])  # Will be formatted by LLM in batch
+    
+    def _batch_generate_vulnerability_descriptions(self, findings: List[Dict]) -> Dict[int, str]:
+        """Batch generate professional vulnerability descriptions using LLM."""
+        if not findings:
+            return {}
+        
+        # Build a single prompt for all vulnerabilities
+        vulnerabilities_json = []
+        for i, finding in enumerate(findings):
+            vulnerabilities_json.append({
+                "index": i,
+                "title": finding.get('title', 'Unknown'),
+                "type": finding.get('type', 'unknown'),
+                "severity": finding.get('severity', 'medium'),
+                "affected_components_raw": finding.get('affected', [])[:3],
+                "raw_description": finding.get('description', '')
+            })
+        
+        prompt = f"""You are writing a professional security audit report. Convert these raw vulnerability data into clear, professional descriptions.
+
+Vulnerabilities to describe:
+{json.dumps(vulnerabilities_json, ensure_ascii=False, indent=2)}
+
+For EACH vulnerability, provide:
+1. A professional description (2-3 paragraphs) that:
+   - Naturally mentions the vulnerability type (logic error, access control, etc.) in the first sentence
+   - Explains the root cause and technical details
+   - Describes the attack vector and potential impact
+2. A human-readable description of the affected components
+
+Return a JSON object with this structure:
+{{
+  "0": {{
+    "description": "Professional vulnerability description...",
+    "affected_components": "the AgentOwnerRegistry contract, specifically the setWorkAddress() function"
+  }},
+  "1": {{
+    "description": "Professional vulnerability description...", 
+    "affected_components": "the MintingFacet contract"
+  }},
+  ...
+}}
+
+Rules for descriptions:
+- Write in third person, professional tone
+- Be concise but thorough
+- DO NOT include metadata prefixes like "VULNERABILITY TYPE:", "ROOT CAUSE:", etc.
+- DO NOT mention discovery methods or analysis process
+
+Rules for affected components:
+- Convert raw node names like "func_MintingFacet__performMinting" to readable format like "the MintingFacet contract, specifically the performMinting() function"
+- Use proper articles and grammar
+- Group related components naturally (contracts first, then specific functions)
+- Examples:
+  - ["AgentOwnerRegistry"] → "the AgentOwnerRegistry contract"
+  - ["func_mint__publicMint", "MintingFacet"] → "the MintingFacet contract, specifically the publicMint() function"
+  - ["Contract1", "Contract2"] → "the Contract1 and Contract2 contracts"
+"""
+
+        try:
+            response = self.llm.raw(
+                system="You are a security expert writing clear vulnerability descriptions. Respond only with valid JSON.",
+                user=prompt
+            )
+            from utils.json_utils import extract_json_object
+            results = extract_json_object(response)
+            
+            if isinstance(results, dict):
+                # Extract both descriptions and component formatting
+                processed = {}
+                for k, v in results.items():
+                    idx = int(k)
+                    if isinstance(v, dict):
+                        processed[idx] = {
+                            'description': v.get('description', ''),
+                            'affected_components': v.get('affected_components', '')
+                        }
+                    else:
+                        # Fallback for old format
+                        processed[idx] = {
+                            'description': v,
+                            'affected_components': ''
+                        }
+                return processed
+            else:
+                return {}
+        except Exception as e:
+            if self.debug:
+                print(f"[!] Failed to batch generate descriptions: {e}")
+            return {}
+    
+    def _generate_vulnerability_description(self, finding: Dict) -> str:
+        """Generate a professional vulnerability description using LLM."""
+        
+        # Extract key information from the raw description
+        raw_desc = finding.get('description', '')
+        title = finding.get('title', 'Unknown')
+        vuln_type = finding.get('type', 'unknown')
+        severity = finding.get('severity', 'medium')
+        affected = finding.get('affected', [])
+        affected_desc = self._describe_affected_components(affected)
+        
+        prompt = f"""You are writing a professional security audit report. Convert this raw vulnerability data into a clear, professional description.
+
+Vulnerability Title: {title}
+Type: {vuln_type}
+Severity: {severity}
+Affected Components: {affected_desc}
+
+Raw Technical Details:
+{raw_desc}
+
+Write a professional vulnerability description (2-3 paragraphs) that:
+1. Naturally mentions this is a {vuln_type} vulnerability in the first sentence
+2. Clearly explains the root cause and technical details
+3. Describes the potential attack vector and impact
+
+Rules:
+- Write in third person, professional tone
+- Be concise but thorough
+- Focus on technical accuracy
+- DO NOT include metadata like "VULNERABILITY TYPE:", "ROOT CAUSE:", etc.
+- DO NOT repeat the same information multiple times
+- DO NOT mention discovery methods or analysis process
+- Present as a clean, professional finding description
+"""
+
+        try:
+            description = self.llm.raw(
+                system="You are a security expert writing clear vulnerability descriptions.",
+                user=prompt
+            )
+            return description.strip()
+        except Exception as e:
+            if self.debug:
+                print(f"[!] Failed to generate description for {title}: {e}")
+            # Fallback: clean up the raw description
+            return self._clean_raw_description(raw_desc)
+    
+    def _clean_raw_description(self, raw_desc: str) -> str:
+        """Clean up raw description as fallback."""
+        # Remove metadata prefixes
+        lines = raw_desc.split('\n')
+        cleaned = []
+        
+        for line in lines:
+            # Skip lines that are just metadata labels
+            if any(line.startswith(prefix) for prefix in 
+                   ['VULNERABILITY TYPE:', 'ROOT CAUSE:', 'ATTACK VECTOR:', 
+                    'AFFECTED NODES:', 'AFFECTED CODE:', 'SEVERITY:', 'REASONING:',
+                    'Location:', 'Technical Details:']):
+                continue
+            # Skip duplicate content lines
+            if line.strip() and not any(c.strip() == line.strip() for c in cleaned):
+                cleaned.append(line)
+        
+        result = ' '.join(cleaned)
+        # Clean up excessive whitespace
+        result = ' '.join(result.split())
+        
+        return result if result else raw_desc
     
     def _escape_html(self, text: str) -> str:
         """Escape HTML special characters."""
@@ -1412,11 +1675,9 @@ The audit employed a comprehensive security assessment methodology including:
         for finding in findings:
             md_parts.append(f"""### [{finding['severity'].upper()}] {finding['title']}
 
-**Type:** {finding['type']}  
-**Affected:** {', '.join(finding['affected'][:3])}  
-**Detected by:** Junior: {finding.get('junior_model', 'N/A')}{', Senior: ' + finding.get('senior_model') if finding.get('senior_model') else ''}
+**Affected:** {finding.get('affected_description', self._describe_affected_components(finding.get('affected', [])))}  
 
-{finding['description']}
+{finding.get('professional_description', finding['description'])}
 
 ---""")
         
