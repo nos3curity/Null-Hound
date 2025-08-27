@@ -38,7 +38,12 @@ class RunTracker:
     def update_token_usage(self, token_summary: Dict[str, Any]):
         """Update token usage statistics."""
         with self._lock:
-            self.data['token_usage'] = token_summary
+            # Exclude the detailed history to keep the file size manageable
+            filtered_summary = {
+                'total_usage': token_summary.get('total_usage', {}),
+                'by_model': token_summary.get('by_model', {})
+            }
+            self.data['token_usage'] = filtered_summary
             self._update_runtime()
             self._save()
     
