@@ -17,9 +17,11 @@
 
 ## Overview
 
-**Hound** is a research framework for **AI-driven code security auditing** that mirrors how expert auditors actually think, learn, and collaborate. Instead of spamming shallow hypotheses or rigidly parsing syntax trees, Hound builds **flexible cognitive models** of a system that accumulate, adapt, and get refined over time (see the [blog post](https://muellerberndt.medium.com/unleashing-the-hound-how-ai-agents-find-deep-logic-bugs-in-any-codebase-64c2110e3a6f) for details).
+Hound is a security audit automation pipeline for AI‑assisted code review that mirrors how expert auditors think, learn, and collaborate. Instead of spamming shallow checks or relying on rigid parse trees, Hound builds living knowledge graphs of the system that accumulate evidence, adapt as understanding improves, and stay grounded in the exact code spans they reference. See the blog post for a deeper tour: https://muellerberndt.medium.com/unleashing-the-hound-how-ai-agents-find-deep-logic-bugs-in-any-codebase-64c2110e3a6f
 
-Agents reason across **abstract business logic and concrete code details**, capturing assumptions, invariants, and observations into evolving **knowledge graphs**. These graphs are dynamic relational models that change as the audit deepens. The process mirrors real audit teams: weeks of cumulative understanding, targeted hypotheses, and collaborative review that surface **deep, business-logic vulnerabilities** missed by pattern-matching tools.
+Agents reason across abstract business logic and concrete code. They capture assumptions, invariants, and observations into evolving graphs that link roles, functions, storage, value flows, and inter‑contract calls back to specific source locations. Two advantages drive results: cross‑granularity reasoning (relating paths, components, and system‑level invariants), and targeted retrieval of the exact snippets relevant to a question. For example, when checking “only s2Admin can delist listings,” Hound pulls the delist guard and its source, all call paths into delisting, any equivalent state transitions that realize delisting, and the storage writes/events that define the state change—so contradictions stand out early.
+
+The workflow uses a junior/senior agent pattern. A fast exploration model gathers evidence and annotations; a stronger reasoning model designs the investigation and mints focused, falsifiable hypotheses. Hound persists graphs and evidence between runs, enabling cumulative audits and generating professional reports from confirmed findings.
 
 ### Key innovations
 
