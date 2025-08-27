@@ -11,6 +11,7 @@ from .openai_provider import OpenAIProvider
 from .gemini_provider import GeminiProvider
 from .anthropic_provider import AnthropicProvider
 from .xai_provider import XAIProvider
+from .mock_provider import MockProvider
 from .token_tracker import get_token_tracker
 
 T = TypeVar('T', bound=BaseModel)
@@ -96,6 +97,13 @@ class UnifiedLLMClient:
             self.provider = XAIProvider(
                 **common_kwargs,
                 verbose=llm_verbose
+            )
+        elif provider_name == "mock":
+            # Mock provider for testing
+            mock_instance = model_config.get("mock_instance")
+            self.provider = MockProvider(
+                **common_kwargs,
+                mock_instance=mock_instance
             )
         else:
             raise ValueError(f"Unknown provider: {provider_name}")
