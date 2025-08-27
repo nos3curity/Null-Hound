@@ -311,6 +311,8 @@ class ReportGenerator:
         }
 
         prompt = (
+            f"PROJECT_NAME: {project_name}\n"
+            f"PROJECT_SOURCE: {project_source}\n\n"
             "SYSTEM_GRAPH_JSON\n"
             f"{json.dumps(system_graph, ensure_ascii=False)}\n\n"
             "HYPOTHESES_STORE_JSON\n"
@@ -329,7 +331,7 @@ class ReportGenerator:
             f"- Quality assurance by: {finalize_model if finalize_model else 'Not specified'}\n"
             f"- Report written by: {reporting_model}\n\n"
             "Guidance:\n"
-            "- Application name: Provide the proper name of the application/protocol (e.g., 'Size Protocol', 'Aave Strategy Vault', etc.)\n"
+            f"- Application name: Extract the actual protocol/application name from the system graph nodes and contracts. Look for protocol names, diamond names, or main contract names. If unclear, use the project name '{project_name}' capitalized.\n"
             "- Executive summary (2-3 paragraphs with good spacing):\n"
             "  * First paragraph: State that the Hound security team conducted this comprehensive audit\n"
             "  * Second paragraph: List aspects from AUDIT_SCOPE_GRAPHS as readable prose, not class names\n"
