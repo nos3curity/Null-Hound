@@ -200,14 +200,7 @@ def report(project_name: str, output: Optional[str], format: str,
         console.print(f"[bright_green]✓ Report generated successfully![/bright_green]")
         console.print(f"[bright_green]Location: {output_path}[/bright_green]")
         
-        # Try to open in browser if HTML
-        if format == 'html':
-            import webbrowser
-            try:
-                webbrowser.open(f"file://{output_path.absolute()}")
-                console.print("[white]Report opened in browser[/white]")
-            except:
-                pass
+        # Report path is already displayed above, no need to open browser
                 
     except Exception as e:
         console.print(f"[red]Report generation failed: {e}[/red]")
