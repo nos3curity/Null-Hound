@@ -61,13 +61,22 @@ def build_custom_graph(
         for card in cards
     )
     
-    # Use all cards if small enough, otherwise sample
-    SIZE_THRESHOLD = 500000  # 500KB threshold for schema design (aligned with main builder)
-    if total_size > SIZE_THRESHOLD:
-        console.print(f"[dim]Large codebase ({total_size:,} chars), sampling for schema design...[/dim]")
-        cards = cards[:100]  # Sample first 100 cards for large codebases (increased from 30)
+    # Use same adaptive sampling logic as main builder
+    original_count = len(cards)
+    builder = GraphBuilder(config, debug=False)
+    cards = builder._sample_cards(cards, target_size_mb=2.0)
+    
+    sampled_size = sum(
+        len(card.get("content", "")) + 
+        len(card.get("peek_head", "")) + 
+        len(card.get("peek_tail", ""))
+        for card in cards
+    )
+    
+    if len(cards) == original_count:  # If no sampling occurred
+        console.print(f"[dim]Using all {len(cards)} cards ({sampled_size:,} chars) for schema design[/dim]")
     else:
-        console.print(f"[dim]Using all {len(cards)} cards ({total_size:,} chars) for schema design[/dim]")
+        console.print(f"[dim]Sampled {len(cards)} from {original_count} cards ({sampled_size:,} chars) for schema design[/dim]")
     
     # Design the graph specification using agent model WITH CODE CONTEXT
     llm_agent = LLMClient(config, profile='agent')
@@ -81,7 +90,7 @@ def build_custom_graph(
         code_context.append({
             "file": card.get("relpath", "unknown"),
             "type": card.get("type", "unknown"),
-            "content": card.get("content", "")[:500]  # First 500 chars
+            "content": card.get("content", "")  # Use full content like main builder
         })
     
     user_prompt = f"""
