@@ -110,8 +110,12 @@ jobs:
     steps:
     - name: Check if all tests passed
       run: |
-        if [[ "${{ needs.test.result }}" != "success" || "${{ needs.test-integration.result }}" != "success" ]]; then
-          echo "One or more test jobs failed"
+        if [[ "${{ needs.test.result }}" != "success" ]]; then
+          echo "Test job failed"
+          exit 1
+        fi
+        if [[ "${{ needs.test-integration.result }}" != "success" && "${{ needs.test-integration.result }}" != "skipped" ]]; then
+          echo "Integration test job failed"
           exit 1
         fi
         echo "All tests passed successfully!"
