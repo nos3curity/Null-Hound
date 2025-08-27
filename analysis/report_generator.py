@@ -34,6 +34,62 @@ class ReportGenerator:
         # Debug helpers for CLI
         self.last_prompt: Optional[str] = None
         self.last_response: Optional[str] = None
+        # Optional progress callback
+        self._progress_cb = None
+        
+        # Load card store + repo root for precise code snippets
+        self.card_store: Dict[str, Dict[str, Any]] = {}
+        self.repo_root: Optional[Path] = None
+        self._load_card_store_and_repo_root()
+
+    def _load_card_store_and_repo_root(self) -> None:
+        """Load card_store.json (graph evidence) and determine repo root.
+
+        Prefers using graphs/knowledge_graphs.json metadata to locate the
+        card store and repo path. Falls back silently if not present.
+        """
+        try:
+            graphs_dir = self.project_dir / "graphs"
+            kg_path = graphs_dir / "knowledge_graphs.json"
+            if kg_path.exists():
+                with open(kg_path, 'r') as f:
+                    kg = json.load(f)
+                # Repo root from manifest
+                manifest = kg.get('manifest') or {}
+                rp = manifest.get('repo_path')
+                if rp:
+                    try:
+                        self.repo_root = Path(rp)
+                    except Exception:
+                        self.repo_root = None
+                # Card store
+                card_store_path = kg.get('card_store_path')
+                if card_store_path:
+                    try:
+                        with open(card_store_path, 'r') as f:
+                            store = json.load(f)
+                        if isinstance(store, dict):
+                            self.card_store = store
+                    except Exception:
+                        # Try local graphs dir fallback
+                        csp = graphs_dir / "card_store.json"
+                        if csp.exists():
+                            with open(csp, 'r') as f2:
+                                store = json.load(f2)
+                            if isinstance(store, dict):
+                                self.card_store = store
+            else:
+                # Try direct card_store.json
+                csp = self.project_dir / "graphs" / "card_store.json"
+                if csp.exists():
+                    with open(csp, 'r') as f3:
+                        store = json.load(f3)
+                    if isinstance(store, dict):
+                        self.card_store = store
+        except Exception:
+            # Leave empty on failure; fallback logic will handle
+            if self.debug:
+                print("[!] Failed to load card store or repo root")
     
     def _load_graphs(self) -> Dict[str, Any]:
         """Load all graphs from project."""
@@ -373,8 +429,11 @@ class ReportGenerator:
     # Note: No fallback generators — we surface errors so the CLI can show details
     
     def generate(self, project_name: str, project_source: str, 
-                title: str, auditors: List[str], format: str = 'html') -> str:
+                title: str, auditors: List[str], format: str = 'html',
+                progress_callback: Optional[callable] = None) -> str:
         """Generate the complete audit report."""
+        self._progress_cb = progress_callback
+        self._emit_progress('start', 'Starting report generation')
         
         # Gather report data
         report_date = datetime.now().strftime("%B %d, %Y")
@@ -404,19 +463,24 @@ class ReportGenerator:
             auditor_models = ['Hound Security Team']
         
         # Preferred: generate both sections via a single LLM call
+        self._emit_progress('llm', 'Generating executive summary and system overview')
         sections = self._generate_sections(project_name, project_source)
+        self._emit_progress('llm_done', 'Sections generated')
         application_name = sections.get('application_name', project_name)
         executive_summary = sections.get('executive_summary', '')
         system_overview = sections.get('system_overview', '')
         
         # Get confirmed findings (if any)
+        self._emit_progress('findings', 'Collecting confirmed findings')
         confirmed_findings = self._get_confirmed_findings()
+        self._emit_progress('findings_done', f"Processed {len(confirmed_findings)} findings")
         
         # No longer generating appendix
         # tested_hypotheses = self._get_all_hypotheses()
         
         # Generate the report based on format
         if format == 'html':
+            self._emit_progress('render', 'Rendering HTML report')
             return self._generate_html_report(
                 title=title,
                 application_name=application_name,
@@ -430,6 +494,7 @@ class ReportGenerator:
                 report_writer=reporting_model
             )
         elif format == 'markdown':
+            self._emit_progress('render', 'Rendering Markdown report')
             return self._generate_markdown_report(
                 title=title,
                 application_name=application_name,
@@ -444,6 +509,7 @@ class ReportGenerator:
             )
         else:
             # Default to HTML
+            self._emit_progress('render', 'Rendering HTML report')
             return self._generate_html_report(
                 title=title,
                 application_name=application_name,
@@ -665,6 +731,7 @@ and systematic vulnerability assessment across all identified attack surfaces.""
         
         # Batch generate professional descriptions for all findings
         if findings:
+            self._emit_progress('findings_describe', f'Generating professional descriptions for {len(findings)} findings')
             professional_results = self._batch_generate_vulnerability_descriptions(findings)
             for i, finding in enumerate(findings):
                 result = professional_results.get(i, {})
@@ -678,7 +745,9 @@ and systematic vulnerability assessment across all identified attack surfaces.""
                     self._describe_affected_components(finding.get('affected', []))
                 
                 # Extract code samples for this finding
+                self._emit_progress('snippets', f"Selecting code snippets: {finding.get('title','')}"[:80])
                 code_samples = self._extract_code_for_finding(finding)
+                self._emit_progress('snippets_done', f"Selected {len(code_samples)} snippet(s)")
                 finding['code_samples'] = code_samples
         
         # Sort by severity
@@ -686,6 +755,14 @@ and systematic vulnerability assessment across all identified attack surfaces.""
         findings.sort(key=lambda x: severity_order.get(x['severity'], 4))
         
         return findings
+
+    def _emit_progress(self, status: str, message: str):
+        """Emit progress to callback if provided."""
+        if callable(self._progress_cb):
+            try:
+                self._progress_cb({'status': status, 'message': message})
+            except Exception:
+                pass
     
     def _get_all_hypotheses(self) -> List[Dict]:
         """Get all tested hypotheses for appendix."""
@@ -1686,8 +1763,334 @@ The audit employed a comprehensive security assessment methodology including:
         return '\n\n'.join(md_parts)
     
     def _extract_code_for_finding(self, finding: Dict) -> List[Dict]:
-        """Extract relevant code snippets for a finding using LLM."""
-        code_samples = []
+        """Extract relevant code snippets for a finding.
+
+        Priority order:
+        1) Use graph node -> card -> source slice mappings for exact snippets
+        2) Prefer letting the reporting model select concise snippets with reasons
+        3) Fall back to file-level LLM selection if mapping unavailable
+        """
+        # 1) Try graph/card evidence mapping to identify affected files
+        files_ctx = self._collect_files_from_cards(finding)
+        if files_ctx:
+            # 2) Ask reporting model to pick small, relevant snippets with explanations
+            picked = self._select_snippets_with_reporting_llm(finding, files_ctx)
+            if picked:
+                return picked
+            # If model selection fails, fall back to direct card slices (limited)
+            mapped_samples = self._extract_code_via_cards(finding)
+            if mapped_samples:
+                return mapped_samples
+
+        # 3) Fallback to previous file-level LLM approach
+        return self._extract_code_via_llm_file_scan(finding)
+
+    def _collect_files_from_cards(self, finding: Dict) -> Dict[str, str]:
+        """Return map of relpath -> full file content for files referenced by card evidence."""
+        files: Dict[str, str] = {}
+        try:
+            if not self.card_store or not self.repo_root or not self.repo_root.exists():
+                return files
+            target_ids = set(str(x) for x in finding.get('affected', []) if x)
+            if not target_ids:
+                return files
+            rels: List[str] = []
+            for graph in self.graphs.values():
+                for node in graph.get('nodes', []):
+                    nid = str(node.get('id') or '')
+                    nlabel = str(node.get('label') or '')
+                    if nid in target_ids or nlabel in target_ids:
+                        refs = node.get('source_refs') or node.get('refs') or []
+                        if isinstance(refs, list):
+                            for r in refs:
+                                c = self.card_store.get(str(r))
+                                if isinstance(c, dict) and c.get('relpath'):
+                                    rels.append(c['relpath'])
+            # Dedup and load files
+            for rel in [r for i, r in enumerate(rels) if r and r not in rels[:i]]:
+                fpath = self.repo_root / rel
+                try:
+                    content = fpath.read_text(encoding='utf-8', errors='ignore')
+                    files[rel] = content
+                except Exception:
+                    continue
+            # Limit to 3 files for token control
+            if len(files) > 3:
+                return {k: files[k] for k in list(files.keys())[:3]}
+            return files
+        except Exception:
+            return {}
+
+    def _select_snippets_with_reporting_llm(self, finding: Dict, files_ctx: Dict[str, str]) -> List[Dict]:
+        """Use reporting LLM to select concise snippets across provided files with explanations.
+        Strongly prefer functions explicitly referenced by the finding.
+        """
+        if not files_ctx:
+            return []
+        try:
+            title = finding.get('title', 'Unknown')
+            ftype = finding.get('type', 'unknown')
+            desc = finding.get('professional_description') or finding.get('description') or ''
+            target_funcs = sorted(list(self._derive_target_functions(finding)))
+            func_index = self._index_functions(files_ctx)
+            payload = {
+                'finding': {
+                    'title': title,
+                    'type': ftype,
+                    'description': desc,
+                },
+                'files': [{'path': p, 'content': c} for p, c in files_ctx.items()],
+                'target_functions': target_funcs,
+                'functions_index': func_index
+            }
+            system = "You are a senior security auditor preparing a report. Return only valid JSON."
+            user = (
+                "You are given a vulnerability finding and a set of source files.\n"
+                "Pick up to 3 short code snippets (5–18 lines each) that BEST illustrate the vulnerability.\n"
+                "You are provided with an index of functions detected per file and a list of TARGET function names (if any).\n"
+                "STRICT PREFERENCE: choose snippets from TARGET functions if they are present.\n"
+                "Avoid constructors unless they are explicitly listed as TARGET functions.\n"
+                "If TARGET functions are not present, choose the function(s) most directly responsible.\n"
+                "Always include the matching function header line in the snippet.\n"
+                "If multiple files are relevant, you may select at most one snippet per file.\n"
+                "Avoid redundant or overly long snippets.\n\n"
+                f"INPUT_JSON:\n{json.dumps(payload, ensure_ascii=False)}\n\n"
+                "Return JSON with this shape:\n"
+                "{\n  \"snippets\": [\n    {\n      \"file\": <path>,\n      \"start_line\": <1-based int>,\n      \"end_line\": <1-based int>,\n      \"explanation\": <why this snippet is relevant>\n    }\n  ]\n}\n"
+                "Constraints:\n- Ensure line numbers correspond to the provided file content.\n- Keep each snippet under 20 lines and maximize signal.\n- If nothing clearly relevant is present, return an empty snippets array."
+            )
+            response = self.llm.raw(system=system, user=user)
+            from utils.json_utils import extract_json_object
+            obj = extract_json_object(response)
+            results: List[Dict] = []
+            if isinstance(obj, dict) and isinstance(obj.get('snippets'), list):
+                for s in obj['snippets'][:3]:
+                    fpath = s.get('file')
+                    start = int(s.get('start_line', 0) or 0)
+                    end = int(s.get('end_line', 0) or 0)
+                    expl = str(s.get('explanation') or '').strip()
+                    if not fpath or fpath not in files_ctx:
+                        continue
+                    if start <= 0 or end <= 0 or end < start:
+                        continue
+                    lines = files_ctx[fpath].split('\n')
+                    start0 = max(0, start - 1)
+                    end0 = min(len(lines), end)
+                    # Enforce max 20 lines
+                    if end0 - start0 > 20:
+                        end0 = start0 + 20
+                    code = '\n'.join(lines[start0:end0])
+                    results.append({
+                        'file': fpath,
+                        'start_line': start0 + 1,
+                        'end_line': end0,
+                        'code': code,
+                        'language': self._detect_language(fpath),
+                        'explanation': expl or 'Relevant to the vulnerability as selected by analysis.'
+                    })
+            # Validate against target functions; if mismatch and we have targets, use deterministic extraction
+            if results and self._derive_target_functions(finding):
+                if not self._snippets_match_targets(results, func_index, self._derive_target_functions(finding)):
+                    det = self._deterministic_snippets_by_function(files_ctx, func_index, self._derive_target_functions(finding))
+                    if det:
+                        return det
+            return results
+        except Exception:
+            return []
+
+    def _derive_target_functions(self, finding: Dict) -> set:
+        """Collect intended function names from hypothesis/finding metadata and affected nodes."""
+        names = set()
+        try:
+            # From properties
+            props = finding.get('properties') or {}
+            for fn in props.get('affected_functions', []) or []:
+                # Normalize: strip qualifiers and ()
+                base = str(fn).split('.')[-1].strip()
+                base = base.replace('()', '')
+                if base:
+                    names.add(base)
+            # From affected_description like "specifically the foo() function"
+            desc = finding.get('affected_description') or ''
+            import re
+            for m in re.findall(r'([A-Za-z_][A-Za-z0-9_]*)\s*\(\)', desc):
+                names.add(m)
+            # From affected node refs via graphs (function-type nodes)
+            targets = set(str(x) for x in finding.get('affected', []) if x)
+            for graph in self.graphs.values():
+                for node in graph.get('nodes', []):
+                    if (node.get('id') in targets) or (node.get('label') in targets):
+                        ntype = (node.get('type') or '').lower()
+                        if ntype == 'function':
+                            label = node.get('label') or node.get('id') or ''
+                            # Try to extract final token as function name
+                            # Patterns: Contract.function, func_Contract__function, function
+                            parts = re.split(r'[\._]', label)
+                            candidate = parts[-1]
+                            candidate = candidate.replace('()', '')
+                            if candidate:
+                                names.add(candidate)
+        except Exception:
+            pass
+        return names
+
+    def _index_functions(self, files_ctx: Dict[str, str]) -> Dict[str, List[Dict[str, int]]]:
+        """Build a coarse function index per Solidity file: name, start_line, end_line."""
+        import re
+        idx: Dict[str, List[Dict[str, int]]] = {}
+        for path, content in files_ctx.items():
+            lines = content.split('\n')
+            headers = []
+            for i, line in enumerate(lines, start=1):
+                # Match function headers and constructor
+                m = re.search(r'\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(', line)
+                c = re.search(r'\bconstructor\s*\(', line)
+                if m:
+                    headers.append((i, 'function', m.group(1)))
+                elif c:
+                    headers.append((i, 'constructor', 'constructor'))
+            # Determine end lines by next header or EOF
+            entries = []
+            for j, (start, kind, name) in enumerate(headers):
+                end = len(lines)
+                if j + 1 < len(headers):
+                    end = headers[j + 1][0] - 1
+                entries.append({'name': name, 'kind': kind, 'start_line': start, 'end_line': end})
+            if entries:
+                idx[path] = entries
+        return idx
+
+    def _snippets_match_targets(self, snippets: List[Dict], func_index: Dict[str, List[Dict[str, int]]], targets: set) -> bool:
+        """Check if at least one snippet falls within a targeted function."""
+        if not targets:
+            return True
+        for sn in snippets:
+            path = sn.get('file')
+            start = sn.get('start_line')
+            end = sn.get('end_line')
+            if not path or path not in func_index:
+                continue
+            for e in func_index[path]:
+                if e['start_line'] <= start <= e['end_line'] and e['start_line'] <= end <= e['end_line']:
+                    if e['name'] in targets or (e.get('kind') == 'constructor' and 'constructor' in targets):
+                        return True
+        return False
+
+    def _deterministic_snippets_by_function(self, files_ctx: Dict[str, str], func_index: Dict[str, List[Dict[str, int]]], targets: set) -> List[Dict]:
+        """If targets are available, cut short snippets directly from those function bodies."""
+        results: List[Dict] = []
+        for path, entries in func_index.items():
+            for e in entries:
+                if e['name'] in targets or (e.get('kind') == 'constructor' and 'constructor' in targets):
+                    lines = files_ctx[path].split('\n')
+                    start0 = e['start_line'] - 1
+                    end0 = min(e['end_line'], e['start_line'] + 18)  # cap ~18 lines
+                    code = '\n'.join(lines[start0:end0])
+                    results.append({
+                        'file': path,
+                        'start_line': start0 + 1,
+                        'end_line': end0,
+                        'code': code,
+                        'language': self._detect_language(path),
+                        'explanation': f"Relevant function '{e['name']}' referenced by the finding."
+                    })
+                    if len(results) >= 3:
+                        return results
+        return results
+
+    def _extract_code_via_cards(self, finding: Dict) -> List[Dict]:
+        """Use node->card mappings to pull precise source slices.
+        Merges adjacent/overlapping card ranges per file to avoid duplicates.
+        """
+        try:
+            if not self.card_store or not self.repo_root or not self.repo_root.exists():
+                return []
+            # Collect affected node identifiers from hypothesis
+            target_ids = set(str(x) for x in finding.get('affected', []) if x)
+            if not target_ids:
+                return []
+            # Gather card IDs from matching nodes across all graphs
+            card_ids: List[str] = []
+            matched_nodes = 0
+            for graph in self.graphs.values():
+                for node in graph.get('nodes', []):
+                    nid = str(node.get('id') or '')
+                    nlabel = str(node.get('label') or '')
+                    if nid in target_ids or nlabel in target_ids:
+                        refs = node.get('source_refs') or node.get('refs') or []
+                        if isinstance(refs, list):
+                            for r in refs:
+                                if r and isinstance(r, str):
+                                    card_ids.append(r)
+                        matched_nodes += 1
+            if not card_ids and self.debug:
+                print(f"[!] No card refs found for affected nodes: {sorted(list(target_ids))}")
+            # Group ranges per file
+            per_file: Dict[str, List[tuple]] = {}
+            for cid in card_ids:
+                c = self.card_store.get(cid)
+                if not isinstance(c, dict):
+                    continue
+                rel = c.get('relpath')
+                cs = c.get('char_start')
+                ce = c.get('char_end')
+                if not rel or not isinstance(cs, int) or not isinstance(ce, int) or ce <= cs:
+                    continue
+                per_file.setdefault(rel, []).append((cs, ce))
+
+            samples: List[Dict] = []
+            for rel, ranges in per_file.items():
+                fpath = self.repo_root / rel
+                try:
+                    text = fpath.read_text(encoding='utf-8', errors='ignore')
+                except Exception:
+                    continue
+                # Merge overlapping/adjacent ranges
+                merged = []
+                for (cs, ce) in sorted(ranges):
+                    if not merged:
+                        merged.append([cs, ce])
+                    else:
+                        last = merged[-1]
+                        if cs <= last[1] + 80:  # merge if close/overlapping
+                            last[1] = max(last[1], ce)
+                        else:
+                            merged.append([cs, ce])
+                # Convert to snippets (limit per file)
+                for cs, ce in merged[:2]:
+                    start_line, end_line = self._char_range_to_lines(text, cs, ce)
+                    code = text[cs:ce]
+                    samples.append({
+                        'file': rel,
+                        'start_line': start_line,
+                        'end_line': end_line,
+                        'code': code.rstrip('\n'),
+                        'language': self._detect_language(rel),
+                        'explanation': 'Merged evidence from graph node → source mapping'
+                    })
+                    if len(samples) >= 3:
+                        break
+                if len(samples) >= 3:
+                    break
+            return samples
+        except Exception:
+            return []
+
+    def _char_range_to_lines(self, text: str, start: int, end: int) -> tuple:
+        """Translate character offsets to 1-based line numbers inclusive."""
+        # Clamp inputs
+        start = max(0, min(start, len(text)))
+        end = max(start, min(end, len(text)))
+        # Count newlines up to positions
+        before = text[:start]
+        within = text[start:end]
+        start_line = 1 + before.count('\n')
+        end_line = start_line + within.count('\n')
+        return start_line, end_line
+
+    def _extract_code_via_llm_file_scan(self, finding: Dict) -> List[Dict]:
+        """Fallback: scan likely files and ask LLM for relevant line ranges."""
+        code_samples: List[Dict] = []
         
         # First check if the finding itself has source_files in properties
         if 'properties' in finding and 'source_files' in finding.get('properties', {}):
@@ -1695,14 +2098,11 @@ The audit employed a comprehensive security assessment methodology including:
         else:
             affected_files = set()
         
-        # Also get affected files from node_refs
+        # Also get affected files from node_refs via graph nodes
         for node_ref in finding.get('affected', []):
-            # Try to extract file paths from node references
-            # Node refs might be contract names or file paths
             if '/' in node_ref or '.sol' in node_ref:
                 affected_files.add(node_ref)
             else:
-                # Try to find the file in our graphs
                 for graph in self.graphs.values():
                     for node in graph.get('nodes', []):
                         if node.get('label') == node_ref or node.get('id') == node_ref:
@@ -1724,57 +2124,33 @@ The audit employed a comprehensive security assessment methodology including:
         if not affected_files and self.debug:
             print(f"[!] No source files found for finding: {finding.get('title', 'Unknown')}")
         
-        # Try to find the project source directory
-        # Look for project.json file that has the source path
-        project_file = self.project_dir / "project.json"
-        source_base_path = None
-        
-        if project_file.exists():
-            with open(project_file, 'r') as f:
-                project_data = json.load(f)
-                source_base_path = Path(project_data.get('source_path', ''))
-        
-        # If no metadata, try common locations
+        # Determine source base path
+        source_base_path = self.repo_root
         if not source_base_path or not source_base_path.exists():
-            # Try the code directory parallel to hound
-            possible_paths = [
-                Path("/Users/bernhardmueller/Projects/hound3/code/size-meta-vault"),
-                self.project_dir.parent.parent / "code" / "size-meta-vault",
-                self.project_dir.parent.parent / "code" / self.project_dir.name.replace('_', '-')
-            ]
-            
-            for path in possible_paths:
-                if path.exists():
-                    source_base_path = path
-                    break
-        
+            # Last-resort heuristics
+            project_file = self.project_dir / "project.json"
+            if project_file.exists():
+                try:
+                    with open(project_file, 'r') as f:
+                        project_data = json.load(f)
+                        source_base_path = Path(project_data.get('source_path', ''))
+                except Exception:
+                    source_base_path = None
         if not source_base_path or not source_base_path.exists():
-            if self.debug:
-                print(f"[!] Could not find source code directory")
             return code_samples
         
-        # For each affected file, ask LLM to identify relevant code sections
-        for file_path in list(affected_files)[:3]:  # Limit to 3 files per finding
+        # Ask LLM to identify relevant lines per file
+        for file_path in list(affected_files)[:3]:
             try:
-                # Try to find the file
                 source_path = source_base_path / file_path
                 if not source_path.exists():
-                    # Try without src/ prefix if it's there
                     if file_path.startswith('src/'):
                         source_path = source_base_path / file_path[4:]
-                    # Or try adding src/ prefix
                     elif not file_path.startswith('/'):
                         source_path = source_base_path / 'src' / file_path
-                    
                     if not source_path.exists():
-                        if self.debug:
-                            print(f"[!] File not found: {source_path}")
                         continue
-                
-                with open(source_path, 'r') as f:
-                    file_content = f.read()
-                
-                # Ask LLM to identify relevant code sections
+                file_content = source_path.read_text(encoding='utf-8', errors='ignore')
                 prompt = f"""Given this security finding and the source code, identify the most relevant code section.
 
 Finding Title: {finding['title']}
@@ -1794,33 +2170,26 @@ Return a JSON object with:
 }}
 
 Only include the most relevant 10-20 lines that directly relate to the vulnerability."""
-                
                 response = self.llm.raw(
                     system="You are a code analysis expert. Return only valid JSON.",
                     user=prompt
                 )
-                
                 from utils.json_utils import extract_json_object
                 result = extract_json_object(response)
-                
                 if result and 'relevant_lines' in result:
                     lines = file_content.split('\n')
-                    start = result['relevant_lines']['start'] - 1  # Convert to 0-indexed
-                    end = result['relevant_lines']['end']
-                    
+                    start = max(1, int(result['relevant_lines']['start'])) - 1
+                    end = max(start + 1, int(result['relevant_lines']['end']))
                     code_samples.append({
                         'file': str(file_path),
-                        'start_line': result['relevant_lines']['start'],
-                        'end_line': result['relevant_lines']['end'],
+                        'start_line': start + 1,
+                        'end_line': end,
                         'code': '\n'.join(lines[start:end]),
                         'language': self._detect_language(file_path),
                         'explanation': result.get('explanation', '')
                     })
-            except Exception as e:
-                if self.debug:
-                    print(f"[!] Failed to extract code for {file_path}: {e}")
+            except Exception:
                 continue
-        
         return code_samples
     
     def _detect_language(self, file_path: str) -> str:

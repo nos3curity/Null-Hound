@@ -700,11 +700,11 @@ class AutonomousAgent:
            - Updated nodes with critical observations
            - Any errors or blockers encountered
         """
-        # Get agent config settings
-        agent_cfg = (self.config or {}).get('agent', {}) if isinstance(self.config, dict) else {}
-        max_tokens = int(agent_cfg.get('context_window', 128000))
-        compression_threshold = float(agent_cfg.get('compression_threshold', 0.75))
-        keep_recent = int(agent_cfg.get('keep_recent_actions', 5))
+        # Get context management settings (global for both agent and guidance)
+        context_cfg = (self.config or {}).get('context', {}) if isinstance(self.config, dict) else {}
+        max_tokens = int(context_cfg.get('max_tokens', 128000))
+        compression_threshold = float(context_cfg.get('compression_threshold', 0.75))
+        keep_recent = int(context_cfg.get('keep_recent_actions', 5))
         
         # Calculate current context size
         try:

@@ -65,6 +65,18 @@ models:
   #   thinking_budget: -1          # Token budget for thinking (-1 = unlimited)
 
 # ============================================================================
+# Agent Context Management
+# ============================================================================
+# IMPORTANT: These settings control context window limits for BOTH agent and guidance models.
+# Set max_tokens to the smaller of the two models' context windows to ensure compatibility.
+# For example, if agent supports 200k but guidance only supports 128k, use 128000.
+
+context:
+  max_tokens: 128000              # Maximum context size in tokens (use smaller of agent/guidance limits)
+  compression_threshold: 0.75     # Compress when reaching this % of max (default: 0.75 = 75%)
+  keep_recent_actions: 5          # Number of recent actions to preserve uncompressed
+
+# ============================================================================
 # Request Configuration
 # ============================================================================
 

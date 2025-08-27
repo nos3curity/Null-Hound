@@ -926,12 +926,18 @@ class AgentRunner:
                 model = guidance_config.get('model', 'unknown')
                 guidance_model_info = f"{provider}/{model}"
         
+        # Get context limit from config
+        context_cfg = self.config.get('context', {}) if self.config else {}
+        max_tokens = context_cfg.get('max_tokens', 128000)
+        compression_threshold = context_cfg.get('compression_threshold', 0.75)
+        
         config_text = (
             f"[bold cyan]AUTONOMOUS SECURITY AGENT[/bold cyan]\n"
             f"Project: [yellow]{self.project_id}[/yellow]\n"
             f"Agent Model: [magenta]{agent_model_info}[/magenta]\n"
             f"Guidance Model: [cyan]{guidance_model_info}[/cyan]\n"
-            f"Max Iterations: [green]{self.agent.max_iterations}[/green]"
+            f"Max Iterations: [green]{self.agent.max_iterations}[/green]\n"
+            f"Context Limit: [blue]{max_tokens:,} tokens[/blue] (compress at {int(compression_threshold*100)}%)"
         )
         if self.time_limit_minutes:
             config_text += f"\nTime Limit: [red]{self.time_limit_minutes} minutes[/red]"

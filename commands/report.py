@@ -89,8 +89,32 @@ def report(project_name: str, output: Optional[str], format: str,
         debug=debug
     )
     
-    # Generate report
-    console.print("[cyan]Analyzing project scope...[/cyan]")
+    # Progress callback from generator
+    def _progress_cb(ev: Dict):
+        status = ev.get('status', '')
+        msg = ev.get('message', '')
+        if status in ('start',):
+            console.print(f"[cyan]🚀 Booting report engines...[/cyan]")
+        elif status in ('llm',):
+            console.print(f"[cyan]🧠 Cooking up summary + overview...[/cyan]")
+        elif status in ('llm_done',):
+            console.print(f"[green]✅ Summary + overview ready[/green]")
+        elif status in ('findings',):
+            console.print(f"[cyan]🔍 Hunting confirmed findings...[/cyan]")
+        elif status in ('findings_describe',):
+            console.print(f"[cyan]✍️  Polishing finding write-ups...[/cyan]")
+        elif status in ('snippets',):
+            console.print(f"[cyan]🧩 Picking code bites: {msg}[/cyan]")
+        elif status in ('snippets_done',):
+            console.print(f"[green]✅ {msg}[/green]")
+        elif status in ('render',):
+            console.print(f"[cyan]🖨️  Forging the final scroll...[/cyan]")
+        elif status in ('findings_done',):
+            console.print(f"[green]✅ {msg}[/green]")
+        else:
+            # Generic fallback
+            if msg:
+                console.print(f"[dim]{msg}[/dim]")
     
     try:
         report_data = generator.generate(
@@ -98,7 +122,8 @@ def report(project_name: str, output: Optional[str], format: str,
             project_source=project["source_path"],
             title=title or f"Security Audit: {project_name}",
             auditors=auditors.split(','),
-            format=format
+            format=format,
+            progress_callback=_progress_cb
         )
         
         # Optionally show prompt/response for debugging
