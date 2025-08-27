@@ -23,7 +23,7 @@ console = Console()
 
 @click.command()
 @click.argument('project_name')
-@click.option('--threshold', '-t', default=0.5, help="Confidence threshold for hypothesis review (default: 0.5)")
+@click.option('--threshold', '-t', default=0.5, help="Confidence threshold for hypothesis review (default: 0.5 or 50%)")
 @click.option('--skip-filter', is_flag=True, help="Skip pre-filtering of hypotheses")
 @click.option('--debug', is_flag=True, help="Enable debug mode")
 def finalize(project_name: str, threshold: float, skip_filter: bool, debug: bool):
@@ -35,6 +35,10 @@ def finalize(project_name: str, threshold: float, skip_filter: bool, debug: bool
     2. Reviews remaining hypotheses with full source code context
     3. Confirms or rejects each hypothesis with reasoning
     """
+    # Convert percentage values (>1) to decimal
+    if threshold > 1:
+        threshold = threshold / 100
+    
     manager = ProjectManager()
     project = manager.get_project(project_name)
     
