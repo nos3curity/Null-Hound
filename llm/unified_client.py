@@ -11,6 +11,7 @@ from .openai_provider import OpenAIProvider
 from .gemini_provider import GeminiProvider
 from .anthropic_provider import AnthropicProvider
 from .xai_provider import XAIProvider
+from .deepseek_provider import DeepSeekProvider
 from .mock_provider import MockProvider
 from .token_tracker import get_token_tracker
 
@@ -95,6 +96,11 @@ class UnifiedLLMClient:
             )
         elif provider_name == "xai":
             self.provider = XAIProvider(
+                **common_kwargs,
+                verbose=llm_verbose
+            )
+        elif provider_name == "deepseek":
+            self.provider = DeepSeekProvider(
                 **common_kwargs,
                 verbose=llm_verbose
             )
