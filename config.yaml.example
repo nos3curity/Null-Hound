@@ -19,13 +19,18 @@ gemini:
 anthropic:
   api_key_env: ANTHROPIC_API_KEY # Environment variable containing your Anthropic API key
 
+# DeepSeek Configuration
+deepseek:
+  api_key_env: DEEPSEEK_API_KEY  # Environment variable containing your DeepSeek API key
+  # base_url: https://api.deepseek.com  # Optional: Custom API endpoint (default shown)
+
 # ============================================================================
 # Model Profiles
 # ============================================================================
 # Configure different models for different tasks
 # Each profile can use a different provider and model with specific settings
 #
-# Available providers: openai, gemini, anthropic
+# Available providers: openai, gemini, anthropic, deepseek
 
 models:
   # Profile for graph building operations (fast, structured output)
