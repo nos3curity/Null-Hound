@@ -156,6 +156,12 @@ def build(
             # Narrative model names
             models = (config or {}).get('models', {})
             graph_model = (models.get('graph') or {}).get('model') or 'Graph-Model'
+            # Discovery uses guidance/strategist profile; prefer strategist, then guidance
+            discovery_model = (
+                (models.get('strategist') or {}).get('model')
+                or (models.get('guidance') or {}).get('model')
+                or 'Guidance-Model'
+            )
 
             # Animated progress bar during graph construction
             iteration_total = max_iterations
@@ -178,8 +184,8 @@ def build(
                             # Narrative seasoning + progress description
                             if kind == 'discover':
                                 line = random.choice([
-                                    f"🧑‍🏭 {graph_model} scouts the terrain: {msg}",
-                                    f"🧑‍🏭 Our junior cartographer {graph_model} surveys the codebase — bold move!",
+                                    f"🧑‍🏭 {discovery_model} scouts the terrain: {msg}",
+                                    f"🧑‍🏭 Strategist {discovery_model} surveys the codebase — bold move!",
                                     msg,
                                 ])
                                 log_line(kind, line)
@@ -242,7 +248,7 @@ def build(
                         kind = info.get('status', 'build')
                         if not quiet:
                             if kind == 'discover':
-                                log_line(kind, f"🧑‍🏭 {graph_model} scouts the terrain: {msg}")
+                                log_line(kind, f"🧑‍🏭 {discovery_model} scouts the terrain: {msg}")
                             elif kind in ('graph_build','building'):
                                 log_line(kind, f"🗺️  {graph_model} sketches connections — {msg}")
                             elif kind == 'update':
