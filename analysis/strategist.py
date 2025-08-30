@@ -39,34 +39,52 @@ def _choose_profile(cfg: Dict[str, Any]) -> str:
 class Strategist:
     """Senior planning agent."""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, debug: bool = False, session_id: Optional[str] = None):
         self.config = config or {}
         profile = _choose_profile(self.config)
-        self.llm = UnifiedLLMClient(cfg=self.config, profile=profile)
+        
+        # Initialize debug logger if needed
+        self.debug_logger = None
+        if debug:
+            from analysis.debug_logger import DebugLogger
+            self.debug_logger = DebugLogger(session_id or "strategist")
+        
+        self.llm = UnifiedLLMClient(cfg=self.config, profile=profile, debug_logger=self.debug_logger)
 
-    def plan_next(self, *, graphs_summary: str, completed: List[str], n: int = 5, coverage_summary: Optional[str] = None, ledger_summary: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Plan the next n investigations from a graphs + history summary.
+    def plan_next(self, *, graphs_summary: str, completed: List[str], n: int = 5, 
+                  hypotheses_summary: Optional[str] = None, coverage_summary: Optional[str] = None, 
+                  ledger_summary: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Plan the next n investigations from comprehensive audit context.
 
         Returns a list of dicts compatible with downstream display and PlanStore.
         """
         system = (
             "You are a senior smart-contract security auditor planning an audit roadmap.\n"
-            "Plan the next investigations based on the system architecture graph.\n\n"
+            "You have access to all graphs, annotations, previous findings, and coverage data.\n\n"
             "GUIDELINES:\n"
-            "- Prefer HIGH-LEVEL aspects to review unless the graph suggests a specific risk.\n"
-            "- Avoid repeating completed items.\n"
-            "- Provide exactly the requested number of items if possible.\n"
+            "- Review the graph annotations (observations and assumptions) carefully\n"
+            "- Consider what hypotheses have already been found and their severity\n"
+            "- Focus on uncovered areas and high-risk components\n"
+            "- Build upon previous investigation results\n"
+            "- Avoid repeating completed items unless new evidence warrants re-investigation\n"
+            "- Provide exactly the requested number of items if possible\n"
         )
 
         completed_str = "\n".join(f"- {c}" for c in completed) if completed else "(none)"
-        coverage_str = coverage_summary or "(none)"
+        hypotheses_str = hypotheses_summary or "(no hypotheses formed yet)"
+        coverage_str = coverage_summary or "(no coverage data)"
         ledger_str = ledger_summary or "(none)"
+        
         user = (
-            f"SYSTEM GRAPH SUMMARY:\n{graphs_summary}\n\n"
-            f"ALREADY COMPLETED:\n{completed_str}\n\n"
-            f"RECENT COVERAGE (avoid redundant work unless new evidence warrants revisits):\n{coverage_str}\n\n"
-            f"RECENT PROJECT FRAMES (informative only; DO NOT block if re-analysis is intentional):\n{ledger_str}\n\n"
-            f"Plan the top {n} NEW investigations."
+            f"ALL GRAPHS WITH ANNOTATIONS:\n{graphs_summary}\n\n"
+            f"CURRENT HYPOTHESES (vulnerabilities found):\n{hypotheses_str}\n\n"
+            f"COMPLETED INVESTIGATIONS (with results):\n{completed_str}\n\n"
+            f"COVERAGE STATUS:\n{coverage_str}\n\n"
+            f"Plan the top {n} NEW investigations based on:\n"
+            f"1. Graph annotations showing potential issues\n"
+            f"2. Areas not yet covered\n"
+            f"3. Building on existing hypotheses\n"
+            f"4. High-risk components identified in graphs"
         )
 
         plan: PlanBatch = self.llm.parse(system=system, user=user, schema=PlanBatch)

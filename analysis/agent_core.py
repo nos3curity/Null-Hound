@@ -101,10 +101,20 @@ class AutonomousAgent:
         # Save config for later utilities
         self.config = config
 
-        # Use 'scout' profile for agent operations (fallbacks handled in client)
+        # Check if there are platform/model overrides in the 'agent' profile
+        # If so, use those instead of the 'scout' profile
+        if (config and 'models' in config and 'agent' in config['models'] and 
+            (config['models']['agent'].get('provider') or config['models']['agent'].get('model'))):
+            # Use 'agent' profile when overrides are present
+            profile_to_use = "agent"
+        else:
+            # Fall back to 'scout' profile (default behavior)
+            profile_to_use = "scout"
+        
+        # Use the determined profile for agent operations
         self.llm = UnifiedLLMClient(
             cfg=config,
-            profile="scout",
+            profile=profile_to_use,
             debug_logger=self.debug_logger
         )
         

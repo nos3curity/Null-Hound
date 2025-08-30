@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from analysis.scout import Scout
 from analysis.strategist import Strategist
-from analysis.run_tracker import RunTracker
+from analysis.session_tracker import SessionTracker
 from llm.token_tracker import get_token_tracker
 from pydantic import BaseModel, Field
 
@@ -582,7 +582,7 @@ class AgentRunner:
         self.agent = None
         self.start_time = None
         self.completed_investigations = []  # Track completed investigation goals
-        self.run_tracker: Optional[RunTracker] = None
+        self.session_tracker: Optional[SessionTracker] = None
         self.project_dir: Optional[Path] = None
         self.plan_store = None
         self.session_id: Optional[str] = session
@@ -724,6 +724,61 @@ class AgentRunner:
         return True
 
     # ---------------------- Dashboard Helpers ----------------------
+    def _get_hypotheses_summary(self) -> str:
+        """Get a summary of current hypotheses for the Strategist."""
+        try:
+            from pathlib import Path as _Path
+            import json as _json
+            hyp_file = (_Path(self.project_dir) / 'hypotheses.json') if self.project_dir else None
+            if hyp_file and hyp_file.exists():
+                data = _json.loads(hyp_file.read_text())
+                hyps = data.get('hypotheses', {})
+                if not hyps:
+                    return "No hypotheses formed yet"
+                
+                summary_parts = []
+                for hyp_id, h in list(hyps.items())[:10]:  # Limit to 10 most recent
+                    status = h.get('status', 'proposed')
+                    severity = h.get('severity', 'unknown')
+                    confidence = h.get('confidence', 'unknown')
+                    desc = h.get('description', '')[:100]  # Truncate long descriptions
+                    summary_parts.append(f"• [{status}] {desc} (severity: {severity}, confidence: {confidence})")
+                
+                if len(hyps) > 10:
+                    summary_parts.append(f"... and {len(hyps) - 10} more hypotheses")
+                
+                return "\n".join(summary_parts)
+            return "No hypotheses file found"
+        except Exception:
+            return "Error reading hypotheses"
+    
+    def _get_investigation_results_summary(self) -> List[str]:
+        """Get investigation results with findings, not just goals."""
+        if not self.session_tracker:
+            return list(self.completed_investigations)
+        
+        # Get investigations from session with their results
+        session_data = self.session_tracker.session_data
+        investigations = session_data.get('investigations', [])
+        
+        results = []
+        for inv in investigations:
+            goal = inv.get('goal', '')
+            hypotheses = inv.get('hypotheses', {})
+            total_hyp = hypotheses.get('total', 0)
+            iterations = inv.get('iterations_completed', 0)
+            
+            # Format: "Goal (X iterations, Y hypotheses found)"
+            result_str = f"{goal} ({iterations} iterations, {total_hyp} hypotheses)"
+            results.append(result_str)
+        
+        # Also add any completed investigations not yet in session
+        for goal in self.completed_investigations:
+            if not any(goal in r for r in results):
+                results.append(goal)
+        
+        return results
+    
     def _hypothesis_stats(self) -> dict:
         """Return hypothesis stats from project hypotheses.json."""
         stats = {"total": 0, "confirmed": 0, "rejected": 0, "uncertain": 0}
@@ -759,108 +814,131 @@ class AgentRunner:
         except Exception:
             return {'nodes': {'total': 0, 'visited': 0, 'percent': 0.0}, 'cards': {'total': 0, 'visited': 0, 'percent': 0.0}}
 
-    def _render_dashboard(self, items: list, current_index: int = -1):
-        """Render a compact dashboard with planning + stats."""
-        from rich.table import Table
-        from rich.panel import Panel
-        from rich.columns import Columns
-        from rich.box import SIMPLE
-        
-        # Planning table
-        plan_tbl = Table(title="Planning", show_header=True, header_style="bold magenta", box=SIMPLE)
-        plan_tbl.add_column("#", style="dim", width=4)
-        plan_tbl.add_column("Status", style="cyan", width=9)
-        plan_tbl.add_column("Goal", style="white", overflow="fold")
-        for i, it in enumerate(items, 1):
-            if current_index == i - 1:
-                status = "[yellow]RUNNING[/yellow]"
-            elif i - 1 < current_index:
-                status = "[green]DONE[/green]"
-            else:
-                status = "[dim]NEXT[/dim]"
-            plan_tbl.add_row(str(i), status, getattr(it, 'goal', ''))
-
-        # Stats tables
-        hyp = self._hypothesis_stats()
-        cov = self._coverage_stats()
-        stats_tbl = Table(title="Stats", show_header=False, box=SIMPLE)
-        stats_tbl.add_row("Hypotheses", f"{hyp['total']} total | {hyp['confirmed']} confirmed | {hyp['rejected']} rejected | {hyp['uncertain']} pending")
-        stats_tbl.add_row("Coverage (nodes)", f"{cov['nodes']['visited']}/{cov['nodes']['total']} ({cov['nodes']['percent']}%)")
-        stats_tbl.add_row("Coverage (cards)", f"{cov['cards']['visited']}/{cov['cards']['total']} ({cov['cards']['percent']}%)")
-
-        # Agent log (last N lines)
-        max_lines = 40
-        log_lines = self._agent_log[-max_lines:] if self._agent_log else ["(no events yet)"]
-        # Indent lines for readability
-        log_text = "\n".join(log_lines)
-        log_panel = Panel(log_text, border_style="dim", title="Agent Log (latest)")
-
-        return Panel(Columns([plan_tbl, stats_tbl, log_panel]), border_style="cyan", title="Hound Audit Dashboard")
     
     def _graph_summary(self) -> str:
-        """Create a compact summary of the system graph with annotations."""
+        """Create a comprehensive summary of ALL graphs loaded by the Scout."""
         try:
-            g = self.agent.loaded_data.get('system_graph', {}).get('data', {})
-            nodes = g.get('nodes', [])
-            edges = g.get('edges', [])
-            parts = [f"{len(nodes)} nodes, {len(edges)} edges\n"]
+            parts = []
             
-            # List all nodes compactly with inline annotations
-            for n in nodes:
-                nid = n.get('id', '')
-                lbl = n.get('label') or nid
-                typ = n.get('type', '')[:4]  # Abbreviate type
-                observations = n.get('observations', [])
-                assumptions = n.get('assumptions', [])
+            # Get all loaded graphs from the agent
+            loaded_data = self.agent.loaded_data if self.agent else {}
+            
+            # Process system graph first
+            if loaded_data.get('system_graph'):
+                graph_data = loaded_data['system_graph']
+                graph_name = graph_data.get('name', 'SYSTEM')
+                g = graph_data.get('data', {})
+                nodes = g.get('nodes', [])
+                edges = g.get('edges', [])
                 
-                # Build compact line
-                line = f"• {lbl} ({typ})"
+                parts.append(f"\n=== {graph_name.upper()} GRAPH ===")
+                parts.append(f"{len(nodes)} nodes, {len(edges)} edges")
                 
-                # Add inline annotations using abbreviated labels
-                annotations = []
-                if observations:
-                    obs_str = '; '.join(observations[:3])  # Limit to 3
-                    annotations.append(f"obs:{obs_str}")
-                if assumptions:
-                    assum_str = '; '.join(assumptions[:3])  # Limit to 3
-                    annotations.append(f"asm:{assum_str}")
-                
-                if annotations:
-                    line += f" [{' | '.join(annotations)}]"
+                # List all nodes compactly with inline annotations
+                for n in nodes:
+                    nid = n.get('id', '')
+                    lbl = n.get('label') or nid
+                    typ = n.get('type', '')[:4]  # Abbreviate type
+                    observations = n.get('observations', [])
+                    assumptions = n.get('assumptions', [])
                     
-                parts.append(line)
+                    # Build compact line
+                    line = f"• {lbl} ({typ})"
                     
-            return "\n".join(parts)
-        except Exception:
-            return "(no graph summary available)"
+                    # Add inline annotations
+                    annotations = []
+                    if observations:
+                        obs_str = '; '.join(observations[:3])  # Limit to 3
+                        annotations.append(f"obs:{obs_str}")
+                    if assumptions:
+                        assum_str = '; '.join(assumptions[:3])  # Limit to 3
+                        annotations.append(f"asm:{assum_str}")
+                    
+                    if annotations:
+                        line += f" [{' | '.join(annotations)}]"
+                        
+                    parts.append(line)
+            
+            # Process additional graphs loaded by the Scout
+            additional_graphs = loaded_data.get('graphs', {})
+            for graph_name, graph_data in additional_graphs.items():
+                if not isinstance(graph_data, dict) or 'data' not in graph_data:
+                    continue
+                    
+                g = graph_data.get('data', {})
+                nodes = g.get('nodes', [])
+                edges = g.get('edges', [])
+                
+                parts.append(f"\n=== {graph_name.upper()} GRAPH ===")
+                parts.append(f"{len(nodes)} nodes, {len(edges)} edges")
+                
+                # List all nodes compactly with inline annotations
+                for n in nodes:
+                    nid = n.get('id', '')
+                    lbl = n.get('label') or nid
+                    typ = n.get('type', '')[:4]  # Abbreviate type
+                    observations = n.get('observations', [])
+                    assumptions = n.get('assumptions', [])
+                    
+                    # Build compact line
+                    line = f"• {lbl} ({typ})"
+                    
+                    # Add inline annotations
+                    annotations = []
+                    if observations:
+                        obs_str = '; '.join(observations[:3])  # Limit to 3
+                        annotations.append(f"obs:{obs_str}")
+                    if assumptions:
+                        assum_str = '; '.join(assumptions[:3])  # Limit to 3
+                        annotations.append(f"asm:{assum_str}")
+                    
+                    if annotations:
+                        line += f" [{' | '.join(annotations)}]"
+                        
+                    parts.append(line)
+                    
+            return "\n".join(parts) if parts else "(no graphs available)"
+        except Exception as e:
+            return f"(error summarizing graphs: {str(e)})"
 
     def _plan_investigations(self, n: int) -> List[object]:
         """Plan next investigations using Strategist by default."""
-        # Use Strategist with current graph summary and completed list
+        # Get comprehensive graph summary with all annotations
         graphs_summary = self._graph_summary()
-        strategist = Strategist(config=self.config)
+        
+        # Get hypothesis summary
+        hypotheses_summary = self._get_hypotheses_summary()
+        
+        # Get investigation results summary (not just goals)
+        investigation_results = self._get_investigation_results_summary()
+        
+        # Get coverage summary from session tracker
         coverage_summary = None
-        try:
-            if getattr(self, 'agent', None) and getattr(self.agent, 'coverage_index', None):
-                coverage_summary = self.agent.coverage_index.summarize(limit=50)
-        except Exception:
-            coverage_summary = None
-        # Include project-wide plan ledger snapshot if available
-        ledger_summary = None
-        try:
-            from analysis.plan_ledger import PlanLedger
-            if self.project_dir:
-                ledger = PlanLedger(self.project_dir / 'plan_ledger.json', agent_id='planner')
-                ledger_summary = ledger.summarize_recent(10)
-        except Exception:
-            ledger_summary = None
+        if self.session_tracker:
+            cov_stats = self.session_tracker.get_coverage_stats()
+            coverage_summary = (
+                f"Nodes visited: {cov_stats['nodes']['visited']}/{cov_stats['nodes']['total']} "
+                f"({cov_stats['nodes']['percent']:.1f}%)\n"
+                f"Cards analyzed: {cov_stats['cards']['visited']}/{cov_stats['cards']['total']} "
+                f"({cov_stats['cards']['percent']:.1f}%)"
+            )
+            if cov_stats['visited_node_ids']:
+                coverage_summary += f"\nVisited nodes: {', '.join(cov_stats['visited_node_ids'][:10])}"
+                if len(cov_stats['visited_node_ids']) > 10:
+                    coverage_summary += f" ... and {len(cov_stats['visited_node_ids']) - 10} more"
+        
+        strategist = Strategist(config=self.config, debug=self.debug, session_id=self.session_id)
         planned = strategist.plan_next(
             graphs_summary=graphs_summary,
-            completed=list(self.completed_investigations),
-            n=n,
+            completed=investigation_results,  # Now includes results, not just goals
+            hypotheses_summary=hypotheses_summary,
             coverage_summary=coverage_summary,
-            ledger_summary=ledger_summary,
+            n=n
         )
+        
+        # Track planning in session
+        if self.session_tracker and planned:
+            self.session_tracker.add_planning(planned)
 
         # Adapt dicts to the legacy display shape using SimpleNamespace
         from types import SimpleNamespace
@@ -1019,33 +1097,104 @@ class AgentRunner:
                 meta += f", {cat}"
             console.print(f"  {mark} {it.goal}  ({meta})")
 
+    def _log_planning_status(self, items: List[object], current_index: int = -1):
+        """Log beautiful planning status and coverage information."""
+        from rich.table import Table
+        from rich.box import ROUNDED
+        from rich.panel import Panel
+        
+        # Clear previous output for clean display
+        console.print("\n" + "="*80)
+        console.print("[bold cyan]STRATEGIST PLANNING & AUDIT STATUS[/bold cyan]")
+        console.print("="*80)
+        
+        # Coverage statistics from session tracker
+        if self.session_tracker:
+            cov = self.session_tracker.get_coverage_stats()
+            console.print("\n[bold yellow]Coverage Statistics:[/bold yellow]")
+            console.print(f"  Nodes visited: {cov['nodes']['visited']}/{cov['nodes']['total']} ([cyan]{cov['nodes']['percent']:.1f}%[/cyan])")
+            console.print(f"  Cards analyzed: {cov['cards']['visited']}/{cov['cards']['total']} ([cyan]{cov['cards']['percent']:.1f}%[/cyan])")
+        else:
+            console.print("\n[bold yellow]Coverage Statistics:[/bold yellow] [dim]Not available[/dim]")
+        
+        # Hypothesis statistics
+        hyp = self._hypothesis_stats()
+        console.print("\n[bold yellow]Hypothesis Statistics:[/bold yellow]")
+        console.print(f"  Total: {hyp['total']} | Confirmed: [green]{hyp['confirmed']}[/green] | Rejected: [red]{hyp['rejected']}[/red] | Pending: [yellow]{hyp['uncertain']}[/yellow]")
+        
+        # Current investigation status
+        if current_index >= 0 and current_index < len(items):
+            current_item = items[current_index]
+            console.print(f"\n[bold magenta]Currently Investigating:[/bold magenta] {current_item.goal}")
+        elif current_index == -1:
+            console.print("\n[bold blue]Planning next investigations...[/bold blue]")
+        
+        # Investigation plan table
+        if items:
+            console.print("\n[bold yellow]Investigation Plan:[/bold yellow]")
+            table = Table(show_header=True, header_style="bold magenta", box=ROUNDED)
+            table.add_column("#", style="dim", width=3)
+            table.add_column("Status", width=10)
+            table.add_column("Goal", overflow="fold")
+            table.add_column("Priority", width=8)
+            table.add_column("Impact", width=8)
+            table.add_column("Category", width=10)
+            
+            for i, it in enumerate(items):
+                num = str(i + 1)
+                if i == current_index:
+                    status = "[bold yellow]ACTIVE[/bold yellow]"
+                elif i < current_index:
+                    status = "[green]DONE[/green]"
+                else:
+                    status = "[dim]PENDING[/dim]"
+                
+                goal = getattr(it, 'goal', '')
+                priority = str(getattr(it, 'priority', '-'))
+                impact = getattr(it, 'expected_impact', '-')
+                category = getattr(it, 'category', '-')
+                
+                table.add_row(num, status, goal, priority, impact, category)
+            
+            console.print(table)
+        
+        # Model activity log
+        if hasattr(self, '_agent_log') and self._agent_log:
+            recent_logs = self._agent_log[-5:]  # Show last 5 entries
+            if recent_logs:
+                console.print("\n[bold yellow]Recent Model Activity:[/bold yellow]")
+                for entry in recent_logs:
+                    console.print(f"  [dim]{entry}[/dim]")
+        
+        console.print("="*80 + "\n")
+
     def run(self, plan_n: int = 5):
         """Run the agent using the unified autonomous flow."""
-        # Initialize run tracker
+        # Initialize session tracker
         if '/' in self.project_id or Path(self.project_id).exists():
             project_dir = Path(self.project_id).resolve()
         else:
             project_dir = get_project_dir(self.project_id)
         
-        output_dir = project_dir / "agent_runs"
-        output_dir.mkdir(exist_ok=True, parents=True)
-        run_file = output_dir / f"run_{self.agent.agent_id}.json"
+        # Use sessions directory instead of agent_runs
+        sessions_dir = project_dir / "sessions"
+        sessions_dir.mkdir(exist_ok=True, parents=True)
         
-        self.run_tracker = RunTracker(run_file)
+        # Generate session ID if not provided
+        if not self.session_id:
+            self.session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{self.agent.agent_id}"
+        
+        # Initialize session tracker
+        self.session_tracker = SessionTracker(sessions_dir, self.session_id)
+        
+        # Initialize coverage tracking
+        graphs_dir = project_dir / "graphs"
+        manifest_dir = project_dir / "manifest"
+        self.session_tracker.initialize_coverage(graphs_dir, manifest_dir)
         
         # Set up token tracker
         token_tracker = get_token_tracker()
         token_tracker.reset()
-        
-        # Capture command line arguments
-        command_args = sys.argv
-        self.run_tracker.set_run_info(self.agent.agent_id, command_args)
-        # Tag run with session id
-        if self.session_id:
-            try:
-                self.run_tracker.set_session_id(self.session_id)
-            except Exception:
-                pass
         
         # Display configuration (omit context window; not available in unified client)
         # Get the actual models being used
@@ -1060,12 +1209,20 @@ class AgentRunner:
                 model = agent_config.get('model', 'unknown')
                 agent_model_info = f"{provider}/{model}"
             
-            # Get guidance model
+            # Get guidance model (strategist)
             if 'guidance' in self.config['models']:
                 guidance_config = self.config['models']['guidance']
                 provider = guidance_config.get('provider', 'unknown')
                 model = guidance_config.get('model', 'unknown')
                 guidance_model_info = f"{provider}/{model}"
+            elif 'strategist' in self.config['models']:
+                strategist_config = self.config['models']['strategist']
+                provider = strategist_config.get('provider', 'unknown')
+                model = strategist_config.get('model', 'unknown')
+                guidance_model_info = f"{provider}/{model}"
+        
+        # Store models in session tracker
+        self.session_tracker.set_models(agent_model_info, guidance_model_info)
         
         # Get context limit from config
         context_cfg = self.config.get('context', {}) if self.config else {}
@@ -1084,36 +1241,38 @@ class AgentRunner:
             config_text += f"\nTime Limit: [red]{self.time_limit_minutes} minutes[/red]"
         console.print(Panel.fit(config_text, border_style="cyan"))
 
-        # Prepare a compact progress callback
+        # Enhanced progress callback with beautiful logging
         def progress_cb(info: dict):
             status = info.get('status', '')
             msg = info.get('message', '')
             it = info.get('iteration', 0)
-            def _short(s: str, n: int = 200) -> str:
-                try:
-                    return (s[: n - 3] + '...') if isinstance(s, str) and len(s) > n else (s or '')
-                except Exception:
-                    return ''
+            
             if status == 'decision':
                 act = info.get('action', '-')
                 reasoning = info.get('reasoning', '')
                 params = info.get('parameters', {}) or {}
                 
+                # Log model actions and thoughts clearly
+                console.print(f"\n[bold blue]Scout Model Decision (Iteration {it}):[/bold blue]")
+                console.print(f"  [cyan]Action:[/cyan] {act}")
+                if reasoning:
+                    console.print(f"  [cyan]Thought:[/cyan] {reasoning}")
+                
                 # Special formatting for deep_think
                 if act == 'deep_think':
-                    console.print(f"\n[bold magenta]🧠 Iter {it}: Calling Deep Think Model[/bold magenta]")
-                    if reasoning:
-                        console.print(f"  [yellow]Reason:[/yellow] {reasoning}")
-                else:
-                    console.print(f"[cyan]Iter {it} decision:[/cyan] {act}")
-                    if reasoning:
-                        console.print(f"  [dim]Thought:[/dim] {reasoning}")  # Don't abbreviate thoughts
-                    if params:
-                        try:
-                            import json as _json
-                            console.print(f"  [dim]Params:[/dim] {_short(_json.dumps(params, separators=(',', ':')))}")
-                        except Exception:
-                            pass
+                    console.print(f"\n[bold magenta]══════ CALLING STRATEGIST MODEL FOR DEEP ANALYSIS ══════[/bold magenta]")
+                    console.print("[yellow]Strategist is analyzing the collected context...[/yellow]")
+                elif params:
+                    # Show parameters compactly for non-deep-think actions
+                    try:
+                        import json as _json
+                        params_str = _json.dumps(params, separators=(',', ':'))
+                        if len(params_str) > 200:
+                            params_str = params_str[:197] + '...'
+                        console.print(f"  [dim]Parameters: {params_str}[/dim]")
+                    except Exception:
+                        pass
+                        
             elif status == 'result':
                 # Special handling for deep_think results
                 action = info.get('action', '')
@@ -1121,28 +1280,32 @@ class AgentRunner:
                 
                 if action == 'deep_think':
                     if result.get('status') == 'success':
-                        console.print(f"\n[bold magenta]═══ DEEP THINK ANALYSIS ═══[/bold magenta]")
+                        console.print(f"\n[bold green]══════ STRATEGIST ANALYSIS COMPLETE ══════[/bold green]")
                         
-                        # Show the compact response
+                        # Show the strategist's analysis
                         full_response = result.get('full_response', '')
                         if full_response:
-                            # Simply display the compact output
-                            console.print(Panel(full_response, border_style="magenta"))
+                            from rich.panel import Panel
+                            console.print(Panel(full_response, border_style="green", title="Strategist Output"))
                         
-                        # Show hypotheses formed count
+                        # Show hypotheses formed
                         hypotheses_formed = result.get('hypotheses_formed', 0)
                         if hypotheses_formed > 0:
                             console.print(f"[bold green]✓ Added {hypotheses_formed} hypothesis(es) to global store[/bold green]")
                         console.print()
                     else:
-                        # Deep think failed - show the error
+                        # Strategist failed - show the error
                         error_msg = result.get('error', 'Unknown error')
-                        console.print(f"\n[bold red]❌ Deep Think Error:[/bold red] {error_msg}")
-                        console.print("[yellow]Continuing with agent exploration...[/yellow]")
+                        console.print(f"\n[bold red]Strategist Error:[/bold red] {error_msg}")
+                        console.print("[yellow]Continuing with scout exploration...[/yellow]")
                 else:
-                    console.print(f"[dim]Iter {it} {status}:[/dim] {msg}")
-            elif status in { 'analyzing', 'executing', 'hypothesis_formed' }:
-                console.print(f"[dim]Iter {it} {status}:[/dim] {msg}")
+                    # Regular action results - keep brief
+                    console.print(f"[dim]Result: {msg or 'completed'}[/dim]")
+                    
+            elif status == 'hypothesis_formed':
+                console.print(f"\n[bold green]Hypothesis Formed:[/bold green] {msg}")
+            elif status in {'analyzing', 'executing'}:
+                console.print(f"[dim]{status.capitalize()}: {msg}[/dim]")
 
         # Compose audit prompt
         audit_prompt = (
@@ -1165,136 +1328,189 @@ class AgentRunner:
             # Log planning batch instead of printing when dashboard is active
             items = self._plan_investigations(max(1, plan_n))
             self._agent_log.append(f"Planning batch {planned_round} (top {plan_n})")
-            # Live dashboard for this batch
-            from rich.live import Live
-            with Live(self._render_dashboard(items, current_index=-1), console=console, refresh_per_second=4, transient=False) as live:
-                # refresher bound to this planning batch
-                def _refresh(idx: int):
-                    try:
-                        live.update(self._render_dashboard(items, current_index=idx))
-                    except Exception:
-                        pass
+            # Log planning status at start of batch
+            console.print(f"\n[bold cyan]═══ Planning Batch {planned_round} ═══[/bold cyan]")
+            self._log_planning_status(items, current_index=-1)
+            
+            # If no items, log and stop
+            if not items:
+                console.print("[yellow]No further promising investigations suggested — audit complete[/yellow]")
+                break
+            
+            # Log previously completed investigations
+            if self.completed_investigations:
+                console.print("\n[bold green]Previously Completed Investigations:[/bold green]")
+                for goal in self.completed_investigations:
+                    console.print(f"  ✓ {goal}")
+            
+            # Log new investigations planned by strategist
+            console.print("\n[bold cyan]New Investigations Planned by Strategist:[/bold cyan]")
+            for i, it in enumerate(items, 1):
+                pr = getattr(it, 'priority', 0)
+                imp = getattr(it, 'expected_impact', None)
+                cat = getattr(it, 'category', None)
+                reasoning = getattr(it, 'reasoning', '')
+                
+                console.print(f"\n  {i}. [bold]{it.goal}[/bold]")
+                console.print(f"     Priority: {pr} | Impact: {imp or 'unknown'} | Category: {cat or 'general'}")
+                if reasoning:
+                    console.print(f"     [dim]Reasoning: {reasoning}[/dim]")
+            
+            # Execute investigations with proper logging
+            for idx, inv in enumerate(items):
+                # Check time limit before starting each investigation
+                if self.time_limit_minutes:
+                    elapsed_minutes = (time.time() - start_overall) / 60.0
+                    remaining_minutes = self.time_limit_minutes - elapsed_minutes
+                    if remaining_minutes <= 0:
+                        console.print(f"\n[yellow]Time limit reached ({self.time_limit_minutes} minutes) — stopping audit[/yellow]")
+                        break
+                    if remaining_minutes < 2:
+                        console.print(f"\n[yellow]Warning: Only {remaining_minutes:.1f} minutes remaining[/yellow]")
+                
+                # Log current investigation with updated coverage
+                console.print(f"\n[bold magenta]═══ Starting Investigation {idx+1}/{len(items)} ═══[/bold magenta]")
+                console.print(f"[bold]Goal:[/bold] {inv.goal}")
+                self._log_planning_status(items, current_index=idx)
+                # Mark plan item in_progress if we have a frame_id
+                try:
+                    if getattr(inv, 'frame_id', None) and self.plan_store:
+                        from analysis.plan_store import PlanStatus
+                        self.plan_store.update_status(inv.frame_id, PlanStatus.IN_PROGRESS, rationale='Execution started')
+                    if getattr(self, 'agent', None) and getattr(self.agent, 'coverage_index', None):
+                        self.agent.coverage_index.record_investigation(getattr(inv, 'frame_id', None), [], 'in_progress')
+                except Exception:
+                    pass
+                max_iters = self.agent.max_iterations if self.agent.max_iterations else 5
+                # Reduce iterations if we're running low on time
+                if self.time_limit_minutes:
+                    elapsed_minutes = (time.time() - start_overall) / 60.0
+                    remaining_minutes = self.time_limit_minutes - elapsed_minutes
+                    safe_iters = max(1, int(remaining_minutes / 1.5))
+                    if safe_iters < max_iters:
+                        console.print(f"[yellow]Reducing iterations from {max_iters} to {safe_iters} due to time limit[/yellow]")
+                        max_iters = safe_iters
 
-                # If no items, log and stop
-                if not items:
-                    self._agent_log.append("No further promising investigations suggested — audit complete")
-                    _refresh(-1)
-                    break
+                self.start_time = time.time()
+                try:
+                    # Enhanced progress callback that logs model actions and thoughts
+                    def _cb(info: dict):
+                        status = info.get('status', '')
+                        msg = info.get('message', '')
+                        it = info.get('iteration', 0)
+                        if status == 'decision':
+                            act = info.get('action', '-')
+                            reasoning = info.get('reasoning', '')
+                            params = info.get('parameters', {})
+                            
+                            # Log model decision with clear formatting
+                            console.print(f"\n[bold blue]Model Decision (Iteration {it}):[/bold blue]")
+                            console.print(f"  [cyan]Action:[/cyan] {act}")
+                            if reasoning:
+                                console.print(f"  [cyan]Thought:[/cyan] {reasoning}")
+                            if params and act != 'deep_think':
+                                # Show parameters for non-deep-think actions
+                                import json
+                                params_str = json.dumps(params, indent=2)
+                                if len(params_str) > 500:
+                                    params_str = params_str[:497] + '...'
+                                console.print(f"  [cyan]Parameters:[/cyan]\n{params_str}")
+                            
+                            # Special handling for deep_think
+                            if act == 'deep_think':
+                                console.print(f"\n[bold magenta]═══ CALLING STRATEGIST FOR DEEP ANALYSIS ═══[/bold magenta]")
+                                console.print(f"[yellow]Strategist is analyzing the collected context...[/yellow]")
+                            
+                            # Update agent log
+                            self._agent_log.append(f"Iter {it}: {act} - {reasoning[:100] if reasoning else 'no reasoning'}")
+                            
+                            # Track visited nodes and cards
+                            if self.session_tracker:
+                                if act == 'load_nodes' and params:
+                                    # Track nodes loaded via load_nodes action
+                                    node_ids = params.get('node_ids', [])
+                                    if node_ids:
+                                        self.session_tracker.track_nodes_batch(node_ids)
+                                elif act == 'explore_graph' and params:
+                                    # Track nodes explored via explore_graph action
+                                    node_ids = params.get('node_ids', [])
+                                    if node_ids:
+                                        self.session_tracker.track_nodes_batch(node_ids)
+                                elif act == 'analyze_code' and params:
+                                    # Track code cards analyzed
+                                    file_path = params.get('file_path')
+                                    if file_path:
+                                        self.session_tracker.track_card_visit(file_path)
+                            
+                        elif status == 'result':
+                            action = info.get('action', '')
+                            result = info.get('result', {})
+                            
+                            if action == 'deep_think':
+                                # Special formatting for deep_think results
+                                if result.get('status') == 'success':
+                                    console.print(f"\n[bold green]═══ STRATEGIST ANALYSIS COMPLETE ═══[/bold green]")
+                                    full_response = result.get('full_response', '')
+                                    if full_response:
+                                        console.print(Panel(full_response, border_style="green", title="Strategist Output"))
+                                    
+                                    hypotheses_formed = result.get('hypotheses_formed', 0)
+                                    if hypotheses_formed > 0:
+                                        console.print(f"[bold green]✓ Added {hypotheses_formed} hypothesis(es) to global store[/bold green]")
+                                else:
+                                    error_msg = result.get('error', 'Unknown error')
+                                    console.print(f"\n[bold red]Strategist Error:[/bold red] {error_msg}")
+                                    console.print("[yellow]Continuing with scout exploration...[/yellow]")
+                            else:
+                                # Regular action results
+                                summ = result.get('summary') or result.get('status') or msg
+                                console.print(f"[dim]Result: {summ}[/dim]")
+                            
+                            self._agent_log.append(f"Iter {it} result: {action}")
+                            
+                        elif status in {'analyzing', 'executing', 'hypothesis_formed'}:
+                            console.print(f"[dim]{status.capitalize()}: {msg}[/dim]")
+                            self._agent_log.append(f"Iter {it} {status}: {msg[:100]}")
 
-                # Log previously completed investigations
-                if self.completed_investigations:
-                    self._agent_log.append("Previously completed investigations:")
-                    for goal in self.completed_investigations:
-                        self._agent_log.append(f"✓ {goal}")
-                    _refresh(-1)
-
-                # Log new investigations
-                self._agent_log.append("New investigations planned:")
-                for i, it in enumerate(items):
-                    pr = getattr(it, 'priority', 0)
-                    imp = getattr(it, 'expected_impact', None)
-                    cat = getattr(it, 'category', None)
-                    meta = f"prio {pr}"
-                    if imp:
-                        meta += f", {imp}"
-                    if cat:
-                        meta += f", {cat}"
-                    self._agent_log.append(f"[ ] {it.goal}  ({meta})")
-                _refresh(-1)
-
-                # Execute investigations under live dashboard
-                for idx, inv in enumerate(items):
-                    # Check time limit before starting each investigation
-                    if self.time_limit_minutes:
-                        elapsed_minutes = (time.time() - start_overall) / 60.0
-                        remaining_minutes = self.time_limit_minutes - elapsed_minutes
-                        if remaining_minutes <= 0:
-                            self._agent_log.append(f"⏰ Time limit reached ({self.time_limit_minutes} minutes) — stopping audit")
-                            _refresh(idx)
-                            break
-                        if remaining_minutes < 2:
-                            self._agent_log.append(f"⚠️  Only {remaining_minutes:.1f} minutes remaining")
-                            _refresh(idx)
-
-                    self._agent_log.append(f"→ Investigating: {inv.goal}")
-                    _refresh(idx)
-                    # Mark plan item in_progress if we have a frame_id
-                    try:
-                        if getattr(inv, 'frame_id', None) and self.plan_store:
-                            from analysis.plan_store import PlanStatus
-                            self.plan_store.update_status(inv.frame_id, PlanStatus.IN_PROGRESS, rationale='Execution started')
-                        if getattr(self, 'agent', None) and getattr(self.agent, 'coverage_index', None):
-                            self.agent.coverage_index.record_investigation(getattr(inv, 'frame_id', None), [], 'in_progress')
-                    except Exception:
-                        pass
-                    max_iters = self.agent.max_iterations if self.agent.max_iterations else 5
-                    # Reduce iterations if we're running low on time
-                    if self.time_limit_minutes:
-                        elapsed_minutes = (time.time() - start_overall) / 60.0
-                        remaining_minutes = self.time_limit_minutes - elapsed_minutes
-                        safe_iters = max(1, int(remaining_minutes / 1.5))
-                        if safe_iters < max_iters:
-                            self._agent_log.append(f"Reducing iterations from {max_iters} to {safe_iters} due to time limit")
-                            max_iters = safe_iters
-                            _refresh(idx)
-
-                    self.start_time = time.time()
-                    try:
-                        # Inject a progress callback that logs events and refreshes the live view
-                        def _cb(info: dict):
-                            status = info.get('status', '')
-                            msg = info.get('message', '')
-                            it = info.get('iteration', 0)
-                            if status == 'decision':
-                                act = info.get('action', '-')
-                                reasoning = info.get('reasoning', '')
-                                self._agent_log.append(f"Iter {it} decision: {act} | {reasoning}")
-                            elif status == 'result':
-                                r = info.get('result', {}) or {}
-                                summ = r.get('summary') or r.get('status') or msg
-                                self._agent_log.append(f"Iter {it} result: {summ}")
-                            elif status:
-                                self._agent_log.append(f"Iter {it} {status}: {msg}")
-                            _refresh(idx)
-
-                        report = self.agent.investigate(inv.goal, max_iterations=max_iters, progress_callback=_cb)
-                        results.append((inv, report))
-                        # Track completed investigation
-                        self.completed_investigations.append(inv.goal)
-                        # Update run tracker with investigation and token usage
-                        self.run_tracker.add_investigation({
-                            'goal': inv.goal,
-                            'priority': getattr(inv, 'priority', 0),
-                            'category': getattr(inv, 'category', None),
-                            'iterations_completed': report.get('iterations_completed', 0) if report else 0,
-                            'hypotheses': report.get('hypotheses', {}) if report else {}
-                        })
-                        self.run_tracker.update_token_usage(token_tracker.get_summary())
-                    except Exception as e:
-                        self.run_tracker.add_error(str(e))
-                        raise
-                    # Show progress
-                    self._agent_log.append(f"✓ Completed: {inv.goal}")
-                    _refresh(idx)
-                    # Mark plan item done
-                    try:
-                        if getattr(inv, 'frame_id', None) and self.plan_store:
-                            from analysis.plan_store import PlanStatus
-                            self.plan_store.update_status(inv.frame_id, PlanStatus.DONE, rationale='Completed investigation')
-                        if getattr(self, 'agent', None) and getattr(self.agent, 'coverage_index', None):
-                            self.agent.coverage_index.record_investigation(getattr(inv, 'frame_id', None), [], 'done')
-                    except Exception:
-                        pass
-                    
-                    # Early stop if agent is satisfied (no hypotheses and no more actions suggested)
-                    try:
-                        hyp = (report or {}).get('hypotheses', {})
-                        total_h = int(hyp.get('total', 0))
-                    except Exception:
-                        total_h = 0
-                    if total_h == 0:
-                        self._agent_log.append("No hypotheses formed; considering coverage achieved for this thread")
-                        _refresh(idx)
+                    report = self.agent.investigate(inv.goal, max_iterations=max_iters, progress_callback=_cb)
+                    results.append((inv, report))
+                    # Track completed investigation
+                    self.completed_investigations.append(inv.goal)
+                    # Update session tracker with investigation and token usage
+                    self.session_tracker.add_investigation({
+                        'goal': inv.goal,
+                        'priority': getattr(inv, 'priority', 0),
+                        'category': getattr(inv, 'category', None),
+                        'iterations_completed': report.get('iterations_completed', 0) if report else 0,
+                        'hypotheses': report.get('hypotheses', {}) if report else {}
+                    })
+                    self.session_tracker.update_token_usage(token_tracker.get_summary())
+                except Exception as e:
+                    # Log error but don't fail the audit
+                    console.print(f"[red]Error in investigation: {str(e)}[/red]")
+                    raise
+                # Show completion
+                console.print(f"\n[bold green]✓ Investigation Completed:[/bold green] {inv.goal}")
+                self._agent_log.append(f"✓ Completed: {inv.goal}")
+                # Mark plan item done
+                try:
+                    if getattr(inv, 'frame_id', None) and self.plan_store:
+                        from analysis.plan_store import PlanStatus
+                        self.plan_store.update_status(inv.frame_id, PlanStatus.DONE, rationale='Completed investigation')
+                    if getattr(self, 'agent', None) and getattr(self.agent, 'coverage_index', None):
+                        self.agent.coverage_index.record_investigation(getattr(inv, 'frame_id', None), [], 'done')
+                except Exception:
+                    pass
+                
+                # Early stop if agent is satisfied (no hypotheses and no more actions suggested)
+                try:
+                    hyp = (report or {}).get('hypotheses', {})
+                    total_h = int(hyp.get('total', 0))
+                except Exception:
+                    total_h = 0
+                if total_h == 0:
+                    console.print("[yellow]No hypotheses formed; considering coverage achieved for this thread[/yellow]")
+                    self._agent_log.append("No hypotheses formed; considering coverage achieved for this thread")
 
         # After audit, show the last report in detail
         if results:
@@ -1305,10 +1521,17 @@ class AgentRunner:
                 console.print(f"\n[bold]Iterations:[/bold] {last_report.get('iterations_completed', 0)}")
                 console.print(f"[bold]Hypotheses:[/bold] {last_report.get('hypotheses', {})}")
 
-        # Finalize run tracker with final token usage
-        self.run_tracker.update_token_usage(token_tracker.get_summary())
-        self.run_tracker.finalize(status='completed')
-        console.print(f"\n[green]Run details saved to:[/green] {run_file}")
+        # Finalize session tracker with final token usage
+        self.session_tracker.update_token_usage(token_tracker.get_summary())
+        self.session_tracker.finalize(status='completed')
+        
+        # Show final coverage
+        coverage_stats = self.session_tracker.get_coverage_stats()
+        console.print(f"\n[bold cyan]Final Coverage Statistics:[/bold cyan]")
+        console.print(f"  Nodes visited: {coverage_stats['nodes']['visited']}/{coverage_stats['nodes']['total']} ([cyan]{coverage_stats['nodes']['percent']:.1f}%[/cyan])")
+        console.print(f"  Cards analyzed: {coverage_stats['cards']['visited']}/{coverage_stats['cards']['total']} ([cyan]{coverage_stats['cards']['percent']:.1f}%[/cyan])")
+        
+        console.print(f"\n[green]Session details saved to:[/green] sessions/{self.session_id}.json")
     
     def _generate_enhanced_summary(self):
         """Deprecated in unified agent flow; retained for API compatibility."""
@@ -1317,11 +1540,11 @@ class AgentRunner:
         }
     
     def finalize_tracking(self, status: str = 'completed'):
-        """Finalize run tracking with given status."""
-        if self.run_tracker:
+        """Finalize session tracking with given status."""
+        if self.session_tracker:
             token_tracker = get_token_tracker()
-            self.run_tracker.update_token_usage(token_tracker.get_summary())
-            self.run_tracker.finalize(status=status)
+            self.session_tracker.update_token_usage(token_tracker.get_summary())
+            self.session_tracker.finalize(status=status)
 
 
 @click.command()
@@ -1363,11 +1586,11 @@ def agent(project_id: str, iterations: Optional[int], plan_n: int, time_limit: O
         if 'models' not in runner.config:
             runner.config['models'] = {}
         if strategist_platform or strategist_model:
-            runner.config['models'].setdefault('guidance', {})
+            runner.config['models'].setdefault('strategist', {})
             if strategist_platform:
-                runner.config['models']['guidance']['provider'] = strategist_platform
+                runner.config['models']['strategist']['provider'] = strategist_platform
             if strategist_model:
-                runner.config['models']['guidance']['model'] = strategist_model
+                runner.config['models']['strategist']['model'] = strategist_model
         # Set strategist overrides then run
         if session_private_hypotheses and getattr(runner, 'agent', None):
             try:

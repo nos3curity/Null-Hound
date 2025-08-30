@@ -171,16 +171,6 @@ python hound.py project hypotheses my_audit
 - Strategist (senior): `--strategist-platform`, `--strategist-model`
 - QA/Finalize: `finalize --platform/--model` or `qa --platform/--model`
 
-### Smoke test (fast)
-- Mock-only (no planning):
-  `python hound.py agent investigate "Quick smoke" tmp_project --iterations 1 --platform mock --model mock --debug`
-- With planning (preferred):
-  - Put your OpenAI key in a root-local file and export it:
-    `echo "<KEY>" > OPENAI_API_KEY.txt && export OPENAI_API_KEY=$(cat OPENAI_API_KEY.txt)`
-  - Run a short audit:
-    `python hound.py agent audit tmp_project --plan-n 1 --iterations 1 --config hound/config.yaml \
-       --platform mock --model mock --strategist-platform openai --strategist-model gpt-4o-mini`
-
 ### Reporting
 - `report` - Generate professional HTML security audit report
 
