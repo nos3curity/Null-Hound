@@ -1517,10 +1517,23 @@ DO NOT include any text before or after the JSON object."""
         
         nodes_display = '\n'.join(display_lines)
         
+        # Aggregate card IDs across loaded nodes
+        all_card_ids = []
+        for nid in current_request_nodes:
+            node_data = self.loaded_data['nodes'].get(nid, {})
+            for c in node_data.get('cards', []) or []:
+                cid = c.get('card_id') or (c.get('metadata') or {}).get('id')
+                if cid:
+                    all_card_ids.append(str(cid))
+        # Deduplicate
+        all_card_ids = list({cid for cid in all_card_ids if cid})
+
         return {
             'status': 'success',
             'summary': f'Loaded {current_loaded_count} nodes ({current_code_count} with code)',
-            'nodes_display': nodes_display
+            'nodes_display': nodes_display,
+            'loaded_node_ids': current_request_nodes,
+            'card_ids': all_card_ids
         }
     
     

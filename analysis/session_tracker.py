@@ -15,33 +15,49 @@ class SessionCoverage:
     visited_cards: Set[str] = field(default_factory=set)
     total_nodes: int = 0
     total_cards: int = 0
+    # Per-node/card visit counts
+    node_visit_counts: Dict[str, int] = field(default_factory=dict)
+    card_visit_counts: Dict[str, int] = field(default_factory=dict)
+    # Known IDs to bound coverage
+    known_node_ids: Set[str] = field(default_factory=set)
+    known_card_ids: Set[str] = field(default_factory=set)
     
     def add_node(self, node_id: str):
         """Mark a node as visited."""
         self.visited_nodes.add(node_id)
+        self.node_visit_counts[node_id] = int(self.node_visit_counts.get(node_id, 0)) + 1
     
     def add_card(self, card_id: str):
         """Mark a card as visited."""
         self.visited_cards.add(card_id)
+        self.card_visit_counts[card_id] = int(self.card_visit_counts.get(card_id, 0)) + 1
     
     def get_stats(self) -> Dict[str, Any]:
-        """Get coverage statistics."""
-        nodes_visited = len(self.visited_nodes)
-        cards_visited = len(self.visited_cards)
+        """Get coverage statistics bounded to known IDs to avoid >100%."""
+        # Default totals
+        nodes_total = len(self.known_node_ids) if self.known_node_ids else self.total_nodes
+        cards_total = len(self.known_card_ids) if self.known_card_ids else self.total_cards
+        # Bound visited to known sets when available
+        nodes_visited = len(self.visited_nodes & self.known_node_ids) if self.known_node_ids else len(self.visited_nodes)
+        cards_visited = len(self.visited_cards & self.known_card_ids) if self.known_card_ids else len(self.visited_cards)
+        
+        def pct(a: int, b: int) -> float:
+            return round((a / b * 100.0) if b else 0.0, 1)
         
         return {
             'nodes': {
                 'visited': nodes_visited,
-                'total': self.total_nodes,
-                'percent': round(100 * nodes_visited / self.total_nodes, 1) if self.total_nodes > 0 else 0.0
+                'total': nodes_total,
+                'percent': pct(nodes_visited, nodes_total)
             },
             'cards': {
                 'visited': cards_visited,
-                'total': self.total_cards,
-                'percent': round(100 * cards_visited / self.total_cards, 1) if self.total_cards > 0 else 0.0
+                'total': cards_total,
+                'percent': pct(cards_visited, cards_total)
             },
             'visited_node_ids': list(self.visited_nodes),
-            'visited_card_ids': list(self.visited_cards)
+            'visited_card_ids': list(self.visited_cards),
+            'node_visit_counts': dict(self.node_visit_counts)
         }
 
 
@@ -110,7 +126,7 @@ class SessionTracker:
             graphs_dir: Directory containing graph files
             manifest_dir: Directory containing manifest files
         """
-        # Count nodes from graphs
+        # Count nodes from graphs and record known IDs
         total_nodes = 0
         if graphs_dir.exists():
             for graph_file in graphs_dir.glob("graph_*.json"):
@@ -119,6 +135,10 @@ class SessionTracker:
                         graph_data = json.load(f)
                         nodes = graph_data.get('nodes', [])
                         total_nodes += len(nodes)
+                        for n in nodes or []:
+                            nid = n.get('id')
+                            if nid is not None:
+                                self.coverage.known_node_ids.add(str(nid))
                 except Exception:
                     pass
         
@@ -137,6 +157,38 @@ class SessionTracker:
             except Exception:
                 pass
         
+        # Build known card IDs and file->cards mapping for accurate tracking
+        try:
+            self._file_to_cards: Dict[str, List[str]] = {}
+            cards_jsonl = manifest_dir / 'cards.jsonl'
+            if cards_jsonl.exists():
+                with open(cards_jsonl, 'r') as f:
+                    for line in f:
+                        try:
+                            card = json.loads(line)
+                            cid = card.get('id')
+                            rel = card.get('relpath')
+                            if cid:
+                                self.coverage.known_card_ids.add(str(cid))
+                            if rel and cid:
+                                self._file_to_cards.setdefault(rel, []).append(str(cid))
+                        except Exception:
+                            continue
+            files_json = manifest_dir / 'files.json'
+            if files_json.exists():
+                with open(files_json, 'r') as f:
+                    files_list = json.load(f)
+                if isinstance(files_list, list):
+                    for fi in files_list:
+                        rel = fi.get('relpath')
+                        cids = fi.get('card_ids', []) or []
+                        if rel and cids:
+                            self._file_to_cards[rel] = [str(x) for x in cids]
+                            for x in cids:
+                                self.coverage.known_card_ids.add(str(x))
+        except Exception:
+            pass
+
         self.coverage.total_nodes = total_nodes
         self.coverage.total_cards = total_cards
         self._save()
@@ -150,7 +202,27 @@ class SessionTracker:
     def track_card_visit(self, card_path: str):
         """Track that a code card was analyzed."""
         with self.lock:
-            self.coverage.add_card(card_path)
+            # Try to map file path to card IDs for accurate card coverage
+            ids: List[str] = []
+            try:
+                # Normalize path to relpath if possible
+                rel = card_path
+                # If the provided path is absolute or has prefixes, try to use as-is in mapping first
+                if hasattr(self, '_file_to_cards'):
+                    if rel in self._file_to_cards:
+                        ids = list(self._file_to_cards.get(rel, []))
+                    else:
+                        # Try stripping leading slashes
+                        rel2 = rel.lstrip('/')
+                        ids = list(self._file_to_cards.get(rel2, []))
+            except Exception:
+                ids = []
+            if ids:
+                for cid in ids:
+                    self.coverage.add_card(cid)
+            else:
+                # Fall back to recording the path (won't count toward known cards)
+                self.coverage.add_card(card_path)
             self._save()
     
     def track_nodes_batch(self, node_ids: List[str]):

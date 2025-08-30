@@ -1381,15 +1381,8 @@ class AgentRunner:
                         self.agent.coverage_index.record_investigation(getattr(inv, 'frame_id', None), [], 'in_progress')
                 except Exception:
                     pass
+                # Always use requested iterations; rely on time-limit checks to stop early
                 max_iters = self.agent.max_iterations if self.agent.max_iterations else 5
-                # Reduce iterations if we're running low on time
-                if self.time_limit_minutes:
-                    elapsed_minutes = (time.time() - start_overall) / 60.0
-                    remaining_minutes = self.time_limit_minutes - elapsed_minutes
-                    safe_iters = max(1, int(remaining_minutes / 1.5))
-                    if safe_iters < max_iters:
-                        console.print(f"[yellow]Reducing iterations from {max_iters} to {safe_iters} due to time limit[/yellow]")
-                        max_iters = safe_iters
 
                 self.start_time = time.time()
                 try:
@@ -1465,6 +1458,14 @@ class AgentRunner:
                                 # Regular action results
                                 summ = result.get('summary') or result.get('status') or msg
                                 console.print(f"[dim]Result: {summ}[/dim]")
+                                # Track cards loaded via load_nodes result if provided
+                                try:
+                                    if self.session_tracker and action == 'load_nodes':
+                                        cids = result.get('card_ids') or []
+                                        if isinstance(cids, list) and cids:
+                                            self.session_tracker.track_cards_batch([str(x) for x in cids])
+                                except Exception:
+                                    pass
                             
                             self._agent_log.append(f"Iter {it} result: {action}")
                             
