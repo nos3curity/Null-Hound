@@ -1650,23 +1650,9 @@ DO NOT include any text before or after the JSON object."""
     def _deep_think(self) -> Dict:
         """Delegate deep analysis to the Strategist and form hypotheses accordingly."""
         try:
-            # Guardrail to avoid "empty" escalations. Keep it simple and documented:
-            # Only escalate when we have a minimum number of loaded nodes for this aspect.
-            # This reduces fast, low-signal calls and nudges the agent to explore more first.
-            MIN_NODES_FOR_DEEP_THINK = 8
-            try:
-                loaded_nodes = len(self.loaded_data.get('nodes', {})) if isinstance(self.loaded_data.get('nodes'), dict) else 0
-            except Exception:
-                loaded_nodes = 0
-            if loaded_nodes < MIN_NODES_FOR_DEEP_THINK:
-                return {
-                    'status': 'skipped',
-                    'summary': (
-                        f'Deep analysis deferred: insufficient context '
-                        f'({loaded_nodes} < {MIN_NODES_FOR_DEEP_THINK} loaded nodes). '
-                        'Load more relevant nodes/code before calling deep_think.'
-                    )
-                }
+            # Removed hard minimum-context guardrail: different aspects require different
+            # amounts of context. We rely on the Scout's prompt to prepare adequate evidence
+            # before escalation instead of enforcing a strict numeric threshold here.
             context = self._build_context()
             from .strategist import Strategist
             # Pass debug and session_id to strategist for deep_think prompt saving
@@ -1717,13 +1703,44 @@ DO NOT include any text before or after the JSON object."""
                 full_raw = getattr(strategist, 'last_raw', None)
             except Exception:
                 full_raw = None
+            # Heuristic guidance extraction for CLI display: pull bullet points after a GUIDANCE header
+            guidance_bullets: list[str] = []
+            try:
+                if isinstance(full_raw, str) and full_raw:
+                    lines = [ln.rstrip() for ln in full_raw.splitlines()]
+                    # Find a line that looks like a GUIDANCE header
+                    start = -1
+                    for i, ln in enumerate(lines):
+                        low = ln.strip().lower()
+                        if low.startswith('guidance') or low == 'next steps:' or low.startswith('next steps'):
+                            start = i + 1
+                            break
+                    if start >= 0:
+                        for ln in lines[start:]:
+                            s = ln.strip()
+                            if not s:
+                                # stop at blank line
+                                break
+                            if s.startswith('- ') or s.startswith('•') or s.startswith('* '):
+                                # normalize bullets and trim length
+                                b = s.lstrip('•*').lstrip('-').strip()
+                                if b:
+                                    guidance_bullets.append(b[:200])
+                            # stop when a new all-caps header seems to start
+                            if s.isupper() and len(s) < 40:
+                                break
+                    # Limit to a handful for display
+                    guidance_bullets = guidance_bullets[:5]
+            except Exception:
+                guidance_bullets = []
             return {
                 'status': 'success',
                 'summary': f'Deep analysis added {added} hypotheses',
                 'hypotheses_formed': added,
                 'hypothesis_titles': titles,
                 'hypotheses_info': hyp_info,
-                'full_response': full_raw or ''
+                'full_response': full_raw or '',
+                'guidance_bullets': guidance_bullets
             }
         except Exception as e:
             return {'status': 'error', 'error': str(e)}

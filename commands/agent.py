@@ -1528,11 +1528,13 @@ class AgentRunner:
                                                 reason = (h.get('reasoning') or '')
                                                 if reason:
                                                     console.print(f"    [dim]{(reason[:200] + '...') if len(reason)>200 else reason}[/dim]")
-                                elif result.get('status') == 'skipped':
-                                    # Graceful messaging when guardrail defers deep_think
-                                    msg = result.get('summary', 'Deep analysis deferred due to insufficient context')
-                                    console.print(f"\n[yellow]{msg}[/yellow]")
-                                    console.print("[yellow]Continuing exploration to gather more evidence...[/yellow]")
+                                    # Show guidance bullets even if no hypotheses were formed
+                                    gb = result.get('guidance_bullets') or []
+                                    if gb:
+                                        console.print("[bold cyan]Strategist Guidance (next steps):[/bold cyan]")
+                                        for b in gb:
+                                            console.print(f"  • {b}")
+                                # 'skipped' status no longer used (guard removed)
                                 else:
                                     error_msg = result.get('error', 'Unknown error')
                                     console.print(f"\n[bold red]Strategist Error:[/bold red] {error_msg}")
