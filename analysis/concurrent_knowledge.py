@@ -134,6 +134,9 @@ class Hypothesis:
     reported_by_model: Optional[str] = None  # Legacy field for backward compatibility
     junior_model: Optional[str] = None  # The agent model that discovered the vulnerability
     senior_model: Optional[str] = None  # The guidance/deep think model that analyzed it
+    # Session tagging
+    session_id: Optional[str] = None
+    visibility: str = "global"  # 'global' or 'session'
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     id: str = ""
     
@@ -309,4 +312,3 @@ class GraphStore(ConcurrentFileStore):
             return data, True
         
         return self.update_atomic(update)
-

@@ -17,6 +17,7 @@ class RunTracker:
         self.data = {
             'run_id': None,
             'command_args': [],
+            'session_id': None,
             'start_time': datetime.now().isoformat(),
             'end_time': None,
             'runtime_seconds': 0,
@@ -33,6 +34,13 @@ class RunTracker:
         with self._lock:
             self.data['run_id'] = run_id
             self.data['command_args'] = command_args
+            self._save()
+
+    def set_session_id(self, session_id: str):
+        """Associate a session ID with this run."""
+        with self._lock:
+            self.data['session_id'] = session_id
+            self._update_runtime()
             self._save()
     
     def update_token_usage(self, token_summary: Dict[str, Any]):

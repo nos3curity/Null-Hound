@@ -41,6 +41,7 @@ class PlanItem:
     investigation_id: Optional[str] = None
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    history: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class PlanStore(ConcurrentFileStore):
@@ -72,7 +73,14 @@ class PlanStore(ConcurrentFileStore):
                 rationale=rationale,
                 created_by=created_by,
             )
-            items[frame_id] = asdict(pi)
+            item_dict = asdict(pi)
+            item_dict["history"] = [{
+                "timestamp": datetime.now().isoformat(),
+                "status": PlanStatus.PLANNED.value,
+                "rationale": rationale,
+                "created_by": created_by,
+            }]
+            items[frame_id] = item_dict
             data["metadata"]["total"] = len(items)
             data["metadata"]["last_modified"] = datetime.now().isoformat()
             return data, (True, frame_id)
@@ -92,6 +100,13 @@ class PlanStore(ConcurrentFileStore):
             if investigation_id:
                 it["investigation_id"] = investigation_id
             it["updated_at"] = datetime.now().isoformat()
+            hist = it.setdefault("history", [])
+            hist.append({
+                "timestamp": datetime.now().isoformat(),
+                "status": it["status"],
+                "rationale": rationale,
+                "investigation_id": investigation_id,
+            })
             data["metadata"]["last_modified"] = datetime.now().isoformat()
             return data, True
 
@@ -120,4 +135,3 @@ class PlanStore(ConcurrentFileStore):
             return data.get("items", {}).get(frame_id)
         finally:
             self._release_lock(lock)
-

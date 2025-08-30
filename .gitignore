@@ -3,6 +3,7 @@ __pycache__
 .pytest_cache
 *.pyc
 .hound_cache
+.hound_debug
 graph_results
 config.yaml
 

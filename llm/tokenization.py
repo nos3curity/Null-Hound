@@ -2,8 +2,10 @@ from functools import lru_cache
 from typing import Dict, Optional
 
 from rich.console import Console
+import os as _os
 
 console = Console()
+_VERBOSE = _os.environ.get("HOUND_LLM_VERBOSE", "").lower() in {"1","true","yes","on"}
 
 class TokenCounter:
     """
@@ -22,9 +24,10 @@ class TokenCounter:
         self._tiktoken_available = self._try_import_tiktoken()
         self._anthropic_available = self._try_import_anthropic()
 
-        console.print(
-            f"TokenCounter: tiktoken={self._tiktoken_available}, anthropic={self._anthropic_available}"
-        )
+        if _VERBOSE:
+            console.print(
+                f"TokenCounter: tiktoken={self._tiktoken_available}, anthropic={self._anthropic_available}"
+            )
 
     def _try_import_tiktoken(self) -> bool:
         """Import tiktoken for OpenAI tokenization."""
@@ -34,7 +37,8 @@ class TokenCounter:
             self._tiktoken = tiktoken
             return True
         except ImportError:
-            console.print("tiktoken not available - OpenAI token counting will use approximation")
+            if _VERBOSE:
+                console.print("tiktoken not available - OpenAI token counting will use approximation")
             return False
 
     def _try_import_anthropic(self) -> bool:
@@ -45,9 +49,10 @@ class TokenCounter:
             self._anthropic = anthropic
             return True
         except ImportError:
-            console.print(
-                "anthropic library not available - Claude token counting will use approximation"
-            )
+            if _VERBOSE:
+                console.print(
+                    "anthropic library not available - Claude token counting will use approximation"
+                )
             return False
 
     @lru_cache(maxsize=16)

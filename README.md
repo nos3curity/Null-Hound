@@ -85,13 +85,19 @@ python hound.py graph export my_audit --output graphs.html
 ### 5. Run security audit
 
 ```bash
-# Explore and investigate the codebase
-python hound.py agent audit my_audit --time-limit 3
+# Explore and investigate the codebase (Strategist plans by default)
+python hound.py agent audit my_audit --plan-n 5 --iterations 5
+
+# Useful flags:
+# - Override scout model:            --platform openai --model gpt-5
+# - Override strategist (planner):   --strategist-platform openai --strategist-model gpt-5
+# - Sessions:                        --new-session  |  --session <id>
+# - Session-private hypotheses:      --session-private-hypotheses
 
 # The audit agent will:
-# - Analyze the knowledge graphs
-# - Investigate potential security issues
-# - Form hypotheses about vulnerabilities
+# - Use the Strategist (senior) to plan high-value investigations
+# - Use the Scout (junior) to load code and annotate graphs
+# - Form hypotheses with session_id + visibility tags
 # - Update graphs with verified observations and assumptions
 ```
 
@@ -150,10 +156,30 @@ python hound.py project hypotheses my_audit
 - `graph add-custom` - Add custom graph with user-defined focus
 - `graph export` - Export graphs to interactive HTML visualization
 
-### Agent Commands
-- `agent audit` - Run comprehensive security audit and form hypotheses
-- `agent finalize` - Validate and confirm high-confidence findings
-- `agent investigate` - Run targeted investigation with specific prompt
+### Audit Commands
+- `agent audit`      - Run comprehensive security audit (Strategist plans, Scout executes)
+- `agent investigate`- Run targeted investigation with specific prompt
+- `finalize`         - Validate and confirm high-confidence findings
+
+### Sessions
+- Audits run within sessions stored under `<project>/sessions/<session_id>`.
+- Plan frames are persisted in `plan.json`; session metadata is written in `state.json`.
+- Use `--new-session` to create a fresh session or `--session <id>` to attach.
+
+### Model overrides
+- Scout (junior): `--platform`, `--model`
+- Strategist (senior): `--strategist-platform`, `--strategist-model`
+- QA/Finalize: `finalize --platform/--model` or `qa --platform/--model`
+
+### Smoke test (fast)
+- Mock-only (no planning):
+  `python hound.py agent investigate "Quick smoke" tmp_project --iterations 1 --platform mock --model mock --debug`
+- With planning (preferred):
+  - Put your OpenAI key in a root-local file and export it:
+    `echo "<KEY>" > OPENAI_API_KEY.txt && export OPENAI_API_KEY=$(cat OPENAI_API_KEY.txt)`
+  - Run a short audit:
+    `python hound.py agent audit tmp_project --plan-n 1 --iterations 1 --config hound/config.yaml \
+       --platform mock --model mock --strategist-platform openai --strategist-model gpt-4o-mini`
 
 ### Reporting
 - `report` - Generate professional HTML security audit report

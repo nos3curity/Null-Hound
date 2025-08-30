@@ -39,7 +39,7 @@ models:
     model: gpt-5-nano            # Fast model for structured graph generation
     
   # Profile for code exploration
-  agent:
+  scout:
     provider: openai
     model: gpt-5-nano              # Code exploration
     # Reasoning effort (OpenAI o1 models only)
@@ -47,8 +47,8 @@ models:
     # Higher effort = better reasoning but slower/more expensive
     # reasoning_effort: medium
 
-  # Profile for deep thinking/guidance model (used by agent's deep_think action)
-  guidance:
+  # Profile for deep thinking (Strategist)
+  strategist:
     provider: openai
     model: gpt-5         # Strong reasoning model for deep analysis
     reasoning_effort: high
@@ -72,9 +72,9 @@ models:
 # ============================================================================
 # Agent Context Management
 # ============================================================================
-# IMPORTANT: These settings control context window limits for BOTH agent and guidance models.
+# IMPORTANT: These settings control context window limits for BOTH scout and strategist models.
 # Set max_tokens to the smaller of the two models' context windows to ensure compatibility.
-# For example, if agent supports 200k but guidance only supports 128k, use 128000.
+# For example, if scout supports 200k but strategist only supports 128k, use 128000.
 
 context:
   max_tokens: 128000              # Maximum context size in tokens (use smaller of agent/guidance limits)

@@ -20,7 +20,8 @@ import sys
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from analysis.agent import AutonomousAgent
+from analysis.scout import Scout
+from analysis.strategist import Strategist
 from analysis.run_tracker import RunTracker
 from llm.token_tracker import get_token_tracker
 from pydantic import BaseModel, Field
@@ -107,7 +108,7 @@ def run_investigation(project_path: str, prompt: str, iterations: Optional[int] 
         "[white]Peak form — you’re not just kicking off an investigation, you’re launching a mini-epic.[/white]",
         "[white]Glorious — you’re not just curious, you’re operationalizing curiosity.[/white]",
     ]))
-    agent = AutonomousAgent(
+    agent = Scout(
         graphs_metadata_path=knowledge_graphs_path,
         manifest_path=manifest_dir,
         agent_id=f"investigate_{int(time.time())}",
@@ -569,7 +570,8 @@ class AgentRunner:
     
     def __init__(self, project_id: str, config_path: Optional[Path] = None, 
                  iterations: Optional[int] = None, time_limit_minutes: Optional[int] = None,
-                 debug: bool = False, platform: Optional[str] = None, model: Optional[str] = None):
+                 debug: bool = False, platform: Optional[str] = None, model: Optional[str] = None,
+                 session: Optional[str] = None, new_session: bool = False):
         self.project_id = project_id
         self.config_path = config_path
         self.max_iterations = iterations
@@ -581,6 +583,11 @@ class AgentRunner:
         self.start_time = None
         self.completed_investigations = []  # Track completed investigation goals
         self.run_tracker: Optional[RunTracker] = None
+        self.project_dir: Optional[Path] = None
+        self.plan_store = None
+        self.session_id: Optional[str] = session
+        self.new_session: bool = new_session
+        self._agent_log: List[str] = []
         
     def initialize(self):
         """Initialize the agent."""
@@ -664,14 +671,17 @@ class AgentRunner:
         
         # Keep config for planning
         self.config = config
+        # Remember project_dir for plan storage
+        self.project_dir = project_dir
         
         # Create agent with knowledge graphs metadata
-        self.agent = AutonomousAgent(
+        self.agent = Scout(
             graphs_metadata_path=knowledge_graphs_path,
             manifest_path=manifest_path,
             agent_id=f"agent_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
             config=config,  # Pass the loaded config dict
-            debug=self.debug
+            debug=self.debug,
+            session_id=self.session_id
         )
         
         # Set debug flag
@@ -680,7 +690,112 @@ class AgentRunner:
         if self.max_iterations:
             self.agent.max_iterations = self.max_iterations
         
+        # Initialize plan store and session directory
+        try:
+            from analysis.plan_store import PlanStore
+            from analysis.session_manager import SessionManager
+            # Create or find session dir
+            sm = SessionManager(self.project_dir)
+            if not self.session_id:
+                # Default session ID to agent ID when not provided
+                self.session_id = f"sess_{self.agent.agent_id}"
+            sinfo = sm.get_or_create(self.session_id, new_session=self.new_session)
+            # Persist normalized session id
+            self.session_id = sinfo.session_id
+            # Plan file in session directory
+            plan_path = sinfo.path / "plan.json"
+            self.plan_store = PlanStore(plan_path, agent_id=f"runner_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+            # Write/update session state
+            try:
+                state_path = sinfo.path / 'state.json'
+                state = {
+                    'session_id': self.session_id,
+                    'project_path': str(self.project_dir),
+                    'created_at': datetime.now().isoformat(),
+                    'models': self.config.get('models', {}) if self.config else {},
+                }
+                import json as _json
+                state_path.write_text(_json.dumps(state, indent=2))
+            except Exception:
+                pass
+        except Exception:
+            self.plan_store = None
+
         return True
+
+    # ---------------------- Dashboard Helpers ----------------------
+    def _hypothesis_stats(self) -> dict:
+        """Return hypothesis stats from project hypotheses.json."""
+        stats = {"total": 0, "confirmed": 0, "rejected": 0, "uncertain": 0}
+        try:
+            from pathlib import Path as _Path
+            import json as _json
+            hyp_file = (_Path(self.project_dir) / 'hypotheses.json') if self.project_dir else None
+            if hyp_file and hyp_file.exists():
+                data = _json.loads(hyp_file.read_text())
+                hyps = data.get('hypotheses', {})
+                stats['total'] = len(hyps)
+                for _, h in hyps.items():
+                    st = h.get('status', 'proposed')
+                    if st == 'confirmed':
+                        stats['confirmed'] += 1
+                    elif st == 'rejected':
+                        stats['rejected'] += 1
+                    else:
+                        stats['uncertain'] += 1
+        except Exception:
+            pass
+        return stats
+
+    def _coverage_stats(self) -> dict:
+        """Return coverage stats using CoverageIndex if available."""
+        try:
+            from analysis.coverage_index import CoverageIndex
+            project_dir = self.project_dir
+            graphs_dir = project_dir / 'graphs'
+            manifest_dir = project_dir / 'manifest'
+            cov = CoverageIndex(project_dir / 'coverage_index.json', agent_id='cli')
+            return cov.compute_stats(graphs_dir, manifest_dir)
+        except Exception:
+            return {'nodes': {'total': 0, 'visited': 0, 'percent': 0.0}, 'cards': {'total': 0, 'visited': 0, 'percent': 0.0}}
+
+    def _render_dashboard(self, items: list, current_index: int = -1):
+        """Render a compact dashboard with planning + stats."""
+        from rich.table import Table
+        from rich.panel import Panel
+        from rich.columns import Columns
+        from rich.box import SIMPLE
+        
+        # Planning table
+        plan_tbl = Table(title="Planning", show_header=True, header_style="bold magenta", box=SIMPLE)
+        plan_tbl.add_column("#", style="dim", width=4)
+        plan_tbl.add_column("Status", style="cyan", width=9)
+        plan_tbl.add_column("Goal", style="white", overflow="fold")
+        for i, it in enumerate(items, 1):
+            if current_index == i - 1:
+                status = "[yellow]RUNNING[/yellow]"
+            elif i - 1 < current_index:
+                status = "[green]DONE[/green]"
+            else:
+                status = "[dim]NEXT[/dim]"
+            plan_tbl.add_row(str(i), status, getattr(it, 'goal', ''))
+
+        # Stats tables
+        hyp = self._hypothesis_stats()
+        cov = self._coverage_stats()
+        stats_tbl = Table(title="Stats", show_header=False, box=SIMPLE)
+        stats_tbl.add_row("Hypotheses", f"{hyp['total']} total | {hyp['confirmed']} confirmed | {hyp['rejected']} rejected | {hyp['uncertain']} pending")
+        stats_tbl.add_row("Coverage (nodes)", f"{cov['nodes']['visited']}/{cov['nodes']['total']} ({cov['nodes']['percent']}%)")
+        stats_tbl.add_row("Coverage (cards)", f"{cov['cards']['visited']}/{cov['cards']['total']} ({cov['cards']['percent']}%)")
+
+        # Agent log (last N lines)
+        max_lines = 40
+        log_lines = self._agent_log[-max_lines:] if self._agent_log else ["(no events yet)"]
+        # Indent lines for readability
+        log_text = "\n".join(log_lines)
+        log_panel = Panel(log_text, border_style="dim", title="Agent Log (latest)")
+
+        return Panel(Columns([plan_tbl, stats_tbl, log_panel]), border_style="cyan", title="Hound Audit Dashboard")
     
     def _graph_summary(self) -> str:
         """Create a compact summary of the system graph with annotations."""
@@ -720,11 +835,83 @@ class AgentRunner:
             return "(no graph summary available)"
 
     def _plan_investigations(self, n: int) -> List[object]:
-        """Use the LLM to propose the next n investigations.
-        Preference: high-level aspects to review unless the graph itself suggests a specific risk.
-        Filters out already completed investigations.
-        """
-        from llm.unified_client import UnifiedLLMClient
+        """Plan next investigations using Strategist by default."""
+        # Use Strategist with current graph summary and completed list
+        graphs_summary = self._graph_summary()
+        strategist = Strategist(config=self.config)
+        coverage_summary = None
+        try:
+            if getattr(self, 'agent', None) and getattr(self.agent, 'coverage_index', None):
+                coverage_summary = self.agent.coverage_index.summarize(limit=50)
+        except Exception:
+            coverage_summary = None
+        # Include project-wide plan ledger snapshot if available
+        ledger_summary = None
+        try:
+            from analysis.plan_ledger import PlanLedger
+            if self.project_dir:
+                ledger = PlanLedger(self.project_dir / 'plan_ledger.json', agent_id='planner')
+                ledger_summary = ledger.summarize_recent(10)
+        except Exception:
+            ledger_summary = None
+        planned = strategist.plan_next(
+            graphs_summary=graphs_summary,
+            completed=list(self.completed_investigations),
+            n=n,
+            coverage_summary=coverage_summary,
+            ledger_summary=ledger_summary,
+        )
+
+        # Adapt dicts to the legacy display shape using SimpleNamespace
+        from types import SimpleNamespace
+        ps = self.plan_store
+        try:
+            from analysis.plan_store import PlanStatus  # noqa: F401
+        except Exception:
+            ps = None
+        items = []
+        for d in planned:
+            frame_id = None
+            if ps is not None:
+                try:
+                    ok, fid = ps.propose(
+                        session_id=self.session_id or self.agent.agent_id,
+                        question=d.get('goal', ''),
+                        artifact_refs=d.get('focus_areas') or [],
+                        priority=int(d.get('priority', 5)),
+                        rationale=d.get('reasoning', ''),
+                        created_by='strategist'
+                    )
+                    frame_id = fid
+                    # Record to project-wide ledger
+                    try:
+                        from analysis.plan_ledger import PlanLedger
+                        from llm.unified_client import UnifiedLLMClient
+                        model_sig = None
+                        try:
+                            # Build strategist model signature from config
+                            strat_cfg = (self.config or {}).get('models', {}).get('strategist')
+                            if strat_cfg:
+                                model_sig = f"{strat_cfg.get('provider','unknown')}:{strat_cfg.get('model','unknown')}"
+                        except Exception:
+                            model_sig = None
+                        if self.project_dir:
+                            ledger = PlanLedger(self.project_dir / 'plan_ledger.json', agent_id='planner')
+                            ledger.record(self.session_id or 'unknown', d.get('goal',''), d.get('focus_areas') or [], model_sig)
+                    except Exception:
+                        pass
+                except Exception:
+                    frame_id = None
+            items.append(SimpleNamespace(
+                goal=d.get('goal', ''),
+                focus_areas=d.get('focus_areas', []),
+                priority=d.get('priority', 5),
+                reasoning=d.get('reasoning', ''),
+                category=d.get('category', 'aspect'),
+                expected_impact=d.get('expected_impact', 'medium'),
+                frame_id=frame_id
+            ))
+        return items
 
         class InvestigationItem(BaseModel):
             goal: str = Field(description="Investigation goal or question")
@@ -853,6 +1040,12 @@ class AgentRunner:
         # Capture command line arguments
         command_args = sys.argv
         self.run_tracker.set_run_info(self.agent.agent_id, command_args)
+        # Tag run with session id
+        if self.session_id:
+            try:
+                self.run_tracker.set_session_id(self.session_id)
+            except Exception:
+                pass
         
         # Display configuration (omit context window; not available in unified client)
         # Get the actual models being used
@@ -969,89 +1162,139 @@ class AgentRunner:
                     break
 
             planned_round += 1
-            console.print(f"\n[bold cyan]Planning batch {planned_round} (top {plan_n})[/bold cyan]")
+            # Log planning batch instead of printing when dashboard is active
             items = self._plan_investigations(max(1, plan_n))
-            if not items:
-                console.print("[green]No further promising investigations suggested — audit complete[/green]")
-                break
+            self._agent_log.append(f"Planning batch {planned_round} (top {plan_n})")
+            # Live dashboard for this batch
+            from rich.live import Live
+            with Live(self._render_dashboard(items, current_index=-1), console=console, refresh_per_second=4, transient=False) as live:
+                # refresher bound to this planning batch
+                def _refresh(idx: int):
+                    try:
+                        live.update(self._render_dashboard(items, current_index=idx))
+                    except Exception:
+                        pass
 
-            # Show previously completed investigations if any
-            if self.completed_investigations:
-                console.print("\n[dim]Previously completed investigations:[/dim]")
-                for goal in self.completed_investigations:  # Show all completed
-                    console.print(f"  [green]✓[/green] {goal}")
-            
-            # Only show new investigations in checklist
-            console.print("\n[bold cyan]New Investigations Planned[/bold cyan]")
-            for i, it in enumerate(items):
-                pr = getattr(it, 'priority', 0)
-                imp = getattr(it, 'expected_impact', None)
-                cat = getattr(it, 'category', None)
-                meta = f"prio {pr}"
-                if imp:
-                    meta += f", {imp}"
-                if cat:
-                    meta += f", {cat}"
-                console.print(f"  [ ] {it.goal}  ({meta})")
+                # If no items, log and stop
+                if not items:
+                    self._agent_log.append("No further promising investigations suggested — audit complete")
+                    _refresh(-1)
+                    break
 
-            for idx, inv in enumerate(items):
-                # Check time limit before starting each investigation
-                if self.time_limit_minutes:
-                    elapsed_minutes = (time.time() - start_overall) / 60.0
-                    remaining_minutes = self.time_limit_minutes - elapsed_minutes
-                    if remaining_minutes <= 0:
-                        console.print(f"\n[yellow]⏰ Time limit reached ({self.time_limit_minutes} minutes) — stopping audit[/yellow]")
-                        break
-                    # Warn if less than 2 minutes remaining
-                    if remaining_minutes < 2:
-                        console.print(f"[yellow]⚠️  Only {remaining_minutes:.1f} minutes remaining[/yellow]")
-                
-                console.print(f"\n[bold blue]→ Investigating:[/bold blue] {inv.goal}")
-                max_iters = self.agent.max_iterations if self.agent.max_iterations else 5
-                
-                # Reduce iterations if we're running low on time
-                if self.time_limit_minutes:
-                    elapsed_minutes = (time.time() - start_overall) / 60.0
-                    remaining_minutes = self.time_limit_minutes - elapsed_minutes
-                    # Estimate 1-2 minutes per iteration, reduce if needed
-                    safe_iters = max(1, int(remaining_minutes / 1.5))  # 1.5 minutes per iteration estimate
-                    if safe_iters < max_iters:
-                        console.print(f"[yellow]Reducing iterations from {max_iters} to {safe_iters} due to time limit[/yellow]")
-                        max_iters = safe_iters
-                
-                self.start_time = time.time()
-                try:
-                    # TODO: Pass remaining_time to investigate() when that feature is added
-                    report = self.agent.investigate(inv.goal, max_iterations=max_iters, progress_callback=progress_cb)
-                    results.append((inv, report))
-                    # Track completed investigation
-                    self.completed_investigations.append(inv.goal)
+                # Log previously completed investigations
+                if self.completed_investigations:
+                    self._agent_log.append("Previously completed investigations:")
+                    for goal in self.completed_investigations:
+                        self._agent_log.append(f"✓ {goal}")
+                    _refresh(-1)
+
+                # Log new investigations
+                self._agent_log.append("New investigations planned:")
+                for i, it in enumerate(items):
+                    pr = getattr(it, 'priority', 0)
+                    imp = getattr(it, 'expected_impact', None)
+                    cat = getattr(it, 'category', None)
+                    meta = f"prio {pr}"
+                    if imp:
+                        meta += f", {imp}"
+                    if cat:
+                        meta += f", {cat}"
+                    self._agent_log.append(f"[ ] {it.goal}  ({meta})")
+                _refresh(-1)
+
+                # Execute investigations under live dashboard
+                for idx, inv in enumerate(items):
+                    # Check time limit before starting each investigation
+                    if self.time_limit_minutes:
+                        elapsed_minutes = (time.time() - start_overall) / 60.0
+                        remaining_minutes = self.time_limit_minutes - elapsed_minutes
+                        if remaining_minutes <= 0:
+                            self._agent_log.append(f"⏰ Time limit reached ({self.time_limit_minutes} minutes) — stopping audit")
+                            _refresh(idx)
+                            break
+                        if remaining_minutes < 2:
+                            self._agent_log.append(f"⚠️  Only {remaining_minutes:.1f} minutes remaining")
+                            _refresh(idx)
+
+                    self._agent_log.append(f"→ Investigating: {inv.goal}")
+                    _refresh(idx)
+                    # Mark plan item in_progress if we have a frame_id
+                    try:
+                        if getattr(inv, 'frame_id', None) and self.plan_store:
+                            from analysis.plan_store import PlanStatus
+                            self.plan_store.update_status(inv.frame_id, PlanStatus.IN_PROGRESS, rationale='Execution started')
+                        if getattr(self, 'agent', None) and getattr(self.agent, 'coverage_index', None):
+                            self.agent.coverage_index.record_investigation(getattr(inv, 'frame_id', None), [], 'in_progress')
+                    except Exception:
+                        pass
+                    max_iters = self.agent.max_iterations if self.agent.max_iterations else 5
+                    # Reduce iterations if we're running low on time
+                    if self.time_limit_minutes:
+                        elapsed_minutes = (time.time() - start_overall) / 60.0
+                        remaining_minutes = self.time_limit_minutes - elapsed_minutes
+                        safe_iters = max(1, int(remaining_minutes / 1.5))
+                        if safe_iters < max_iters:
+                            self._agent_log.append(f"Reducing iterations from {max_iters} to {safe_iters} due to time limit")
+                            max_iters = safe_iters
+                            _refresh(idx)
+
+                    self.start_time = time.time()
+                    try:
+                        # Inject a progress callback that logs events and refreshes the live view
+                        def _cb(info: dict):
+                            status = info.get('status', '')
+                            msg = info.get('message', '')
+                            it = info.get('iteration', 0)
+                            if status == 'decision':
+                                act = info.get('action', '-')
+                                reasoning = info.get('reasoning', '')
+                                self._agent_log.append(f"Iter {it} decision: {act} | {reasoning}")
+                            elif status == 'result':
+                                r = info.get('result', {}) or {}
+                                summ = r.get('summary') or r.get('status') or msg
+                                self._agent_log.append(f"Iter {it} result: {summ}")
+                            elif status:
+                                self._agent_log.append(f"Iter {it} {status}: {msg}")
+                            _refresh(idx)
+
+                        report = self.agent.investigate(inv.goal, max_iterations=max_iters, progress_callback=_cb)
+                        results.append((inv, report))
+                        # Track completed investigation
+                        self.completed_investigations.append(inv.goal)
+                        # Update run tracker with investigation and token usage
+                        self.run_tracker.add_investigation({
+                            'goal': inv.goal,
+                            'priority': getattr(inv, 'priority', 0),
+                            'category': getattr(inv, 'category', None),
+                            'iterations_completed': report.get('iterations_completed', 0) if report else 0,
+                            'hypotheses': report.get('hypotheses', {}) if report else {}
+                        })
+                        self.run_tracker.update_token_usage(token_tracker.get_summary())
+                    except Exception as e:
+                        self.run_tracker.add_error(str(e))
+                        raise
+                    # Show progress
+                    self._agent_log.append(f"✓ Completed: {inv.goal}")
+                    _refresh(idx)
+                    # Mark plan item done
+                    try:
+                        if getattr(inv, 'frame_id', None) and self.plan_store:
+                            from analysis.plan_store import PlanStatus
+                            self.plan_store.update_status(inv.frame_id, PlanStatus.DONE, rationale='Completed investigation')
+                        if getattr(self, 'agent', None) and getattr(self.agent, 'coverage_index', None):
+                            self.agent.coverage_index.record_investigation(getattr(inv, 'frame_id', None), [], 'done')
+                    except Exception:
+                        pass
                     
-                    # Update run tracker with investigation and token usage
-                    self.run_tracker.add_investigation({
-                        'goal': inv.goal,
-                        'priority': getattr(inv, 'priority', 0),
-                        'category': getattr(inv, 'category', None),
-                        'iterations_completed': report.get('iterations_completed', 0) if report else 0,
-                        'hypotheses': report.get('hypotheses', {}) if report else {}
-                    })
-                    self.run_tracker.update_token_usage(token_tracker.get_summary())
-                except Exception as e:
-                    self.run_tracker.add_error(str(e))
-                    raise
-                # Show progress
-                console.print(f"[green]✓ Completed:[/green] {inv.goal}")
-
-                # Early stop if agent is satisfied (no hypotheses and no more actions suggested)
-                try:
-                    hyp = (report or {}).get('hypotheses', {})
-                    total_h = int(hyp.get('total', 0))
-                except Exception:
-                    total_h = 0
-                if total_h == 0:
-                    console.print("[dim]No hypotheses formed; considering coverage achieved for this thread[/dim]")
-                    # Continue to next planned item; planner will run again next round
-            # Loop to next planning round
+                    # Early stop if agent is satisfied (no hypotheses and no more actions suggested)
+                    try:
+                        hyp = (report or {}).get('hypotheses', {})
+                        total_h = int(hyp.get('total', 0))
+                    except Exception:
+                        total_h = 0
+                    if total_h == 0:
+                        self._agent_log.append("No hypotheses formed; considering coverage achieved for this thread")
+                        _refresh(idx)
 
         # After audit, show the last report in detail
         if results:
@@ -1089,10 +1332,17 @@ class AgentRunner:
 @click.option('--config', type=click.Path(exists=True), help='Configuration file')
 @click.option('--resume', is_flag=True, help='Resume from previous session')
 @click.option('--debug', is_flag=True, help='Enable debug logging of prompts and responses')
-@click.option('--platform', default=None, help='Override LLM platform (e.g., openai, anthropic)')
-@click.option('--model', default=None, help='Override LLM model (e.g., gpt-4, claude-3)')
+@click.option('--platform', default=None, help='Override scout platform (e.g., openai, anthropic, mock)')
+@click.option('--model', default=None, help='Override scout model (e.g., gpt-5, gpt-4o-mini, mock)')
+@click.option('--strategist-platform', default=None, help='Override strategist platform (e.g., openai, anthropic, mock)')
+@click.option('--strategist-model', default=None, help='Override strategist model (e.g., gpt-4o-mini)')
+@click.option('--session', default=None, help='Attach to a specific session ID')
+@click.option('--new-session', is_flag=True, help='Create a new session')
+@click.option('--session-private-hypotheses', is_flag=True, help='Keep new hypotheses private to this session')
 def agent(project_id: str, iterations: Optional[int], plan_n: int, time_limit: Optional[int], 
-          config: Optional[str], resume: bool, debug: bool, platform: Optional[str], model: Optional[str]):
+          config: Optional[str], resume: bool, debug: bool, platform: Optional[str], model: Optional[str],
+          strategist_platform: Optional[str], strategist_model: Optional[str],
+          session: Optional[str], new_session: bool, session_private_hypotheses: bool):
     """Run autonomous security analysis agent."""
     
     if resume:
@@ -1101,12 +1351,29 @@ def agent(project_id: str, iterations: Optional[int], plan_n: int, time_limit: O
     
     config_path = Path(config) if config else None
     
-    runner = AgentRunner(project_id, config_path, iterations, time_limit, debug, platform, model)
+    runner = AgentRunner(project_id, config_path, iterations, time_limit, debug, platform, model, session=session, new_session=new_session)
     
     if not runner.initialize():
         return
     
     try:
+        # Apply strategist overrides (update config before run if provided)
+        if runner.config is None:
+            runner.config = {}
+        if 'models' not in runner.config:
+            runner.config['models'] = {}
+        if strategist_platform or strategist_model:
+            runner.config['models'].setdefault('guidance', {})
+            if strategist_platform:
+                runner.config['models']['guidance']['provider'] = strategist_platform
+            if strategist_model:
+                runner.config['models']['guidance']['model'] = strategist_model
+        # Set strategist overrides then run
+        if session_private_hypotheses and getattr(runner, 'agent', None):
+            try:
+                runner.agent.default_hypothesis_visibility = 'session'
+            except Exception:
+                pass
         runner.run(plan_n=plan_n)
     except KeyboardInterrupt:
         console.print("\n[yellow]Agent interrupted by user[/yellow]")

@@ -63,6 +63,24 @@ def project_info(name: str = typer.Argument(..., help="Project name")):
     ctx.params = {'name': name}
     info.invoke(ctx)
 
+@project_app.command("coverage")
+def project_coverage(name: str = typer.Argument(..., help="Project name")):
+    """Show coverage metrics for a project (nodes and cards)."""
+    from analysis.coverage_index import CoverageIndex
+    manager = ProjectManager()
+    proj = manager.get_project(name)
+    if not proj:
+        console.print(f"[red]Project '{name}' not found.[/red]")
+        raise typer.Exit(1)
+    project_dir = manager.get_project_path(name)
+    graphs_dir = project_dir / 'graphs'
+    manifest_dir = project_dir / 'manifest'
+    cov = CoverageIndex(project_dir / 'coverage_index.json', agent_id='cli')
+    stats = cov.compute_stats(graphs_dir, manifest_dir)
+    console.print("[bold cyan]Coverage[/bold cyan]")
+    console.print(f"Nodes: {stats['nodes']['visited']} / {stats['nodes']['total']} ({stats['nodes']['percent']}%)")
+    console.print(f"Cards: {stats['cards']['visited']} / {stats['cards']['total']} ({stats['cards']['percent']}%)")
+
 @project_app.command("delete")
 def project_delete(
     name: str = typer.Argument(..., help="Project name"),
@@ -122,8 +140,13 @@ def agent_audit(
     resume: bool = typer.Option(False, "--resume", help="Resume from previous session"),
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging"),
     project: str = typer.Option(None, "--project", "-p", help="Use existing project"),
-    platform: str = typer.Option(None, "--platform", help="Override LLM platform (e.g., openai, anthropic)"),
-    model: str = typer.Option(None, "--model", help="Override LLM model (e.g., gpt-4, claude-3)")
+    platform: str = typer.Option(None, "--platform", help="Override scout platform (e.g., openai, anthropic, mock)"),
+    model: str = typer.Option(None, "--model", help="Override scout model (e.g., gpt-5, gpt-4o-mini, mock)"),
+    strategist_platform: str = typer.Option(None, "--strategist-platform", help="Override strategist platform (e.g., openai, anthropic, mock)"),
+    strategist_model: str = typer.Option(None, "--strategist-model", help="Override strategist model (e.g., gpt-4o-mini)"),
+    session: str = typer.Option(None, "--session", help="Attach to a specific session ID"),
+    new_session: bool = typer.Option(False, "--new-session", help="Create a new session"),
+    session_private_hypotheses: bool = typer.Option(False, "--session-private-hypotheses", help="Keep new hypotheses private to this session")
 ):
     """Run autonomous security audit (plans investigations automatically)."""
     from commands.agent import agent as agent_command
@@ -189,7 +212,12 @@ def agent_audit(
         'resume': resume,
         'debug': debug,
         'platform': platform,
-        'model': model
+        'model': model,
+        'strategist_platform': strategist_platform,
+        'strategist_model': strategist_model,
+        'session': session,
+        'new_session': new_session,
+        'session_private_hypotheses': session_private_hypotheses
     }
     agent_command.invoke(ctx)
 
@@ -492,7 +520,9 @@ def graph_export(
 def finalize(
     project: str = typer.Argument(..., help="Project name"),
     threshold: float = typer.Option(0.75, "--threshold", "-t", help="Confidence threshold for review"),
-    debug: bool = typer.Option(False, "--debug", help="Enable debug mode")
+    debug: bool = typer.Option(False, "--debug", help="Enable debug mode"),
+    platform: str = typer.Option(None, "--platform", help="Override QA platform (e.g., openai, anthropic, mock)"),
+    model: str = typer.Option(None, "--model", help="Override QA model (e.g., gpt-4o-mini)")
 ):
     """Finalize hypotheses - review and confirm/reject high-confidence findings."""
     from commands.finalize import finalize as finalize_command
@@ -506,7 +536,9 @@ def finalize(
         'project_name': project,
         'threshold': threshold,
         'skip_filter': False,  # Default to not skipping the filter
-        'debug': debug
+        'debug': debug,
+        'platform': platform,
+        'model': model
     }
     
     try:
@@ -514,6 +546,8 @@ def finalize(
     except SystemExit as e:
         if e.code != 0:
             raise typer.Exit(e.code)
+
+
 
 
 @app.command()

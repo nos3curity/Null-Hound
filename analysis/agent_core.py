@@ -73,12 +73,16 @@ class AutonomousAgent:
                  manifest_path: Path,
                  agent_id: str,
                  config: Optional[Dict] = None,
-                 debug: bool = False):
+                 debug: bool = False,
+                 session_id: Optional[str] = None):
         """Initialize the autonomous agent."""
         
         self.agent_id = agent_id
         self.manifest_path = manifest_path
         self.debug = debug
+        self.session_id = session_id
+        # Default hypothesis visibility; can be overridden by runner
+        self.default_hypothesis_visibility = 'global'
         
         # Initialize debug logger if needed
         self.debug_logger = None
@@ -97,22 +101,22 @@ class AutonomousAgent:
         # Save config for later utilities
         self.config = config
 
-        # Use 'agent' profile for agent operations
+        # Use 'scout' profile for agent operations (fallbacks handled in client)
         self.llm = UnifiedLLMClient(
             cfg=config,
-            profile="agent",
+            profile="scout",
             debug_logger=self.debug_logger
         )
         
-        # Initialize guidance model for deep thinking
+        # Initialize strategist model for deep thinking
         try:
             self.guidance_client = UnifiedLLMClient(
                 cfg=config,
-                profile="guidance",
+                profile="strategist",
                 debug_logger=self.debug_logger
             )
         except Exception:
-            # If guidance model not configured, fall back to agent model
+            # If strategist model not configured, fall back to scout model
             self.guidance_client = self.llm
 
         # Use the agent model itself for context compression
@@ -1086,37 +1090,22 @@ DO NOT include any text before or after the JSON object."""
             # Fallback to more robust parsing
             if response:
                 try:
-                    # Try to extract JSON from the response
+                    from .parsing import parse_agent_decision_fallback
+                    data = parse_agent_decision_fallback(response)
+                    if isinstance(data, dict):
+                        if 'parameters' not in data or data['parameters'] is None:
+                            data['parameters'] = {}
+                        return AgentDecision(**data)
+                    # Try to extract action and reasoning manually
                     import re
-                    json_match = re.search(r'\{.*\}', response, re.DOTALL)
-                    if json_match:
-                        json_str = json_match.group()
-                        # Try to fix common JSON issues
-                        # Fix unclosed quotes
-                        if json_str.count('"') % 2 != 0:
-                            json_str = json_str.rstrip('}') + '"}' 
-                        # Fix trailing commas
-                        json_str = re.sub(r',\s*}', '}', json_str)
-                        json_str = re.sub(r',\s*]', ']', json_str)
-                        
-                        try:
-                            data = json.loads(json_str)
-                            # Ensure parameters is a dict
-                            if 'parameters' not in data:
-                                data['parameters'] = {}
-                            elif data['parameters'] is None:
-                                data['parameters'] = {}
-                            return AgentDecision(**data)
-                        except json.JSONDecodeError:
-                            # Try to extract action and reasoning manually
-                            action_match = re.search(r'"action"\s*:\s*"([^"]+)"', response)
-                            reasoning_match = re.search(r'"reasoning"\s*:\s*"([^"]+)"', response)
-                            if action_match:
-                                return AgentDecision(
-                                    action=action_match.group(1),
-                                    reasoning=reasoning_match.group(1) if reasoning_match else "Parsed from malformed JSON",
-                                    parameters={}
-                                )
+                    action_match = re.search(r'"action"\s*:\s*"([^"]+)"', response)
+                    reasoning_match = re.search(r'"reasoning"\s*:\s*"([^"]+)"', response)
+                    if action_match:
+                        return AgentDecision(
+                            action=action_match.group(1),
+                            reasoning=reasoning_match.group(1) if reasoning_match else "Parsed from malformed JSON",
+                            parameters={}
+                        )
                 except Exception as e2:
                     print(f"[!] Failed to parse response: {e2}")
             
@@ -1265,82 +1254,17 @@ DO NOT include any text before or after the JSON object."""
         """Load and cache cards.jsonl as an index by ID."""
         if self._card_index is not None:
             return
-        self._card_index = {}
-        # Prefer graph card store if available
-        try:
-            graphs_dir = Path(self.graphs_metadata_path).parent
-            card_store = graphs_dir / 'card_store.json'
-            if card_store.exists():
-                with open(card_store) as f:
-                    store = json.load(f)
-                    if isinstance(store, dict):
-                        for cid, card in store.items():
-                            if cid and isinstance(card, dict):
-                                self._card_index[cid] = card
-                # Debug logging removed - too noisy
-                pass
-        except Exception:
-            # Silently continue if card store not found
-            pass
-        # Also load manifest cards
-        manifest_file = self.manifest_path / "cards.jsonl"
-        if manifest_file.exists():
-            with open(manifest_file) as f:
-                for line in f:
-                    try:
-                        card = json.loads(line)
-                        cid = card.get('id')
-                        if cid and cid not in self._card_index:
-                            self._card_index[cid] = card
-                            rel = card.get('relpath')
-                            if rel:
-                                self._file_to_cards.setdefault(rel, []).append(cid)
-                    except json.JSONDecodeError:
-                        continue
-        # Load files.json to get ordered mapping relpath -> card_ids
-        files_json = self.manifest_path / 'files.json'
-        if files_json.exists():
-            try:
-                with open(files_json) as f:
-                    files_list = json.load(f)
-                if isinstance(files_list, list):
-                    for fi in files_list:
-                        rel = fi.get('relpath')
-                        cids = fi.get('card_ids', []) or []
-                        if rel and isinstance(cids, list):
-                            self._file_to_cards[rel] = cids
-            except Exception:
-                pass
+        from .cards import load_card_index
+        idx, file_map = load_card_index(self.graphs_metadata_path, self.manifest_path)
+        self._card_index = idx
+        self._file_to_cards.update(file_map)
 
     def _extract_card_content(self, card: Dict[str, Any]) -> str:
         """Get best-available content from a card record."""
-        content = card.get('content')
-        if content:
-            return content
-        # Try reconstructing from source if we know offsets
-        try:
-            rel = card.get('relpath')
-            cs = card.get('char_start')
-            ce = card.get('char_end')
-            if self._repo_root and rel and isinstance(cs, int) and isinstance(ce, int) and ce > cs:
-                fpath = self._repo_root / rel
-                if fpath.exists():
-                    text = fpath.read_text(encoding='utf-8', errors='ignore')
-                    return text[cs:ce]
-        except Exception:
-            pass
-        # Fallback to peek head/tail if content missing
-        head = card.get('peek_head', '') or ''
-        tail = card.get('peek_tail', '') or ''
-        return (head + ("\n" if head and tail else "") + tail).strip()
+        from .cards import extract_card_content
+        return extract_card_content(card, self._repo_root)
 
-    def _iter_graphs(self):
-        """Yield (name, data) for the system graph first, then any loaded graphs."""
-        if self.loaded_data.get('system_graph'):
-            g = self.loaded_data['system_graph']
-            yield g['name'], g['data']
-        for name, data in (self.loaded_data.get('graphs') or {}).items():
-            yield name, data
+    # Note: _iter_graphs was a duplicate of _iterate_graphs and has been removed.
 
     def _load_nodes(self, node_ids: List[str], graph_name: Optional[str] = None) -> Dict:
         """Load complete node data with associated source code.
@@ -1467,6 +1391,12 @@ DO NOT include any text before or after the JSON object."""
                         ) if k in c
                     }
                 })
+                # Track card coverage
+                try:
+                    if self.coverage_index and cid:
+                        self.coverage_index.touch_card(str(cid))
+                except Exception:
+                    pass
 
             # NO FALLBACK - if node has no explicit source_refs, it has no code
             # This prevents loading entire files when agent requests non-existent nodes
@@ -1477,6 +1407,11 @@ DO NOT include any text before or after the JSON object."""
                 self.loaded_data['code'][chosen_id] = '\n\n'.join(c['content'] for c in node_cards)
             self.loaded_data['nodes'][chosen_id] = node_copy
             loaded_nodes.append(chosen_id)
+            try:
+                if self.coverage_index:
+                    self.coverage_index.touch_node(chosen_id)
+            except Exception:
+                pass
 
         # Count only the nodes from this request
         current_request_nodes = loaded_nodes
@@ -1689,289 +1624,38 @@ DO NOT include any text before or after the JSON object."""
         }
     
     def _deep_think(self) -> Dict:
-        """
-        Execute deep thinking analysis using the guidance model.
-        Passes the entire context to analyze for vulnerabilities and get guidance.
-        """
+        """Delegate deep analysis to the Strategist and form hypotheses accordingly."""
         try:
-            # Check if guidance client is available
-            if not self.guidance_client:
-                return {
-                    'status': 'error',
-                    'error': 'Guidance model not initialized'
-                }
-            
-            # Build full context (same as agent sees)
             context = self._build_context()
-            
-            # Build hypotheses summary for context
-            existing_hypotheses = ""
-            try:
-                current_data = self.hypothesis_store._load_data()
-                hypotheses_dict = current_data.get('hypotheses', {})
-                if hypotheses_dict:
-                    hyp_list = []
-                    for hyp_id, hyp in list(hypotheses_dict.items())[:10]:  # Show first 10
-                        desc = hyp.get('description', hyp.get('title', 'Unknown'))
-                        conf = hyp.get('confidence', 0)
-                        hyp_list.append(f"- {desc} (confidence: {conf:.0%})")
-                    if hyp_list:
-                        existing_hypotheses = "\n".join(hyp_list)
-            except Exception:
-                pass  # Silently continue if can't load
-            
-            # Prepare prompt for guidance model
-            system_prompt = """You are a deep thinking security analysis model.
-Analyze the agent's RECENT exploration to find vulnerabilities.
-
-Return a COMPACT but COMPLETE analysis:
-
-HYPOTHESES:
-[For each NEW vulnerability (not already in existing hypotheses), provide ONE LINE with ALL elements separated by |]
-Title | Type | Root Cause | Attack Vector | Affected Nodes | Affected Code/Files | Severity | Confidence | Reasoning
-Example:
-Reentrancy in withdraw | reentrancy | No CEI pattern | Callback drains funds | func_withdraw,Vault | VaultManager.sol:145 | critical | high | External call before state update allows reentrant attack
-Access control bypass | access_control | Missing modifier | Direct call | func_setOwner,AdminPanel | AdminPanel.sol:23 | high | medium | No onlyOwner modifier on critical function
-
-Required fields:
-- Title: Short descriptive name
-- Type: reentrancy/access_control/integer_overflow/dos/injection/logic_error/other
-- Root Cause: Technical reason for vulnerability
-- Attack Vector: How to exploit
-- Affected Nodes: Comma-separated node IDs from the graphs (func_X, Contract_Y, etc.)
-- Affected Code/Files: File:line or Contract.function() format
-- Severity: critical/high/medium/low
-- Confidence: high/medium/low
-- Reasoning: Brief explanation of why this is vulnerable
-
-FALSE POSITIVES MUST BE DISMISSED! DO NOT PROPOSE VULNERABILITES IF:
-- The issue is trivial and/or has no impact (e.g. missing input validation with no effect)
-- Exploitation requires admin privileges
-- The issue is impractical to exploit
-- You cannot think of a concrete attack vector
-
-EXPLORATION STRATEGY:
-[One paragraph - what patterns to look for next and why]
-Focus on areas not yet explored. Suggest specific node IDs or code patterns to examine based on vulnerabilities found.
-If you have a hypothesis but need to see more code to confirm it, let the agent know in this section!
-Keep responses COMPACT but include ALL required fields."""
-            
-            user_prompt = f"""Security audit context (FOCUS ON 'RECENT ACTIONS' section):
-
-{context}
-
-EXISTING HYPOTHESES (don't duplicate these):
-{existing_hypotheses if existing_hypotheses else "None yet"}
-
-Analyze the RECENT exploration steps for vulnerabilities. What security issues do you see in the recently loaded code?"""
-            
-            # Call guidance model
-            try:
-                response = self.guidance_client.raw(
-                    system=system_prompt,
-                    user=user_prompt
-                )
-            except Exception as llm_error:
-                return {
-                    'status': 'error',
-                    'error': f'LLM call failed: {str(llm_error)}'
-                }
-            
-            if response:
-                # Parse and process the guidance
-                # Track hypotheses formed before and after
-                try:
-                    # Load current hypotheses from the store
-                    current_data = self.hypothesis_store._load_data()
-                    initial_hyp_count = len(current_data.get('hypotheses', {}))
-                    
-                    self._process_guidance_response(response)
-                    
-                    # Reload to get updated count
-                    updated_data = self.hypothesis_store._load_data()
-                    new_hyp_count = len(updated_data.get('hypotheses', {}))
-                    hypotheses_formed = new_hyp_count - initial_hyp_count
-                    
-                    # Get the newly formed hypotheses
-                    new_hypotheses = []
-                    if hypotheses_formed > 0:
-                        # Get the latest hypotheses from the store
-                        all_hyps = list(updated_data.get('hypotheses', {}).values())
-                        new_hypotheses = all_hyps[-hypotheses_formed:] if all_hyps else []
-                except Exception as proc_error:
-                    # Even if hypothesis processing fails, return the guidance
-                    return {
-                        'status': 'success',  # Still success because we got guidance
-                        'summary': 'Deep analysis complete - guidance provided (hypothesis formation failed)',
-                        'full_response': response,
-                        'guidance': response[:500],
-                        'hypotheses_formed': 0,
-                        'new_hypotheses': [],
-                        'processing_error': str(proc_error)
-                    }
-                
-                return {
-                    'status': 'success',
-                    'summary': 'Deep analysis complete - vulnerabilities analyzed and guidance provided',
-                    'full_response': response,  # Return full response for display
-                    'guidance': response[:500],  # Keep short version too
-                    'hypotheses_formed': hypotheses_formed,
-                    'new_hypotheses': new_hypotheses
-                }
-            else:
-                return {
-                    'status': 'error',
-                    'error': 'No response from guidance model'
-                }
-                
-        except Exception as e:
-            import traceback
-            error_details = traceback.format_exc()
-            return {
-                'status': 'error',
-                'error': f'Deep think failed: {str(e)}',
-                'traceback': error_details[:500]  # Include first 500 chars of traceback
-            }
-    
-    def _process_guidance_response(self, response: str):
-        """
-        Process the guidance response to extract and form hypotheses.
-        """
-        try:
-            # The model is returning numbered vulnerabilities, not a HYPOTHESES: section
-            # Look for lines with pipe separators anywhere in the response
-            lines = response.split('\n')
-            found_hypotheses = False
-            
-            for line in lines:
-                line = line.strip()
-                # Look for lines with the pipe format we specified
-                if '|' in line and 'Title |' in line and 'Type |' in line:
-                    # This is the header line, skip it but mark that we found the format
-                    found_hypotheses = True
-                    continue
-                elif '|' in line and line.count('|') >= 7:  # Our format has 8 pipes
-                    # This looks like a hypothesis line
-                    self._form_hypothesis_from_guidance(line)
-                    found_hypotheses = True
-            
-            # Also try the original parsing in case format changes
-            if not found_hypotheses and 'HYPOTHESES:' in response:
-                # Extract hypotheses section
-                hyp_section = response.split('HYPOTHESES:')[1]
-                if 'EXPLORATION STRATEGY' in hyp_section:
-                    hyp_section = hyp_section.split('EXPLORATION STRATEGY')[0]
-                elif 'EXPLORE' in hyp_section:
-                    # Handle variations  
-                    for keyword in ['EXPLORE', 'EXPLORATION', 'NEXT']:
-                        if keyword in hyp_section:
-                            hyp_section = hyp_section.split(keyword)[0]
-                            break
-                
-                # Parse each hypothesis line
-                lines = hyp_section.strip().split('\n')
-                for line in lines:
-                    line = line.strip()
-                    # Skip empty lines, headers, and examples
-                    if not line or 'Example:' in line or 'Title |' in line or line.startswith('['):
-                        continue
-                    # Process lines with pipe separators
-                    if '|' in line:
-                        self._form_hypothesis_from_guidance(line)
-                        
-        except Exception:
-            # Silently continue - guidance is still useful even if parsing fails
-            pass
-    
-    def _form_hypothesis_from_guidance(self, vulnerability_text: str):
-        """
-        Form a hypothesis from guidance model's vulnerability finding.
-        Format: Title | Type | Root Cause | Attack Vector | Affected Nodes | Affected Code/Files | Severity | Confidence | Reasoning
-        """
-        try:
-            import re
-            
-            # Parse the pipe-separated format
-            parts = [p.strip() for p in vulnerability_text.split('|')]
-            
-            if len(parts) < 8:
-                return  # Skip invalid format silently
-            
-            title = parts[0]
-            vuln_type = parts[1] if len(parts) > 1 else "security_issue"
-            root_cause = parts[2] if len(parts) > 2 else ""
-            attack_vector = parts[3] if len(parts) > 3 else ""
-            affected_nodes = parts[4] if len(parts) > 4 else ""
-            affected_code = parts[5] if len(parts) > 5 else ""
-            severity = parts[6].lower() if len(parts) > 6 else "medium"
-            confidence_str = parts[7].lower() if len(parts) > 7 else "medium"
-            reasoning = parts[8] if len(parts) > 8 else ""
-            
-            # Parse confidence
-            confidence = 0.8  # default
-            if 'high' in confidence_str:
-                confidence = 0.9
-            elif 'medium' in confidence_str:
-                confidence = 0.6
-            elif 'low' in confidence_str:
-                confidence = 0.4
-            
-            # Validate severity
-            if severity not in ['critical', 'high', 'medium', 'low']:
-                severity = 'medium'
-            
-            # Parse node IDs from the affected nodes field
-            node_refs = []
-            if affected_nodes:
-                # Split by comma and clean up
-                node_refs = [n.strip() for n in affected_nodes.split(',') if n.strip()]
-            
-            # Default to system if no nodes found
-            if not node_refs:
-                node_refs = ['system']
-            
-            # Build detailed description with all information
-            details = f"""VULNERABILITY TYPE: {vuln_type}
-ROOT CAUSE: {root_cause}
-ATTACK VECTOR: {attack_vector}
-AFFECTED NODES: {', '.join(node_refs)}
-AFFECTED CODE: {affected_code}
-SEVERITY: {severity}
-REASONING: {reasoning}
-
-This vulnerability was identified through deep analysis of the recently explored code.
-The issue allows an attacker to {attack_vector.lower()} due to {root_cause.lower()}.
-Location: {affected_code}
-Technical Details: {reasoning}"""
-            
-            # Get guidance model info if available
+            from .strategist import Strategist
+            strategist = Strategist(config=self.config or {})
+            items = strategist.deep_think(context=context) or []
+            added = 0
             guidance_model_info = None
             if hasattr(self, 'guidance_client') and self.guidance_client:
-                guidance_model_info = f"{self.guidance_client.provider_name}:{self.guidance_client.model}"
-            
-            # Build params for the existing _form_hypothesis method
-            params = {
-                'description': title,  # Compact title
-                'details': details,  # Full details with all information
-                'vulnerability_type': vuln_type,
-                'severity': severity,
-                'confidence': confidence,
-                'node_ids': node_refs,  # Proper node IDs from the model
-                'reasoning': reasoning,
-                'graph_name': 'SystemArchitecture',  # Could extract from context
-                'guidance_model': guidance_model_info  # Pass guidance model for senior_model field
-            }
-            
-            # Use the existing _form_hypothesis method which handles all storage properly
-            result = self._form_hypothesis(params)
-            
-            if result.get('status') == 'success':
-                # Just show the title of the added hypothesis
-                print(f"✓ Added hypothesis: {title}")
-            
-        except Exception:
-            # Silently continue if a single hypothesis fails
-            pass
+                try:
+                    guidance_model_info = f"{self.guidance_client.provider_name}:{self.guidance_client.model}"
+                except Exception:
+                    guidance_model_info = None
+            for it in items:
+                params = {
+                    'description': it.get('description', 'Hypothesis'),
+                    'details': it.get('details', ''),
+                    'vulnerability_type': it.get('vulnerability_type', 'security_issue'),
+                    'severity': it.get('severity', 'medium'),
+                    'confidence': it.get('confidence', 0.6),
+                    'node_ids': it.get('node_ids', ['system']),
+                    'reasoning': it.get('reasoning', ''),
+                    'graph_name': 'SystemArchitecture',
+                    'guidance_model': guidance_model_info,
+                }
+                res = self._form_hypothesis(params)
+                if res.get('status') == 'success':
+                    added += 1
+            return {'status': 'success', 'summary': f'Deep analysis added {added} hypotheses', 'hypotheses_formed': added}
+        except Exception as e:
+            return {'status': 'error', 'error': str(e)}
+    
     
     def _guess_vuln_type(self, text: str) -> str:
         """Guess vulnerability type from description."""
@@ -2022,7 +1706,9 @@ Technical Details: {reasoning}"""
             created_by=self.agent_id,
             reported_by_model=senior_model or junior_model,  # Legacy field for backward compatibility
             junior_model=junior_model,
-            senior_model=senior_model
+            senior_model=senior_model,
+            session_id=getattr(self, 'session_id', None),
+            visibility=params.get('visibility', getattr(self, 'default_hypothesis_visibility', 'global'))
         )
         
         # Extract source files from nodes

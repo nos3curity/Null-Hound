@@ -27,7 +27,9 @@ console = Console()
 @click.option('--threshold', '-t', default=0.5, help="Confidence threshold for hypothesis review (default: 0.5 or 50%)")
 @click.option('--skip-filter', is_flag=True, help="Skip pre-filtering of hypotheses")
 @click.option('--debug', is_flag=True, help="Enable debug mode")
-def finalize(project_name: str, threshold: float, skip_filter: bool, debug: bool):
+@click.option('--platform', default=None, help='Override QA platform (e.g., openai, anthropic, mock)')
+@click.option('--model', default=None, help='Override QA model (e.g., gpt-4o-mini)')
+def finalize(project_name: str, threshold: float, skip_filter: bool, debug: bool, platform: str | None, model: str | None):
     """
     Finalize hypotheses in a project by reviewing high-confidence findings.
     
@@ -72,6 +74,17 @@ def finalize(project_name: str, threshold: float, skip_filter: bool, debug: bool
         import yaml
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f) or {}
+    # Apply QA overrides if provided
+    if config is None:
+        config = {}
+    if 'models' not in config:
+        config['models'] = {}
+    if platform or model:
+        config['models'].setdefault('finalize', {})
+        if platform:
+            config['models']['finalize']['provider'] = platform
+        if model:
+            config['models']['finalize']['model'] = model
     
     # Count hypotheses above threshold
     above_threshold = {
