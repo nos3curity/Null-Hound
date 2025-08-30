@@ -104,9 +104,11 @@ def run_investigation(project_path: str, prompt: str, iterations: Optional[int] 
     console.print("[bright_cyan]Initializing agent...[/bright_cyan]")
     from random import choice as _choice
     console.print(_choice([
-        "[white]Exquisite move — you’re not just asking a question, you’re summoning a code sleuth.[/white]",
-        "[white]Peak form — you’re not just kicking off an investigation, you’re launching a mini-epic.[/white]",
-        "[white]Glorious — you’re not just curious, you’re operationalizing curiosity.[/white]",
+        "[white]Normal people ask questions, but YOU issue royal decrees to logic itself.[/white]",
+        "[white]This isn’t just an investigation — it’s the moment mysteries retire on YOUR timetable.[/white]",
+        "[white]Normal curiosity wanders; YOUR curiosity drafts laws that code must obey.[/white]",
+        "[white]This is not mere inquiry — it’s jurisprudence of insight under YOUR seal.[/white]",
+        "[white]Normal analysts explore; YOU redraw the map and make the unknown pay rent.[/white]",
     ]))
     agent = Scout(
         graphs_metadata_path=knowledge_graphs_path,
@@ -1232,9 +1234,8 @@ class AgentRunner:
         config_text = (
             f"[bold cyan]AUTONOMOUS SECURITY AGENT[/bold cyan]\n"
             f"Project: [yellow]{self.project_id}[/yellow]\n"
-            f"Agent Model: [magenta]{agent_model_info}[/magenta]\n"
-            f"Guidance Model: [cyan]{guidance_model_info}[/cyan]\n"
-            f"Max Iterations: [green]{self.agent.max_iterations}[/green]\n"
+            f"Scout: [magenta]{agent_model_info}[/magenta]\n"
+            f"Strategist: [cyan]{guidance_model_info}[/cyan]\n"
             f"Context Limit: [blue]{max_tokens:,} tokens[/blue] (compress at {int(compression_threshold*100)}%)"
         )
         if self.time_limit_minutes:
@@ -1325,8 +1326,13 @@ class AgentRunner:
                     break
 
             planned_round += 1
-            # Log planning batch instead of printing when dashboard is active
-            items = self._plan_investigations(max(1, plan_n))
+            # Show an animated status while strategist plans the next batch
+            try:
+                from rich.status import Status
+                with console.status("[cyan]Strategist planning next steps...[/cyan]", spinner="dots", spinner_style="cyan"):
+                    items = self._plan_investigations(max(1, plan_n))
+            except Exception:
+                items = self._plan_investigations(max(1, plan_n))
             self._agent_log.append(f"Planning batch {planned_round} (top {plan_n})")
             # Log planning status at start of batch
             console.print(f"\n[bold cyan]═══ Planning Batch {planned_round} ═══[/bold cyan]")
@@ -1473,7 +1479,13 @@ class AgentRunner:
                             console.print(f"[dim]{status.capitalize()}: {msg}[/dim]")
                             self._agent_log.append(f"Iter {it} {status}: {msg[:100]}")
 
-                    report = self.agent.investigate(inv.goal, max_iterations=max_iters, progress_callback=_cb)
+                    # Show an animated status while the agent thinks/acts for this investigation
+                    try:
+                        from rich.status import Status
+                        with console.status("[cyan]Agent thinking deeply...[/cyan]", spinner="line", spinner_style="cyan"):
+                            report = self.agent.investigate(inv.goal, max_iterations=max_iters, progress_callback=_cb)
+                    except Exception:
+                        report = self.agent.investigate(inv.goal, max_iterations=max_iters, progress_callback=_cb)
                     results.append((inv, report))
                     # Track completed investigation
                     self.completed_investigations.append(inv.goal)

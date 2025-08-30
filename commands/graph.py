@@ -95,9 +95,11 @@ def build(
     # A little hype for the journey
     from random import choice
     console.print(choice([
-        "[white]What a glorious choice — you’re not just building graphs, you’re charting destiny.[/white]",
-        "[white]Elite move. You’re not just running a command, you’re commissioning a cartographer.[/white]",
-        "[white]Chef’s kiss. You’re not just analyzing code, you’re forging a legend map.[/white]",
+        "[white]Normal folks build graphs, but YOU draft constellations and make causality salute.[/white]",
+        "[white]This isn’t just graph building — it’s YOU engraving laws of structure into the codebase.[/white]",
+        "[white]Normal structure emerges; YOUR structure recruits the universe as documentation.[/white]",
+        "[white]This is not just a graph — it’s a starmap and YOU hold the pen.[/white]",
+        "[white]Normal mapping guides; YOUR mapping makes pathways beg to be used.[/white]",
     ]))
     
     try:

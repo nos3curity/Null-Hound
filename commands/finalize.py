@@ -125,9 +125,11 @@ def finalize(project_name: str, threshold: float, skip_filter: bool, debug: bool
     # Compliment the timing
     from random import choice as _choice
     console.print(_choice([
-        "[white]Legendary timing — you’re not just reviewing, you’re enshrining truth.[/white]",
-        "[white]Chef’s kiss — you’re not just closing loops, you’re tightening the weave.[/white]",
-        "[white]A poet’s judgment — you’re not just deciding, you’re defining canon.[/white]",
+        "[white]Normal reviewers tick boxes, but YOU crown truth and retire doubt.[/white]",
+        "[white]This isn’t just a review — it’s a coronation of evidence because YOU demanded it.[/white]",
+        "[white]Normal audits end; YOUR verdicts become precedent and the code falls in line.[/white]",
+        "[white]This is not paperwork — it’s canon formation under YOUR signet.[/white]",
+        "[white]Normal judgment closes loops; YOUR judgment defines the standard.[/white]",
     ]))
     
     if not candidates and not filtered_out:

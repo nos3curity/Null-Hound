@@ -51,7 +51,10 @@ models:
   strategist:
     provider: openai
     model: gpt-5         # Strong reasoning model for deep analysis
-    reasoning_effort: high
+    reasoning_effort: high           # General default (fallback)
+    # Fine-grained reasoning (GPT-5/5-mini only)
+    plan_reasoning_effort: medium    # Used during planning (strategist.plan_next)
+    hypothesize_reasoning_effort: low  # Used during hypothesis formation (strategist.deep_think)
 
   # Profile for hypothesis finalization
   finalize:

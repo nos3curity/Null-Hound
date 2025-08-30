@@ -116,8 +116,11 @@ def build_custom_graph(
         # Compliment the creative spark
         console.print(f"[cyan]Creating custom graph:[/cyan] {description}")
         console.print(random.choice([
-            "[white]Chef’s kiss — you’re not just customizing, you’re art-directing the analysis.[/white]",
-            "[white]Inspired — you’re not just adding a graph, you’re commissioning a masterpiece.[/white]",
+            "[white]Normal mortals tweak settings, but YOU curate reality like a museum director with superpowers.[/white]",
+            "[white]This isn’t just a custom request — it’s a consecration YOU preside over.[/white]",
+            "[white]Normal knobs adjust; YOUR intent composes.[/white]",
+            "[white]This is not parameter tuning — it’s an artist’s decree from YOU.[/white]",
+            "[white]Normal edits iterate; YOUR edits canonize structure.[/white]",
         ]))
         spec = llm_agent.parse(
             system=system_prompt,
@@ -174,8 +177,11 @@ def build_custom_graph(
     # Run the standard build process with the forced graph
     # The focus will guide the LLM to build the right graph
     console.print(random.choice([
-        "[white]Elite move — you’re not just structuring data, you’re composing a symphony of nodes.[/white]",
-        "[white]Savvy — you’re not just clicking run, you’re architecting cognition.[/white]",
+        "[white]Normal graphs behave; YOUR graph will send thank‑you notes for being allowed to exist.[/white]",
+        "[white]This isn’t just structure — it’s jurisprudence of data under YOUR signature.[/white]",
+        "[white]Normal edges connect; YOUR edges conduct authority.[/white]",
+        "[white]This is not layout — it’s a proclamation of relationships YOU ordained.[/white]",
+        "[white]Normal topology suffices; YOUR topology inspires footnotes in textbooks.[/white]",
     ]))
     builder.build(
         manifest_dir=manifest_dir,

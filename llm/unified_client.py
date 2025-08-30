@@ -97,6 +97,7 @@ class UnifiedLLMClient:
             self.provider = OpenAIProvider(
                 **common_kwargs,
                 reasoning_effort=model_config.get("reasoning_effort"),
+                text_verbosity=model_config.get("text_verbosity"),
                 verbose=llm_verbose
             )
         elif provider_name == "gemini":
@@ -139,7 +140,7 @@ class UnifiedLLMClient:
                 if self.provider.thinking_enabled:
                     print(f"    Thinking mode: Enabled")
     
-    def parse(self, *, system: str, user: str, schema: Type[T]) -> T:
+    def parse(self, *, system: str, user: str, schema: Type[T], reasoning_effort: Optional[str] = None) -> T:
         """
         Structured call: returns an instance of `schema` (Pydantic BaseModel).
         
@@ -150,7 +151,11 @@ class UnifiedLLMClient:
         response = None
         
         try:
-            response = self.provider.parse(system=system, user=user, schema=schema)
+            try:
+                response = self.provider.parse(system=system, user=user, schema=schema, reasoning_effort=reasoning_effort)
+            except TypeError:
+                # Provider may not support per-call overrides
+                response = self.provider.parse(system=system, user=user, schema=schema)
             
             # Track token usage if provider supports it
             if hasattr(self.provider, 'get_last_token_usage'):
@@ -182,7 +187,7 @@ class UnifiedLLMClient:
                     error=error
                 )
     
-    def raw(self, *, system: str, user: str) -> str:
+    def raw(self, *, system: str, user: str, reasoning_effort: Optional[str] = None) -> str:
         """
         Plain text call (no schema).
         
@@ -193,7 +198,10 @@ class UnifiedLLMClient:
         response = None
         
         try:
-            response = self.provider.raw(system=system, user=user)
+            try:
+                response = self.provider.raw(system=system, user=user, reasoning_effort=reasoning_effort)
+            except TypeError:
+                response = self.provider.raw(system=system, user=user)
             
             # Track token usage if provider supports it
             if hasattr(self.provider, 'get_last_token_usage'):

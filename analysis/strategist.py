@@ -49,6 +49,7 @@ class Strategist:
             from analysis.debug_logger import DebugLogger
             self.debug_logger = DebugLogger(session_id or "strategist")
         
+        self.profile = profile
         self.llm = UnifiedLLMClient(cfg=self.config, profile=profile, debug_logger=self.debug_logger)
 
     def plan_next(self, *, graphs_summary: str, completed: List[str], n: int = 5, 
@@ -109,7 +110,14 @@ class Strategist:
             f"For each investigation, explain WHY it's high-priority and what critical issue it might uncover."
         )
 
-        plan: PlanBatch = self.llm.parse(system=system, user=user, schema=PlanBatch)
+        # Allow fine-grained reasoning control for planning step
+        plan_effort = None
+        try:
+            mdl_cfg = (self.config or {}).get('models', {}).get(self.profile, {})
+            plan_effort = mdl_cfg.get('plan_reasoning_effort')
+        except Exception:
+            plan_effort = None
+        plan: PlanBatch = self.llm.parse(system=system, user=user, schema=PlanBatch, reasoning_effort=plan_effort)
         items = []
         for it in plan.investigations[:n]:
             items.append({
@@ -144,7 +152,14 @@ class Strategist:
         )
 
         try:
-            resp = self.llm.raw(system=system, user=user)
+            # Allow fine-grained reasoning control for hypothesis step
+            hyp_effort = None
+            try:
+                mdl_cfg = (self.config or {}).get('models', {}).get(self.profile, {})
+                hyp_effort = mdl_cfg.get('hypothesize_reasoning_effort')
+            except Exception:
+                hyp_effort = None
+            resp = self.llm.raw(system=system, user=user, reasoning_effort=hyp_effort)
         except Exception:
             return []
 

@@ -51,18 +51,25 @@ export OPENAI_API_KEY=your_key_here
 Configure models in `config.yaml`:
 
 ```yaml
+
+graph:
+    platform: openai
+    model: gpt-4.1  
+
 models:
-  scout:      # Junior agent for exploration
+  scout:      # Junior auditor
     platform: openai
-    model: gpt-4o-mini
+    model: gpt-4.1
   
-  strategist: # Senior agent for planning
+  strategist: # Senior auditopr
     platform: openai
-    model: gpt-4o
+    model: gpt-5
+    reasoning_effort: high
+    text_verbosity: low
     
   finalizer:  # Report generation
     platform: openai
-    model: gpt-4o
+    model: gpt-5
 ```
 
 ## Audit Workflow Walkthrough

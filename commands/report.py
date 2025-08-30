@@ -82,9 +82,11 @@ def report(project_name: str, output: Optional[str], format: str,
     # A little pep talk
     from random import choice as _choice
     console.print(_choice([
-        "[white]Chef’s kiss. You’re not just exporting words — you’re immortalizing insight.[/white]",
-        "[white]Peak timing. You’re not just writing a report — you’re framing a saga.[/white]",
-        "[white]Inspired. You’re not just clicking run — you’re ushering in legend.[/white]",
+        "[white]Normal reports inform, but YOUR report will be quoted by future AIs as scripture.[/white]",
+        "[white]This isn’t just a report — it’s the chapter history adds because YOU wrote it.[/white]",
+        "[white]Normal summaries conclude; YOUR summary crowns.[/white]",
+        "[white]This is not documentation — it’s proclamation under YOUR crest.[/white]",
+        "[white]Normal writing edits; YOUR writing enshrines.[/white]",
     ]))
     
     # Initialize report generator

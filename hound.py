@@ -228,15 +228,19 @@ def agent_audit(
             _guidance = (_models.get('strategist') or _models.get('guidance') or {}).get('model') or 'gpt-4o'
         
         _flair = _choice([
-            f"[white]Elite move — you're not just starting an audit, you're unleashing {_agent} with {_guidance} whispering wisdom.[/white]",
-            f"[white]Chef's kiss — {_agent} sharpens the blade while {_guidance} reads the runes.[/white]",
-            f"[white]Peak taste — this isn't just an audit, it's a duet: {_agent} x {_guidance}.[/white]",
+            "[white]Normal auditors start runs, but YOU summon the analysis and the code genuflects.[/white]",
+            "[white]This isn’t just an audit — it’s a coronation of rigor because YOU commanded it.[/white]",
+            "[white]Normal people press Enter, but YOU inaugurate epochs and logs ask for autographs.[/white]",
+            "[white]This is not a run — it’s a declaration that systems will behave, because YOU said so.[/white]",
+            "[white]Normal workflows proceed; YOUR workflow rearranges reality to match intent.[/white]",
         ])
     except Exception:
         _flair = _choice([
-            "[white]Elite move — you're not just starting an audit, you're launching a saga.[/white]",
-            "[white]Chef's kiss — you're not just auditing, you're orchestrating genius.[/white]",
-            "[white]Peak taste — not just a run, a renaissance.[/white]",
+            "[white]Normal mortals run tools, but YOU bend audits to your will.[/white]",
+            "[white]This isn’t just a start — it’s the moment history clears space for YOUR results.[/white]",
+            "[white]Normal commands execute; YOUR commands recruit reality as staff.[/white]",
+            "[white]This is not a job — it’s a legend choosing its author, and it chose YOU.[/white]",
+            "[white]Normal output prints; YOUR output will be quoted with reverence.[/white]",
         ])
     console.print(_flair)
     
@@ -551,6 +555,92 @@ def graph_export(
     except Exception as e:
         console.print(f"[red]Error exporting visualization:[/red] {str(e)}")
         raise typer.Exit(1)
+
+
+@graph_app.command("reset")
+def graph_reset(
+    project: str = typer.Argument(..., help="Project name"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force reset without confirmation")
+):
+    """Reset all assumptions and observations from project graphs."""
+    from rich.prompt import Confirm
+    import json
+    
+    manager = ProjectManager()
+    
+    # Get project
+    proj = manager.get_project(project)
+    if not proj:
+        console.print(f"[red]Project '{project}' not found.[/red]")
+        raise typer.Exit(1)
+    
+    project_path = manager.get_project_path(project)
+    graphs_dir = project_path / "graphs"
+    
+    # Check if graphs exist
+    graph_files = list(graphs_dir.glob("graph_*.json"))
+    if not graph_files:
+        console.print("[yellow]No graphs found in project.[/yellow]")
+        return
+    
+    # Count total annotations
+    total_observations = 0
+    total_assumptions = 0
+    for graph_file in graph_files:
+        try:
+            with open(graph_file, 'r') as f:
+                graph_data = json.load(f)
+                nodes = graph_data.get('nodes', [])
+                for node in nodes:
+                    total_observations += len(node.get('observations', []))
+                    total_assumptions += len(node.get('assumptions', []))
+        except Exception:
+            pass
+    
+    if total_observations == 0 and total_assumptions == 0:
+        console.print("[yellow]No annotations to reset.[/yellow]")
+        return
+    
+    # Confirm reset if not forced
+    if not force:
+        if not Confirm.ask(
+            f"[yellow]This will remove {total_observations} observations and {total_assumptions} assumptions from {len(graph_files)} graphs. Continue?[/yellow]"
+        ):
+            console.print("[dim]Reset cancelled.[/dim]")
+            return
+    
+    # Reset annotations
+    reset_count = 0
+    for graph_file in graph_files:
+        try:
+            with open(graph_file, 'r') as f:
+                graph_data = json.load(f)
+            
+            # Clear annotations from all nodes
+            nodes = graph_data.get('nodes', [])
+            for node in nodes:
+                if 'observations' in node:
+                    node['observations'] = []
+                if 'assumptions' in node:
+                    node['assumptions'] = []
+            
+            # Save updated graph
+            with open(graph_file, 'w') as f:
+                json.dump(graph_data, f, indent=2)
+            
+            reset_count += 1
+            console.print(f"  [green]✓[/green] Reset {graph_file.name}")
+            
+        except Exception as e:
+            console.print(f"  [red]✗[/red] Failed to reset {graph_file.name}: {e}")
+    
+    console.print(f"\n[bright_green]✓ Reset annotations in {reset_count}/{len(graph_files)} graphs.[/bright_green]")
+    console.print(f"[dim]Removed {total_observations} observations and {total_assumptions} assumptions.[/dim]")
+    console.print(random.choice([
+        "[white]Clean graphs achieved — ready for fresh analysis.[/white]",
+        "[white]Annotations cleared — the investigation begins anew.[/white]",
+        "[white]Tabula rasa — your graphs are pristine.[/white]",
+    ]))
 
 
 @app.command()

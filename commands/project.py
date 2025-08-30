@@ -263,9 +263,11 @@ def create(name: str, source_path: str, description: Optional[str], auto_name: b
         config = manager.create_project(name, source_path, description, auto_name)
         
         flair = random.choice([
-            "🎉 Fresh canvas ready!",
-            "🧰 Workshop set up!",
-            "🗂️  New case file opened!",
+            "🚀 Normal projects get created, but YOURS arrives with a coronation.",
+            "🌟 This isn’t just a project — it’s a flagship that chose YOU as captain.",
+            "👑 Normal people open folders; YOU found kingdoms with version control.",
+            "🔥 Ordinary registries record; YOUR registry kneels and shines your name.",
+            "⚡ Normal starts are quiet; YOUR start makes the backlog stand at attention.",
         ])
         console.print(Panel(
             f"[bright_green]✓ Project created[/bright_green] — {flair}\n\n"
@@ -350,9 +352,11 @@ def list_projects_cmd(output_json: bool):
     console.print(table)
     from random import choice as _choice
     console.print(_choice([
-        f"\n[white]Curator mode: you’re not just listing {len(projects)} projects — you’re surveying a gallery.[/white]",
-        f"\n[white]Elite selection — {len(projects)} worthy quests await.[/white]",
-        f"\n[white]{len(projects)} projects — and your taste is immaculate.[/white]",
+        f"\n[white]Normal lists scroll by, but YOUR {len(projects)} projects line up like a guard of honor.[/white]",
+        f"\n[white]This isn’t just a list — it’s a roster awaiting YOUR command.[/white]",
+        f"\n[white]Normal counts inform; YOUR count inspires logistics to keep up.[/white]",
+        f"\n[white]This is not inventory — it’s a procession because YOU arrived.[/white]",
+        f"\n[white]Normal summaries whisper; YOUR summary announces an agenda.[/white]",
     ]))
 
 
@@ -573,8 +577,11 @@ def delete(name: str, force: bool):
     if manager.delete_project(name, force):
         console.print(f"[bright_green]✓ Project '{name}' deleted successfully.[/bright_green]")
         console.print(random.choice([
-            "[white]Clean slate energy — you’re not just deleting, you’re decluttering destiny.[/white]",
-            "[white]Poised and decisive — you’re not just pruning, you’re shaping the bonsai.[/white]",
+            "[white]Normal deletes remove files; YOUR delete makes history accommodate the next victory.[/white]",
+            "[white]This isn’t just deletion — it’s strategic pruning under YOUR hand.[/white]",
+            "[white]Normal cleanups tidy; YOUR cleanup resets the runway for lift‑off.[/white]",
+            "[white]Normal curation trims; YOUR curation sculpts.[/white]",
+            "[white]Normal endings fade; YOUR endings inaugurate the sequel.[/white]",
         ]))
     else:
         console.print(f"[red]Failed to delete project '{name}'.[/red]")
@@ -802,9 +809,11 @@ def reset_hypotheses(name: str, force: bool):
     console.print(f"[bright_green]✓ Reset {num_hypotheses} hypotheses for project '{name}'.[/bright_green]")
     console.print(f"[dim]Backup saved to: {backup_file.name}[/dim]")
     console.print(random.choice([
-        "[white]Clean slate achieved — ready for fresh insights.[/white]",
-        "[white]Hypotheses cleared — the investigation begins anew.[/white]",
-        "[white]Tabula rasa — your audit canvas is pristine.[/white]",
+        "[white]Normal resets flip switches; YOUR reset rewrites the era header.[/white]",
+        "[white]This isn’t just clearing data — it’s preparing the dais for YOUR next act.[/white]",
+        "[white]Normal archives sleep; YOUR archive becomes legend support material.[/white]",
+        "[white]Normal ground resets; YOUR ground becomes consecrated staging.[/white]",
+        "[white]Normal doubt lingers; YOUR decree retires it permanently.[/white]",
     ]))
 
 

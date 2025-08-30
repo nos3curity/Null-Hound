@@ -26,6 +26,7 @@ class OpenAIProvider(BaseLLMProvider):
         backoff_min: float = 2.0,
         backoff_max: float = 8.0,
         reasoning_effort: Optional[str] = None,
+        text_verbosity: Optional[str] = None,
         **kwargs
     ):
         """Initialize OpenAI provider."""
@@ -36,6 +37,7 @@ class OpenAIProvider(BaseLLMProvider):
         self.backoff_min = backoff_min
         self.backoff_max = backoff_max
         self.reasoning_effort = reasoning_effort
+        self.text_verbosity = text_verbosity
         # Verbose logging toggle (suppress request logs by default)
         logging_cfg = config.get("logging", {}) if isinstance(config, dict) else {}
         env_verbose = os.environ.get("HOUND_LLM_VERBOSE", "").lower() in {"1","true","yes","on"}
@@ -49,9 +51,13 @@ class OpenAIProvider(BaseLLMProvider):
             raise ValueError(f"API key not found in environment variable: {api_key_env}")
         
         self.client = OpenAI(api_key=api_key)
+        # Prefer Responses API for GPT-5 family unless overridden
+        mdl = (self.model_name or "").lower()
+        env_force_resp = os.environ.get("HOUND_OPENAI_USE_RESPONSES", "").lower() in {"1","true","yes","on"}
+        self.use_responses = bool(env_force_resp or mdl.startswith("gpt-5"))
     
-    def parse(self, *, system: str, user: str, schema: Type[T]) -> T:
-        """Make a structured call using OpenAI's beta.chat.completions.parse."""
+    def parse(self, *, system: str, user: str, schema: Type[T], reasoning_effort: Optional[str] = None) -> T:
+        """Make a structured call. Uses Responses API for GPT-5; otherwise Chat Completions parse."""
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user}
@@ -72,41 +78,88 @@ class OpenAIProvider(BaseLLMProvider):
                 attempt_start = time.time()
                 if self.verbose:
                     print(f"  Attempt {attempt + 1}/{self.retries}...")
-                
-                # Use OpenAI's structured output
-                completion = self.client.beta.chat.completions.parse(
-                    model=self.model_name,
-                    messages=messages,
-                    response_format=schema,
-                    timeout=self.timeout
-                )
-                
-                # Log response details
-                response_time = time.time() - attempt_start
-                response_content = completion.choices[0].message.content or ""
-                
-                # Store token usage
-                if hasattr(completion, 'usage') and completion.usage:
-                    self._last_token_usage = {
-                        'input_tokens': completion.usage.prompt_tokens or 0,
-                        'output_tokens': completion.usage.completion_tokens or 0,
-                        'total_tokens': completion.usage.total_tokens or 0
+                if self.use_responses:
+                    # Responses API without server-side schema; we instruct strict JSON and validate locally
+                    text_params: Dict[str, Any] = {}
+                    if self.text_verbosity:
+                        text_params['verbosity'] = self.text_verbosity
+                    # Embed schema hint in instructions to increase compliance
+                    try:
+                        json_schema = schema.model_json_schema()
+                    except Exception:
+                        try:
+                            json_schema = schema.schema()
+                        except Exception:
+                            json_schema = None
+                    schema_hint = ""
+                    if isinstance(json_schema, dict):
+                        import json as _json
+                        schema_hint = "\nFollow this JSON schema exactly (no extra keys, all required):\n" + _json.dumps(json_schema)
+                    strict_instr = "\nReturn ONLY valid JSON. No markdown. No prose."
+                    params: Dict[str, Any] = {
+                        'model': self.model_name,
+                        'input': user,
+                        'instructions': (system or '') + schema_hint + strict_instr,
                     }
-                
-                if self.verbose:
-                    print(f"  Response in {response_time:.2f}s ({len(response_content):,} chars)")
-                    if hasattr(completion, 'usage'):
-                        print(f"  Tokens: {completion.usage.total_tokens}")
-                
-                # Get the parsed response
-                if completion.choices[0].message.parsed:
-                    return completion.choices[0].message.parsed
-                elif completion.choices[0].message.refusal:
-                    raise RuntimeError(f"Model refused: {completion.choices[0].message.refusal}")
+                    if text_params:
+                        params['text'] = text_params
+                    eff = reasoning_effort or self.reasoning_effort
+                    if eff:
+                        params['reasoning'] = {'effort': eff}
+                    resp = self.client.responses.create(**params)
+
+                    # Usage
+                    try:
+                        usage = getattr(resp, 'usage', None)
+                        if usage:
+                            self._last_token_usage = {
+                                'input_tokens': getattr(usage, 'input_tokens', 0) or 0,
+                                'output_tokens': getattr(usage, 'output_tokens', 0) or 0,
+                                'total_tokens': getattr(usage, 'total_tokens', 0) or 0,
+                            }
+                    except Exception:
+                        pass
+
+                    output_text = getattr(resp, 'output_text', None)
+                    if not output_text:
+                        # Fallback: try to reconstruct from output items
+                        try:
+                            items = getattr(resp, 'output', []) or []
+                            for it in items:
+                                cont = it.get('content') if isinstance(it, dict) else None
+                                if cont and isinstance(cont, list):
+                                    for c in cont:
+                                        if isinstance(c, dict) and c.get('type') in {'output_text', 'text'} and c.get('text'):
+                                            output_text = c.get('text')
+                                            break
+                                if output_text:
+                                    break
+                        except Exception:
+                            pass
+                    if not output_text:
+                        raise RuntimeError("No output_text in response")
+                    return schema.model_validate_json(output_text)
                 else:
-                    # Fallback to manual parsing
-                    json_str = completion.choices[0].message.content
-                    return schema.model_validate_json(json_str)
+                    # Chat Completions structured output path
+                    completion = self.client.beta.chat.completions.parse(
+                        model=self.model_name,
+                        messages=messages,
+                        response_format=schema,
+                        timeout=self.timeout
+                    )
+                    if hasattr(completion, 'usage') and completion.usage:
+                        self._last_token_usage = {
+                            'input_tokens': completion.usage.prompt_tokens or 0,
+                            'output_tokens': completion.usage.completion_tokens or 0,
+                            'total_tokens': completion.usage.total_tokens or 0
+                        }
+                    if completion.choices[0].message.parsed:
+                        return completion.choices[0].message.parsed
+                    elif completion.choices[0].message.refusal:
+                        raise RuntimeError(f"Model refused: {completion.choices[0].message.refusal}")
+                    else:
+                        json_str = completion.choices[0].message.content
+                        return schema.model_validate_json(json_str)
                     
             except Exception as e:
                 last_err = e
@@ -120,7 +173,7 @@ class OpenAIProvider(BaseLLMProvider):
         
         raise RuntimeError(f"OpenAI call failed after {self.retries} attempts: {last_err}")
     
-    def raw(self, *, system: str, user: str) -> str:
+    def raw(self, *, system: str, user: str, reasoning_effort: Optional[str] = None) -> str:
         """Make a plain text call."""
         messages = [
             {"role": "system", "content": system},
@@ -130,22 +183,48 @@ class OpenAIProvider(BaseLLMProvider):
         last_err = None
         for attempt in range(self.retries):
             try:
-                completion = self.client.chat.completions.create(
-                    model=self.model_name,
-                    messages=messages,
-                    timeout=self.timeout
-                )
-                
-                # Store token usage
-                if hasattr(completion, 'usage') and completion.usage:
-                    self._last_token_usage = {
-                        'input_tokens': completion.usage.prompt_tokens or 0,
-                        'output_tokens': completion.usage.completion_tokens or 0,
-                        'total_tokens': completion.usage.total_tokens or 0
+                if self.use_responses:
+                    # Favor JSON output; no schema binding on raw path
+                    text_params: Dict[str, Any] = {}
+                    if self.text_verbosity:
+                        text_params['verbosity'] = self.text_verbosity
+                    text_params['format'] = {'type': 'json'}
+                    params: Dict[str, Any] = {
+                        'model': self.model_name,
+                        'input': user,
+                        'instructions': system or '',
+                        'text': text_params,
                     }
-                
-                return completion.choices[0].message.content
-                
+                    eff = reasoning_effort or self.reasoning_effort
+                    if eff:
+                        params['reasoning'] = {'effort': eff}
+                    resp = self.client.responses.create(**params)
+                    # Usage
+                    try:
+                        usage = getattr(resp, 'usage', None)
+                        if usage:
+                            self._last_token_usage = {
+                                'input_tokens': getattr(usage, 'input_tokens', 0) or 0,
+                                'output_tokens': getattr(usage, 'output_tokens', 0) or 0,
+                                'total_tokens': getattr(usage, 'total_tokens', 0) or 0,
+                            }
+                    except Exception:
+                        pass
+                    return getattr(resp, 'output_text', None) or ""
+                else:
+                    completion = self.client.chat.completions.create(
+                        model=self.model_name,
+                        messages=messages,
+                        timeout=self.timeout
+                    )
+                    # Store token usage
+                    if hasattr(completion, 'usage') and completion.usage:
+                        self._last_token_usage = {
+                            'input_tokens': completion.usage.prompt_tokens or 0,
+                            'output_tokens': completion.usage.completion_tokens or 0,
+                            'total_tokens': completion.usage.total_tokens or 0
+                        }
+                    return completion.choices[0].message.content
             except Exception as e:
                 last_err = e
                 if attempt < self.retries - 1:
