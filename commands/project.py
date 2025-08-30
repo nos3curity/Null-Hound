@@ -452,6 +452,53 @@ def info(name: str):
         title="[bold bright_cyan]Project Information[/bold bright_cyan]",
         border_style="bright_cyan"
     ))
+
+    # Show hypothesis counts by status if hypotheses.json exists
+    if hypothesis_file.exists():
+        try:
+            with open(hypothesis_file, 'r') as f:
+                hyp_data = json.load(f)
+            hypotheses = hyp_data.get("hypotheses", {}) or {}
+            status_counts = {
+                'confirmed': 0,
+                'rejected': 0,
+                'investigating': 0,
+                'supported': 0,
+                'refuted': 0,
+                'proposed': 0,
+                'other': 0,
+            }
+            for h in hypotheses.values():
+                s = str(h.get('status', 'proposed')).lower()
+                if s not in status_counts:
+                    status_counts['other'] += 1
+                else:
+                    status_counts[s] += 1
+
+            from rich.table import Table as RTable
+            status_table = RTable(title="Hypotheses by Status")
+            status_table.add_column("Status", style="cyan")
+            status_table.add_column("Count", justify="right")
+            # Only show non-zero statuses, in a sensible order
+            order = [
+                ('confirmed', 'green'),
+                ('rejected', 'red'),
+                ('investigating', 'yellow'),
+                ('supported', 'green'),
+                ('refuted', 'red'),
+                ('proposed', 'white'),
+                ('other', 'dim'),
+            ]
+            shown = 0
+            for key, color in order:
+                cnt = status_counts.get(key, 0)
+                if cnt:
+                    status_table.add_row(f"[{color}]{key}[/{color}]", str(cnt))
+                    shown += 1
+            if shown:
+                console.print(status_table)
+        except Exception:
+            pass
     
     if graphs_files:
         console.print("\n[bold]Recent graphs:[/bold]")
@@ -784,6 +831,7 @@ def runs(project_name: str, run_id: Optional[str], list_runs: bool, output_json:
     
     if not runs_dir.exists() or not list(runs_dir.glob("*.json")):
         console.print(f"[yellow]No agent runs found for project '{project_name}'.[/yellow]")
+        console.print("[dim]Tip: Use 'hound project sessions' to view audit sessions.[/dim]")
         return
     
     if list_runs or not run_id:
@@ -792,6 +840,37 @@ def runs(project_name: str, run_id: Optional[str], list_runs: bool, output_json:
     else:
         # Show details for specific run
         _show_run_details(runs_dir, run_id, output_json)
+
+
+@project.command(name='sessions')
+@click.argument('project_name')
+@click.argument('session_id', required=False)
+@click.option('--list', 'list_sessions', is_flag=True, help="List all sessions for the project")
+@click.option('--json', 'output_json', is_flag=True, help="Output as JSON")
+def sessions(project_name: str, session_id: Optional[str], list_sessions: bool, output_json: bool):
+    """View audit sessions for a project (preferred over legacy 'runs').
+
+    Examples:
+        hound project sessions myproject --list
+        hound project sessions myproject session_20250830_123456_...
+    """
+    manager = ProjectManager()
+    project_path = manager.get_project_path(project_name)
+    
+    if not project_path:
+        console.print(f"[red]Project '{project_name}' not found.[/red]")
+        return
+    
+    sessions_dir = Path(project_path) / "sessions"
+    
+    if not sessions_dir.exists() or not list(sessions_dir.glob("*.json")):
+        console.print(f"[yellow]No sessions found for project '{project_name}'.[/yellow]")
+        return
+    
+    if list_sessions or not session_id:
+        _list_sessions(sessions_dir, output_json)
+    else:
+        _show_session_details(sessions_dir, session_id, output_json)
 
 
 def _list_runs(runs_dir: Path, output_json: bool):
@@ -879,6 +958,51 @@ def _list_runs(runs_dir: Path, output_json: bool):
         console.print(table)
 
 
+def _list_sessions(sessions_dir: Path, output_json: bool):
+    """List all sessions in a project."""
+    items = []
+    for sess_file in sorted(sessions_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            with open(sess_file) as f:
+                data = json.load(f)
+            items.append({
+                'session_id': data.get('session_id', sess_file.stem),
+                'status': data.get('status', 'unknown'),
+                'start_time': data.get('start_time', ''),
+                'end_time': data.get('end_time', ''),
+                'investigations': len(data.get('investigations', [])),
+            })
+        except Exception:
+            items.append({'session_id': sess_file.stem, 'status': 'unknown', 'start_time': '', 'end_time': '', 'investigations': 0})
+
+    if output_json:
+        click.echo(json.dumps(items, indent=2))
+        return
+
+    table = Table(title="Sessions", show_header=True, header_style="bold cyan")
+    table.add_column("Session ID", style="yellow")
+    table.add_column("Start Time", style="white")
+    table.add_column("Status", style="green")
+    table.add_column("Investigations", style="magenta", justify="right")
+
+    for it in items:
+        try:
+            dt = datetime.fromisoformat((it['start_time'] or '').replace('Z', '+00:00'))
+            time_str = dt.strftime("%Y-%m-%d %H:%M")
+        except:
+            time_str = (it['start_time'] or '')[:19]
+        status = it.get('status', 'unknown')
+        if status == 'completed':
+            status_style = "[green]✓ completed[/green]"
+        elif status == 'active':
+            status_style = "[yellow]⚡ active[/yellow]"
+        else:
+            status_style = status
+        table.add_row(it['session_id'], time_str, status_style, str(it.get('investigations', 0)))
+
+    console.print(table)
+
+
 def _show_run_details(runs_dir: Path, run_id: str, output_json: bool):
     """Show details for a specific run."""
     # Try to find the run file
@@ -960,6 +1084,76 @@ def _show_run_details(runs_dir: Path, run_id: str, output_json: bool):
             console.print(f"\n[bold red]Errors ({len(errors)}):[/bold red]")
             for err in errors:
                 console.print(f"  {err.get('timestamp', 'Unknown time')}: {err.get('error', 'Unknown error')}")
+
+
+def _show_session_details(sessions_dir: Path, session_id: str, output_json: bool):
+    """Show details for a specific session."""
+    sess_file = sessions_dir / f"{session_id}.json"
+    if not sess_file.exists():
+        # Try prefix match
+        candidates = sorted([p for p in sessions_dir.glob("*.json") if p.stem.startswith(session_id)], key=lambda p: p.stat().st_mtime, reverse=True)
+        if candidates:
+            sess_file = candidates[0]
+        else:
+            console.print(f"[red]Session '{session_id}' not found.[/red]")
+            console.print("[dim]Use --list to see available sessions.[/dim]")
+            return
+
+    try:
+        with open(sess_file) as f:
+            data = json.load(f)
+    except Exception as e:
+        console.print(f"[red]Error reading session file: {e}[/red]")
+        return
+
+    if output_json:
+        click.echo(json.dumps(data, indent=2))
+        return
+
+    console.print(Panel.fit(f"[bold cyan]Session Details: {sess_file.stem}[/bold cyan]", border_style="cyan"))
+
+    console.print("\n[bold]Basic Information:[/bold]")
+    console.print(f"  Start Time: {data.get('start_time', 'Unknown')}")
+    console.print(f"  End Time: {data.get('end_time', 'N/A')}")
+    console.print(f"  Status: {data.get('status', 'unknown')}")
+
+    models = data.get('models', {}) or {}
+    if models:
+        console.print("\n[bold]Models:[/bold]")
+        console.print(f"  Scout: {models.get('scout', 'unknown')}")
+        console.print(f"  Strategist: {models.get('strategist', 'unknown')}")
+
+    token_usage = data.get('token_usage', {})
+    if token_usage:
+        console.print("\n[bold]Token Usage:[/bold]")
+        total = token_usage.get('total_usage', {})
+        console.print(f"  Total Input Tokens: {total.get('input_tokens', 0):,}")
+        console.print(f"  Total Output Tokens: {total.get('output_tokens', 0):,}")
+        console.print(f"  Total Tokens: {total.get('total_tokens', 0):,}")
+        console.print(f"  Total API Calls: {total.get('call_count', 0)}")
+        by_model = token_usage.get('by_model', {})
+        if by_model:
+            console.print("\n  [bold]By Model:[/bold]")
+            for model, usage in by_model.items():
+                console.print(f"    {model}:")
+                console.print(f"      Calls: {usage.get('call_count', 0)}")
+                console.print(f"      Input: {usage.get('input_tokens', 0):,}")
+                console.print(f"      Output: {usage.get('output_tokens', 0):,}")
+                console.print(f"      Total: {usage.get('total_tokens', 0):,}")
+
+    cov = data.get('coverage', {}) or {}
+    if cov:
+        nodes = cov.get('nodes', {})
+        cards = cov.get('cards', {})
+        console.print("\n[bold]Coverage:[/bold]")
+        console.print(f"  Nodes: {nodes.get('visited', 0)}/{nodes.get('total', 0)} ({nodes.get('percent', 0)}%)")
+        console.print(f"  Cards: {cards.get('visited', 0)}/{cards.get('total', 0)} ({cards.get('percent', 0)}%)")
+
+    invs = data.get('investigations', []) or []
+    if invs:
+        console.print(f"\n[bold]Investigations ({len(invs)}):[/bold]")
+        for i, inv in enumerate(invs[:10], 1):
+            console.print(f"  [{i}] {inv.get('goal', 'Unknown')} (iters={inv.get('iterations_completed', 0)})")
 
 
 if __name__ == "__main__":

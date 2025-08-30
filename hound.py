@@ -129,6 +129,30 @@ def project_runs(
     }
     runs.invoke(ctx)
 
+@project_app.command("sessions")
+def project_sessions(
+    project_name: str = typer.Argument(..., help="Project name"),
+    session_id: str = typer.Argument(None, help="Session ID to show details for"),
+    list_sessions: bool = typer.Option(False, "--list", "-l", help="List all sessions for the project"),
+    output_json: bool = typer.Option(False, "--json", help="Output as JSON")
+):
+    """View audit sessions for a project (preferred over 'runs').
+    
+    Examples:
+        hound project sessions myproject --list       # List all sessions
+        hound project sessions myproject session_123  # Show details for specific session
+    """
+    from commands.project import sessions
+    import click
+    ctx = click.Context(sessions)
+    ctx.params = {
+        'project_name': project_name,
+        'session_id': session_id,
+        'list_sessions': list_sessions,
+        'output_json': output_json
+    }
+    sessions.invoke(ctx)
+
 @project_app.command("reset-hypotheses")
 def project_reset_hypotheses(
     name: str = typer.Argument(..., help="Project name"),

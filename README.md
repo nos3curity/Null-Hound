@@ -42,12 +42,10 @@ pip install -r requirements.txt
 
 ## Configuration
 
-Set up your API keys:
+Set up your API keys, e.g.:
 
 ```bash
 export OPENAI_API_KEY=your_key_here
-export ANTHROPIC_API_KEY=your_key_here  
-export GOOGLE_API_KEY=your_key_here
 ```
 
 Configure models in `config.yaml`:
