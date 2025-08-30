@@ -514,21 +514,7 @@ class ReportGenerator:
         # No longer generating appendix
         # tested_hypotheses = self._get_all_hypotheses()
         
-        # Append coverage metrics to the executive summary
-        try:
-            from .coverage_index import CoverageIndex
-            cov = CoverageIndex(self.project_dir / 'coverage_index.json', agent_id='report')
-            graphs_dir = self.project_dir / 'graphs'
-            manifest_dir = self.project_dir / 'manifest'
-            stats = cov.compute_stats(graphs_dir, manifest_dir)
-            coverage_block = (
-                f"\n\nCoverage Summary\n"
-                f"- Nodes visited: {stats['nodes']['visited']} / {stats['nodes']['total']} ({stats['nodes']['percent']}%)\n"
-                f"- Code cards loaded: {stats['cards']['visited']} / {stats['cards']['total']} ({stats['cards']['percent']}%)\n"
-            )
-            executive_summary = (executive_summary or '').strip() + coverage_block
-        except Exception:
-            pass
+        # Coverage summary removed - not showing coverage metrics
 
         # Generate the report based on format
         if format == 'html':

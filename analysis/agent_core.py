@@ -1729,7 +1729,7 @@ DO NOT include any text before or after the JSON object."""
         # Create hypothesis object with compact title but detailed description
         # The title is compact but the description must be COMPLETE
         hypothesis = Hypothesis(
-            title=params.get('description', 'vuln')[:60],  # Keep title compact for display
+            title=params.get('description', 'vuln')[:200],  # Increased limit to avoid truncation
             description=params.get('details', params.get('description', '')),  # FULL details here
             vulnerability_type=params.get('vulnerability_type', 'unknown'),
             severity=params.get('severity', 'medium'),
