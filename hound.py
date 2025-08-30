@@ -106,26 +106,7 @@ def project_hypotheses(
     from commands.project import hypotheses
     _invoke_click(hypotheses, {'name': name, 'details': details})
 
-@project_app.command("runs")
-def project_runs(
-    project_name: str = typer.Argument(..., help="Project name"),
-    run_id: str = typer.Argument(None, help="Run ID to show details for"),
-    list_runs: bool = typer.Option(False, "--list", "-l", help="List all runs for the project"),
-    output_json: bool = typer.Option(False, "--json", help="Output as JSON")
-):
-    """View agent run information for a project.
-    
-    Examples:
-        hound project runs myproject --list       # List all runs
-        hound project runs myproject run_123      # Show details for specific run
-    """
-    from commands.project import runs
-    _invoke_click(runs, {
-        'project_name': project_name,
-        'run_id': run_id,
-        'list_runs': list_runs,
-        'output_json': output_json
-    })
+# Removed deprecated 'runs' subcommand. Use 'project sessions' instead.
 
 @project_app.command("plan")
 def project_plan(

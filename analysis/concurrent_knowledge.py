@@ -10,6 +10,7 @@ import fcntl
 import time
 import hashlib
 from pathlib import Path
+import threading
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
@@ -29,6 +30,8 @@ class ConcurrentFileStore(ABC):
         self.agent_id = agent_id or "anonymous"
         self.lock_path = self.file_path.with_suffix('.lock')
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
+        # Initialize or fetch a per-file thread lock to guard against races within a single process
+        self._thread_lock = self._get_thread_lock(self.file_path)
         
         if not self.file_path.exists():
             self._save_data(self._get_empty_data())
@@ -82,15 +85,32 @@ class ConcurrentFileStore(ABC):
     
     def update_atomic(self, update_func) -> Any:
         """Atomically read, update, and write data."""
-        lock = self._acquire_lock()
-        try:
-            data = self._load_data()
-            updated_data, result = update_func(data)
-            if updated_data is not None:
-                self._save_data(updated_data)
-            return result
-        finally:
-            self._release_lock(lock)
+        # Ensure only one thread in this process performs the critical section at a time
+        with self._thread_lock:
+            lock = self._acquire_lock()
+            try:
+                data = self._load_data()
+                updated_data, result = update_func(data)
+                if updated_data is not None:
+                    self._save_data(updated_data)
+                return result
+            finally:
+                self._release_lock(lock)
+
+    # ---------- Internal: per-file thread lock registry ----------
+    _locks_registry: Dict[str, threading.RLock] = {}
+    _locks_registry_guard = threading.Lock()
+
+    @classmethod
+    def _get_thread_lock(cls, file_path: Path) -> threading.RLock:
+        """Return a re-entrant lock keyed by absolute file path string."""
+        key = str(Path(file_path).resolve())
+        with cls._locks_registry_guard:
+            lk = cls._locks_registry.get(key)
+            if lk is None:
+                lk = threading.RLock()
+                cls._locks_registry[key] = lk
+            return lk
 
 
 # ============================================================================

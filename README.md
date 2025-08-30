@@ -104,14 +104,7 @@ Hound analyzes your codebase and builds aspect-oriented knowledge graphs:
 ./hound.py graph list myaudit
 ```
 
-**What happens:** Hound inspects the codebase and creates graphs for different aspects:
-- **SystemArchitecture** - Components and their interactions
-- **AuthorizationAndAccessControl** - Permission systems and role management
-- **MonetaryFlows** - Value transfers and financial operations
-- **DataFlowAndState** - State variables and data transformations
-- **ExternalInterfaces** - External calls and integrations
-
-Each graph links abstract concepts to specific code locations, building a semantic understanding of your system.
+Hound inspects the codebase and creates graphs for different aspects. Each graph links abstract concepts to specific code locations, building a semantic understanding of your system.
 
 ### Step 3: Run the Audit
 
@@ -214,13 +207,6 @@ Review findings and produce professional audit reports:
 ./hound.py report view myaudit
 ```
 
-**Report includes:**
-- Executive summary
-- System architecture overview
-- Detailed findings with severity ratings
-- Code references and attack scenarios
-- Remediation recommendations
-
 ## Session Management
 
 Each audit run creates a session with comprehensive tracking:
@@ -228,6 +214,14 @@ Each audit run creates a session with comprehensive tracking:
 ```bash
 # View session details
 ./hound.py project info myaudit
+
+# List and inspect sessions
+./hound.py project sessions myaudit --list
+./hound.py project sessions myaudit <session_id>
+
+# Show planned investigations (Strategist PlanStore)
+./hound.py project plan myaudit
+./hound.py project plan myaudit <session_id>
 
 # Session data includes:
 # - Coverage statistics (nodes/cards visited)
@@ -243,6 +237,8 @@ Sessions are stored in `~/.hound/projects/myaudit/sessions/` and contain:
 - `investigations`: All executed investigations
 - `planning_history`: Strategic decisions made
 - `token_usage`: Detailed API usage metrics
+
+Note: The legacy `project runs` command and `agent_runs` files are deprecated and removed. Use the session commands above instead.
 
 ## Managing Hypotheses
 
@@ -300,15 +296,6 @@ Monitor audit progress and completeness:
 # - Graph nodes visited vs total
 # - Code cards analyzed vs total
 # - Percentage completion
-```
-
-### Parallel Execution
-
-Run multiple investigations concurrently:
-
-```bash
-# Run parallel investigations (experimental)
-./hound.py agent audit myaudit --parallel --workers 3
 ```
 
 ## Contributing

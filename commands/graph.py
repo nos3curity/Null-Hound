@@ -21,7 +21,6 @@ from rich import box
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from analysis.graph_builder import GraphBuilder
-from analysis.run_tracker import RunTracker
 from llm.token_tracker import get_token_tracker
 import random
 from ingest.manifest import RepositoryManifest
@@ -69,17 +68,6 @@ def build(
     output_dir = Path(output_dir) if output_dir else Path(".hound_cache") / repo_name
     manifest_dir = output_dir / "manifest"
     graphs_dir = output_dir / "graphs"
-    
-    # Set up run tracking
-    agent_runs_dir = output_dir / "agent_runs"
-    agent_runs_dir.mkdir(exist_ok=True, parents=True)
-    run_id = f"graph_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    run_file = agent_runs_dir / f"run_{run_id}.json"
-    run_tracker = RunTracker(run_file)
-    
-    # Capture command line arguments
-    command_args = sys.argv
-    run_tracker.set_run_info(run_id, command_args)
     
     # Set up token tracker
     token_tracker = get_token_tracker()
@@ -320,25 +308,14 @@ def build(
                 console.print(f"\n[bold]Open in browser:[/bold] [link]file://{html_path.resolve()}[/link]")
                 console.print(f"\n[dim]Tip: Use 'hound graph export {repo_name} --open' to regenerate and open visualization[/dim]")
     
-        # Finalize run tracking
-        run_tracker.update_token_usage(token_tracker.get_summary())
-        run_tracker.finalize(status='completed')
-        
         console.print(Panel.fit(
             "[green]✓[/green] Graph building complete!",
             box=box.ROUNDED,
             style="green"
         ))
-        
-        console.print(f"[green]Run details saved to:[/green] {run_file}")
     
     except Exception as e:
-        # Update token usage and mark as failed
-        run_tracker.update_token_usage(token_tracker.get_summary())
-        run_tracker.add_error(str(e))
-        run_tracker.finalize(status='failed')
         console.print(f"[red]Error during graph building: {e}[/red]")
-        console.print(f"[yellow]Run details saved to:[/yellow] {run_file}")
         raise
 
 
