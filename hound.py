@@ -127,6 +127,20 @@ def project_runs(
         'output_json': output_json
     })
 
+@project_app.command("plan")
+def project_plan(
+    project_name: str = typer.Argument(..., help="Project name"),
+    session_id: str = typer.Argument(None, help="Session ID to filter (optional)"),
+    output_json: bool = typer.Option(False, "--json", help="Output as JSON")
+):
+    """Show planned investigations from the PlanStore."""
+    from commands.project import plan
+    _invoke_click(plan, {
+        'project_name': project_name,
+        'session_id': session_id,
+        'output_json': output_json
+    })
+
 @project_app.command("sessions")
 def project_sessions(
     project_name: str = typer.Argument(..., help="Project name"),
@@ -565,6 +579,7 @@ def graph_reset(
     """Reset all assumptions and observations from project graphs."""
     from rich.prompt import Confirm
     import json
+    import random
     
     manager = ProjectManager()
     

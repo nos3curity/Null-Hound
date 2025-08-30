@@ -1199,29 +1199,49 @@ class AgentRunner:
         token_tracker.reset()
         
         # Display configuration (omit context window; not available in unified client)
-        # Get the actual models being used
-        agent_model_info = "default"
-        guidance_model_info = "default"
+        # Get the actual models being used from the agent's LLM clients
+        agent_model_info = "unknown/unknown"
+        guidance_model_info = "unknown/unknown"
         
-        if self.config and 'models' in self.config:
-            # Get agent model
-            if 'agent' in self.config['models']:
-                agent_config = self.config['models']['agent']
-                provider = agent_config.get('provider', 'unknown')
-                model = agent_config.get('model', 'unknown')
-                agent_model_info = f"{provider}/{model}"
-            
-            # Get guidance model (strategist)
-            if 'guidance' in self.config['models']:
-                guidance_config = self.config['models']['guidance']
-                provider = guidance_config.get('provider', 'unknown')
-                model = guidance_config.get('model', 'unknown')
-                guidance_model_info = f"{provider}/{model}"
-            elif 'strategist' in self.config['models']:
-                strategist_config = self.config['models']['strategist']
-                provider = strategist_config.get('provider', 'unknown')
-                model = strategist_config.get('model', 'unknown')
-                guidance_model_info = f"{provider}/{model}"
+        # Get Scout model info from the actual LLM client
+        if hasattr(self.agent, 'llm') and self.agent.llm:
+            try:
+                provider_name = self.agent.llm.provider.provider_name if hasattr(self.agent.llm.provider, 'provider_name') else 'unknown'
+                model_name = self.agent.llm.model if hasattr(self.agent.llm, 'model') else 'unknown'
+                agent_model_info = f"{provider_name}/{model_name}"
+            except Exception:
+                # Fall back to config if we can't get from LLM client
+                if self.config and 'models' in self.config:
+                    if 'agent' in self.config['models']:
+                        agent_config = self.config['models']['agent']
+                        provider = agent_config.get('provider', 'unknown')
+                        model = agent_config.get('model', 'unknown')
+                        agent_model_info = f"{provider}/{model}"
+                    elif 'scout' in self.config['models']:
+                        scout_config = self.config['models']['scout']
+                        provider = scout_config.get('provider', 'unknown')
+                        model = scout_config.get('model', 'unknown')
+                        agent_model_info = f"{provider}/{model}"
+        
+        # Get Strategist model info from the actual guidance client
+        if hasattr(self.agent, 'guidance_client') and self.agent.guidance_client:
+            try:
+                provider_name = self.agent.guidance_client.provider.provider_name if hasattr(self.agent.guidance_client.provider, 'provider_name') else 'unknown'
+                model_name = self.agent.guidance_client.model if hasattr(self.agent.guidance_client, 'model') else 'unknown'
+                guidance_model_info = f"{provider_name}/{model_name}"
+            except Exception:
+                # Fall back to config if we can't get from guidance client
+                if self.config and 'models' in self.config:
+                    if 'strategist' in self.config['models']:
+                        strategist_config = self.config['models']['strategist']
+                        provider = strategist_config.get('provider', 'unknown')
+                        model = strategist_config.get('model', 'unknown')
+                        guidance_model_info = f"{provider}/{model}"
+                    elif 'guidance' in self.config['models']:
+                        guidance_config = self.config['models']['guidance']
+                        provider = guidance_config.get('provider', 'unknown')
+                        model = guidance_config.get('model', 'unknown')
+                        guidance_model_info = f"{provider}/{model}"
         
         # Store models in session tracker
         self.session_tracker.set_models(agent_model_info, guidance_model_info)
@@ -1317,6 +1337,11 @@ class AgentRunner:
         results = []
         planned_round = 0
         start_overall = time.time()
+        time_up = False
+
+        # Local exception used to abort long-running investigations when time is up
+        class _TimeLimitReached(Exception):
+            pass
         while True:
             # Time limit check
             if self.time_limit_minutes:
@@ -1394,6 +1419,10 @@ class AgentRunner:
                 try:
                     # Enhanced progress callback that logs model actions and thoughts
                     def _cb(info: dict):
+                        # Enforce global time limit within investigation callbacks
+                        if self.time_limit_minutes:
+                            if (time.time() - start_overall) / 60.0 >= self.time_limit_minutes:
+                                raise _TimeLimitReached()
                         status = info.get('status', '')
                         msg = info.get('message', '')
                         it = info.get('iteration', 0)
@@ -1408,12 +1437,35 @@ class AgentRunner:
                             if reasoning:
                                 console.print(f"  [cyan]Thought:[/cyan] {reasoning}")
                             if params and act != 'deep_think':
-                                # Show parameters for non-deep-think actions
-                                import json
-                                params_str = json.dumps(params, indent=2)
-                                if len(params_str) > 500:
-                                    params_str = params_str[:497] + '...'
-                                console.print(f"  [cyan]Parameters:[/cyan]\n{params_str}")
+                                # Show parameters for non-deep-think actions (concise summary)
+                                def _summ(v):
+                                    try:
+                                        import json
+                                        return json.dumps(v)[:200]
+                                    except Exception:
+                                        return str(v)[:200]
+                                lines = []
+                                for k, v in (params or {}).items():
+                                    if isinstance(v, list):
+                                        if k in ("observations", "assumptions", "refs", "node_ids"):
+                                            preview = ", ".join([str(x)[:60] for x in v[:2]])
+                                            more = f" (+{len(v)-2} more)" if len(v) > 2 else ""
+                                            lines.append(f"  - {k}: {len(v)} {more}")
+                                            if preview:
+                                                lines.append(f"    • {preview}")
+                                        else:
+                                            lines.append(f"  - {k}: {len(v)} items")
+                                    elif isinstance(v, dict):
+                                        lines.append(f"  - {k}: {{...}}")
+                                    else:
+                                        sval = str(v)
+                                        if len(sval) > 120:
+                                            sval = sval[:117] + "..."
+                                        lines.append(f"  - {k}: {sval}")
+                                if lines:
+                                    console.print("  [cyan]Parameters:[/cyan]")
+                                    for ln in lines[:8]:
+                                        console.print(ln)
                             
                             # Special handling for deep_think
                             if act == 'deep_think':
@@ -1456,6 +1508,11 @@ class AgentRunner:
                                     hypotheses_formed = result.get('hypotheses_formed', 0)
                                     if hypotheses_formed > 0:
                                         console.print(f"[bold green]✓ Added {hypotheses_formed} hypothesis(es) to global store[/bold green]")
+                                        titles = result.get('hypothesis_titles') or []
+                                        if titles:
+                                            console.print("[bold cyan]New hypotheses:[/bold cyan]")
+                                            for t in titles[:5]:
+                                                console.print(f"  • {t}")
                                 else:
                                     error_msg = result.get('error', 'Unknown error')
                                     console.print(f"\n[bold red]Strategist Error:[/bold red] {error_msg}")
@@ -1484,8 +1541,18 @@ class AgentRunner:
                         from rich.status import Status
                         with console.status("[cyan]Agent thinking deeply...[/cyan]", spinner="line", spinner_style="cyan"):
                             report = self.agent.investigate(inv.goal, max_iterations=max_iters, progress_callback=_cb)
+                    except _TimeLimitReached:
+                        console.print(f"\n[yellow]Time limit reached ({self.time_limit_minutes} minutes) — stopping audit[/yellow]")
+                        time_up = True
+                        break
                     except Exception:
-                        report = self.agent.investigate(inv.goal, max_iterations=max_iters, progress_callback=_cb)
+                        # Retry without status context; still honor time limit
+                        try:
+                            report = self.agent.investigate(inv.goal, max_iterations=max_iters, progress_callback=_cb)
+                        except _TimeLimitReached:
+                            console.print(f"\n[yellow]Time limit reached ({self.time_limit_minutes} minutes) — stopping audit[/yellow]")
+                            time_up = True
+                            break
                     results.append((inv, report))
                     # Track completed investigation
                     self.completed_investigations.append(inv.goal)
@@ -1525,6 +1592,10 @@ class AgentRunner:
                     console.print("[yellow]No hypotheses formed; considering coverage achieved for this thread[/yellow]")
                     self._agent_log.append("No hypotheses formed; considering coverage achieved for this thread")
 
+            # If time was exhausted during an investigation, stop planning loop as well
+            if time_up:
+                break
+
         # After audit, show the last report in detail
         if results:
             last_report = results[-1][1]
@@ -1536,7 +1607,8 @@ class AgentRunner:
 
         # Finalize session tracker with final token usage
         self.session_tracker.update_token_usage(token_tracker.get_summary())
-        self.session_tracker.finalize(status='completed')
+        final_status = 'interrupted' if 'time_up' in locals() and time_up else 'completed'
+        self.session_tracker.finalize(status=final_status)
         
         # Show final coverage
         coverage_stats = self.session_tracker.get_coverage_stats()

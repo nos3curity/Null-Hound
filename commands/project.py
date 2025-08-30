@@ -1167,3 +1167,97 @@ def _show_session_details(sessions_dir: Path, session_id: str, output_json: bool
 
 if __name__ == "__main__":
     project()
+
+
+# ------------------ Plan (Planned Investigations) ------------------
+
+@project.command(name='plan')
+@click.argument('project_name')
+@click.argument('session_id', required=False)
+@click.option('--json', 'output_json', is_flag=True, help="Output as JSON")
+def plan(project_name: str, session_id: Optional[str], output_json: bool):
+    """Show planned investigations from the PlanStore.
+
+    Examples:
+        hound project plan myproject                 # All sessions
+        hound project plan myproject sess_2025...    # Specific session
+        hound project plan myproject --json          # JSON output
+    """
+    manager = ProjectManager()
+    project_path = manager.get_project_path(project_name)
+
+    if not project_path:
+        console.print(f"[red]Project '{project_name}' not found.[/red]")
+        return
+
+    sessions_dir = Path(project_path) / "sessions"
+    if not sessions_dir.exists():
+        console.print(f"[yellow]No sessions found for project '{project_name}'.[/yellow]")
+        return
+
+    # Resolve session directories to inspect
+    session_dirs: List[Path] = []
+    if session_id:
+        cand = sessions_dir / session_id
+        if cand.exists() and cand.is_dir():
+            session_dirs = [cand]
+        else:
+            # Prefix match by folder name
+            matches = [p for p in sessions_dir.glob("*/") if p.name.startswith(session_id)]
+            if matches:
+                session_dirs = [matches[0]]
+            else:
+                console.print(f"[red]Session '{session_id}' not found.[/red]")
+                console.print("[dim]Use 'hound project sessions <project> --list' to view sessions.[/dim]")
+                return
+    else:
+        session_dirs = [p for p in sessions_dir.iterdir() if p.is_dir()]
+
+    # Collect plan items across selected sessions
+    all_items: List[dict] = []
+    from analysis.plan_store import PlanStore
+    for sdir in sorted(session_dirs, key=lambda p: p.stat().st_mtime, reverse=True):
+        plan_file = sdir / 'plan.json'
+        if not plan_file.exists():
+            continue
+        try:
+            ps = PlanStore(plan_file, agent_id='cli')
+            items = ps.list()
+            for it in items:
+                # Ensure session id present and attach directory name for clarity
+                it.setdefault('session_id', sdir.name)
+                all_items.append(it)
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not read plan for session {sdir.name}: {e}[/yellow]")
+
+    if not all_items:
+        console.print("[yellow]No planned investigations found.[/yellow]")
+        return
+
+    # Output as JSON if requested
+    if output_json:
+        click.echo(json.dumps(all_items, indent=2))
+        return
+
+    # Render as a table
+    table = Table(title="Planned Investigations", show_header=True, header_style="bold cyan")
+    # Bias layout toward the Question column
+    table.add_column("Session", style="yellow", ratio=1)
+    table.add_column("Status", style="green", ratio=1)
+    table.add_column("Priority", style="magenta", justify="right", ratio=1)
+    table.add_column("Question", style="white", ratio=5)
+    table.add_column("Refs", style="cyan", ratio=2, no_wrap=True)
+
+    for it in all_items:
+        sess = it.get('session_id', '-')
+        status = it.get('status', 'planned')
+        prio = str(it.get('priority', ''))
+        q = it.get('question', '') or ''
+        if len(q) > 140:
+            q = q[:137] + '...'
+        refs = ','.join(it.get('artifact_refs', []) or [])
+        if len(refs) > 40:
+            refs = refs[:37] + '...'
+        table.add_row(sess, status, prio, q, refs)
+
+    console.print(table)

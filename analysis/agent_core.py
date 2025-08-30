@@ -1651,9 +1651,15 @@ DO NOT include any text before or after the JSON object."""
         try:
             context = self._build_context()
             from .strategist import Strategist
-            strategist = Strategist(config=self.config or {})
+            # Pass debug and session_id to strategist for deep_think prompt saving
+            strategist = Strategist(
+                config=self.config or {}, 
+                debug=self.debug, 
+                session_id=self.session_id
+            )
             items = strategist.deep_think(context=context) or []
             added = 0
+            titles: list[str] = []
             guidance_model_info = None
             if hasattr(self, 'guidance_client') and self.guidance_client:
                 try:
@@ -1675,7 +1681,11 @@ DO NOT include any text before or after the JSON object."""
                 res = self._form_hypothesis(params)
                 if res.get('status') == 'success':
                     added += 1
-            return {'status': 'success', 'summary': f'Deep analysis added {added} hypotheses', 'hypotheses_formed': added}
+                    try:
+                        titles.append(params.get('description', 'Hypothesis'))
+                    except Exception:
+                        pass
+            return {'status': 'success', 'summary': f'Deep analysis added {added} hypotheses', 'hypotheses_formed': added, 'hypothesis_titles': titles}
         except Exception as e:
             return {'status': 'error', 'error': str(e)}
     

@@ -151,6 +151,49 @@ class Strategist:
             "Use: severity=(critical|high|medium|low), confidence=(high|medium|low)."
         )
 
+        # Save deep_think prompts to debug files if debug logger is available
+        if self.debug_logger:
+            try:
+                from pathlib import Path
+                from datetime import datetime
+                # Prefer debug logger's output_dir for consistency; fallback to CWD/.hound_debug
+                base_dir = getattr(self.debug_logger, 'output_dir', None)
+                if not base_dir:
+                    base_dir = Path.cwd() / '.hound_debug'
+                base_path = Path(base_dir)
+                # Create deep_think directory scoped by session id
+                session_dir = base_path / str(getattr(self.debug_logger, 'session_id', 'strategist')) / 'deep_think_prompts'
+                session_dir.mkdir(parents=True, exist_ok=True)
+                # Timestamped filename
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                prompt_path = session_dir / f'deep_think_{timestamp}.txt'
+                # Write full prompt for reproduction
+                with open(prompt_path, 'w') as f:
+                    f.write("=" * 80 + "\n")
+                    f.write("DEEP THINK PROMPT\n")
+                    f.write(f"Generated at: {datetime.now().isoformat()}\n")
+                    f.write("=" * 80 + "\n\n")
+                    f.write("SYSTEM PROMPT:\n")
+                    f.write("-" * 40 + "\n")
+                    f.write(system)
+                    f.write("\n\n")
+                    f.write("USER PROMPT:\n")
+                    f.write("-" * 40 + "\n")
+                    f.write(user)
+                    f.write("\n\n")
+                    f.write("=" * 80 + "\n")
+                    f.write("NOTE: Combine the system and user prompts when testing manually.\n")
+                    f.write("=" * 80 + "\n")
+                # Optionally log an event into the HTML debug log
+                try:
+                    if hasattr(self.debug_logger, 'log_event'):
+                        self.debug_logger.log_event('DeepThink Prompt Saved', str(prompt_path))
+                except Exception:
+                    pass
+            except Exception:
+                # Never fail deep_think on debug save issues
+                pass
+
         try:
             # Allow fine-grained reasoning control for hypothesis step
             hyp_effort = None
