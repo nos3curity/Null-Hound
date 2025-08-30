@@ -48,14 +48,19 @@ class UnifiedLLMClient:
         models_cfg = cfg.get("models", {}) if isinstance(cfg, dict) else {}
         profile_key = profile
         if profile_key not in models_cfg:
-            # Backward-compatible fallbacks
-            fallback = {
-                "scout": "agent",
-                "strategist": "guidance",
-                "qa": "finalize",
-            }.get(profile_key)
-            if fallback and fallback in models_cfg:
-                profile_key = fallback
+            # Backward-compatible fallbacks (bidirectional where appropriate)
+            fallbacks = {
+                "scout": ["agent"],
+                "agent": ["scout"],
+                "strategist": ["guidance", "agent"],
+                "guidance": ["strategist", "agent"],
+                "qa": ["finalize"],
+                "finalize": ["qa"],
+            }
+            for alt in fallbacks.get(profile_key, []):
+                if alt in models_cfg:
+                    profile_key = alt
+                    break
         if profile_key not in models_cfg:
             raise ValueError(f"Model profile '{profile}' not found in config and no fallback available")
         model_config = models_cfg[profile_key]

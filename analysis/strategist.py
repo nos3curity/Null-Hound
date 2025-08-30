@@ -64,8 +64,14 @@ class Strategist:
             "CRITICAL PLANNING PRINCIPLES:\n"
             "1. ALWAYS prioritize investigations with the highest chance of finding critical vulnerabilities\n"
             "2. Look for CONTRADICTIONS between assumptions and observations - these often reveal bugs\n"
-            "3. Focus on areas where security controls intersect (e.g., access control + financial operations)\n"
+            "3. Focus on areas where security controls intersect\n"
             "4. Reorganize priorities based on new findings - what seemed low-priority may become critical\n\n"
+            "INVESTIGATION STRATEGY:\n"
+            "- Start with HIGH-LEVEL security aspects and broad architectural patterns\n"
+            "- As understanding accumulates, become progressively more specific\n"
+            "- Use coverage metrics and completed investigations to gauge audit maturity\n"
+            "- Early investigations should establish system understanding\n"
+            "- Later investigations should target specific vulnerabilities based on evidence\n\n"
             "INVESTIGATION GUIDELINES:\n"
             "- Review ALL graph annotations (observations and assumptions) for contradictions or inconsistencies\n"
             "- Prioritize based on potential impact: critical > high > medium > low\n"
@@ -82,15 +88,21 @@ class Strategist:
         coverage_str = coverage_summary or "(no coverage data)"
         ledger_str = ledger_summary or "(none)"
         
+        # Calculate planning iteration count (this is passed as part of completed list)
+        planning_iteration = len(completed) // n + 1 if n > 0 else 1
+        
         user = (
             f"ALL GRAPHS WITH ANNOTATIONS:\n{graphs_summary}\n\n"
             f"CURRENT HYPOTHESES (vulnerabilities found):\n{hypotheses_str}\n\n"
             f"COMPLETED INVESTIGATIONS (with results):\n{completed_str}\n\n"
             f"COVERAGE STATUS:\n{coverage_str}\n\n"
+            f"AUDIT PROGRESS:\n"
+            f"- Planning iteration: {planning_iteration}\n"
+            f"- Investigations completed: {len(completed)}\n\n"
             f"Plan the top {n} NEW investigations.\n\n"
             f"PRIORITIZATION CRITERIA (in order):\n"
             f"1. Contradictions between assumptions and observations in the graphs\n"
-            f"2. High-risk areas not yet covered (value transfer, access control, external calls)\n"
+            f"2. High-risk areas not yet covered\n"
             f"3. Patterns suggested by existing findings (if we found X, check for Y)\n"
             f"4. Complex interactions between multiple components\n"
             f"5. Areas with suspicious observations or questionable assumptions\n\n"
