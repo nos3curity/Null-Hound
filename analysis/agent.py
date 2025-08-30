@@ -1,11 +1,14 @@
+"""Agent compatibility shims.
+
+Refactor introduces Scout (junior) and Strategist (senior) names. This module
+preserves existing imports while mapping to the new names.
 """
-Autonomous agent system for security analysis.
-"""
 
-from .agent_core import AutonomousAgent
+from .scout import Scout
 
-# Export aliases for compatibility
-Agent = AutonomousAgent
-SimpleAgent = AutonomousAgent  # Backward compatibility
+# Backward-compatible aliases for the junior agent
+AutonomousAgent = Scout
+Agent = Scout
+SimpleAgent = Scout
 
-__all__ = ['AutonomousAgent', 'Agent', 'SimpleAgent']
+__all__ = ['AutonomousAgent', 'Agent', 'SimpleAgent', 'Scout']

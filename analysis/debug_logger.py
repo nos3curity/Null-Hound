@@ -23,15 +23,40 @@ class DebugLogger:
             output_dir: Directory to save debug logs (defaults to .hound_debug)
         """
         self.session_id = session_id
-        self.output_dir = output_dir or Path.home() / ".hound_debug"
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        # Prefer caller-provided directory, then env var, then workspace-local fallback
+        self.output_dir = output_dir
+        if not self.output_dir:
+            try:
+                import os as _os
+                env_dir = _os.environ.get("HOUND_DEBUG_DIR")
+                if env_dir:
+                    self.output_dir = Path(env_dir)
+                else:
+                    # Use CWD-local debug dir to avoid sandbox permission issues
+                    self.output_dir = Path.cwd() / ".hound_debug"
+            except Exception:
+                self.output_dir = Path.cwd() / ".hound_debug"
+        # Ensure directory exists; if creation fails, fall back to CWD
+        try:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            self.output_dir = Path.cwd() / ".hound_debug"
+            try:
+                self.output_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                # Final fallback: disable file logging by pointing to a non-persistent temp-like path
+                self.output_dir = Path(".hound_debug")
         
         # Create HTML file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.log_file = self.output_dir / f"debug_{session_id}_{timestamp}.html"
         
-        # Initialize HTML
-        self._init_html()
+        # Initialize HTML (best-effort)
+        try:
+            self._init_html()
+        except Exception:
+            # If we cannot write the file, disable logging silently
+            self.log_file = None
         
         # Track interaction count
         self.interaction_count = 0
@@ -237,8 +262,9 @@ class DebugLogger:
     <div id="interactions">
 """
         
-        with open(self.log_file, 'w') as f:
-            f.write(html_header)
+        if self.log_file:
+            with open(self.log_file, 'w') as f:
+                f.write(html_header)
     
     def log_interaction(
         self,
