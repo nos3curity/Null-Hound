@@ -122,6 +122,10 @@ def project_plan(
         'output_json': output_json
     })
 
+# Removed 'reset-plan' and composite 'reset' commands. Use:
+# - graph reset <project>
+# - project reset-hypotheses <project>
+
 @project_app.command("sessions")
 def project_sessions(
     project_name: str = typer.Argument(..., help="Project name"),

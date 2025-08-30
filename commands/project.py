@@ -1062,3 +1062,4 @@ def plan(project_name: str, session_id: Optional[str], output_json: bool):
         table.add_row(sess, status, prio, q, refs)
 
     console.print(table)
+
