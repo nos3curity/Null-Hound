@@ -26,6 +26,22 @@ app.add_typer(project_app, name="project")
 agent_app = typer.Typer(help="Run security analysis agents")
 app.add_typer(agent_app, name="agent")
 
+# Helper to invoke Click command functions without noisy tracebacks
+def _invoke_click(cmd_func, params: dict):
+    import click
+    ctx = click.Context(cmd_func)
+    ctx.params = params or {}
+    try:
+        cmd_func.invoke(ctx)
+    except SystemExit as e:
+        # Normalize Click exits to Typer exits (quiet)
+        code = e.code if isinstance(e.code, int) else 1
+        raise typer.Exit(code)
+    except Exception as e:
+        # Print concise error instead of full traceback
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
 @project_app.command("create")
 def project_create(
     name: str = typer.Argument(..., help="Project name"),
@@ -35,33 +51,24 @@ def project_create(
 ):
     """Create a new project."""
     from commands.project import create
-    import click
-    ctx = click.Context(create)
-    ctx.params = {
+    _invoke_click(create, {
         'name': name,
         'source_path': source_path,
         'description': description,
         'auto_name': auto_name
-    }
-    create.invoke(ctx)
+    })
 
 @project_app.command("list")
 def project_list():
     """List all projects."""
     from commands.project import list_projects_cmd
-    import click
-    ctx = click.Context(list_projects_cmd)
-    ctx.params = {'output_json': False}
-    list_projects_cmd.invoke(ctx)
+    _invoke_click(list_projects_cmd, {'output_json': False})
 
 @project_app.command("info")
 def project_info(name: str = typer.Argument(..., help="Project name")):
     """Show project information."""
     from commands.project import info
-    import click
-    ctx = click.Context(info)
-    ctx.params = {'name': name}
-    info.invoke(ctx)
+    _invoke_click(info, {'name': name})
 
 @project_app.command("coverage")
 def project_coverage(name: str = typer.Argument(..., help="Project name")):
@@ -88,10 +95,7 @@ def project_delete(
 ):
     """Delete a project."""
     from commands.project import delete
-    import click
-    ctx = click.Context(delete)
-    ctx.params = {'name': name, 'force': force}
-    delete.invoke(ctx)
+    _invoke_click(delete, {'name': name, 'force': force})
 
 @project_app.command("hypotheses")
 def project_hypotheses(
@@ -100,10 +104,7 @@ def project_hypotheses(
 ):
     """List all hypotheses for a project with confidence ratings."""
     from commands.project import hypotheses
-    import click
-    ctx = click.Context(hypotheses)
-    ctx.params = {'name': name, 'details': details}
-    hypotheses.invoke(ctx)
+    _invoke_click(hypotheses, {'name': name, 'details': details})
 
 @project_app.command("runs")
 def project_runs(
@@ -119,15 +120,12 @@ def project_runs(
         hound project runs myproject run_123      # Show details for specific run
     """
     from commands.project import runs
-    import click
-    ctx = click.Context(runs)
-    ctx.params = {
+    _invoke_click(runs, {
         'project_name': project_name,
         'run_id': run_id,
         'list_runs': list_runs,
         'output_json': output_json
-    }
-    runs.invoke(ctx)
+    })
 
 @project_app.command("sessions")
 def project_sessions(
@@ -143,15 +141,12 @@ def project_sessions(
         hound project sessions myproject session_123  # Show details for specific session
     """
     from commands.project import sessions
-    import click
-    ctx = click.Context(sessions)
-    ctx.params = {
+    _invoke_click(sessions, {
         'project_name': project_name,
         'session_id': session_id,
         'list_sessions': list_sessions,
         'output_json': output_json
-    }
-    sessions.invoke(ctx)
+    })
 
 @project_app.command("reset-hypotheses")
 def project_reset_hypotheses(
@@ -160,10 +155,7 @@ def project_reset_hypotheses(
 ):
     """Reset (clear) the hypotheses store for a project."""
     from commands.project import reset_hypotheses
-    import click
-    ctx = click.Context(reset_hypotheses)
-    ctx.params = {'name': name, 'force': force}
-    reset_hypotheses.invoke(ctx)
+    _invoke_click(reset_hypotheses, {'name': name, 'force': force})
 
 # Agent audit subcommand
 @agent_app.command("audit")
@@ -249,8 +241,7 @@ def agent_audit(
     console.print(_flair)
     
     # Create a Click context and invoke the command
-    ctx = click.Context(agent_command)
-    ctx.params = {
+    _invoke_click(agent_command, {
         'project_id': project_id,
         'iterations': iterations,
         'plan_n': plan_n,
@@ -265,8 +256,7 @@ def agent_audit(
         'session': session,
         'new_session': new_session,
         'session_private_hypotheses': session_private_hypotheses
-    }
-    agent_command.invoke(ctx)
+    })
 
 
 # Agent investigate subcommand
