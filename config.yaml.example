@@ -36,12 +36,12 @@ models:
   # Profile for graph building operations (fast, structured output)
   graph:
     provider: openai              # Options: openai, gemini, anthropic
-    model: gpt-5-nano            # Fast model for structured graph generation
+    model: gpt-4.1                # Fast model for structured graph generation
     
   # Profile for code exploration
   scout:
     provider: openai
-    model: gpt-5-nano              # Code exploration
+    model: gpt-5-mini              # Code exploration
     # Reasoning effort (OpenAI o1 models only)
     # Options: low, medium, high
     # Higher effort = better reasoning but slower/more expensive
