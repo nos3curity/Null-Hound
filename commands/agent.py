@@ -1470,6 +1470,15 @@ class AgentRunner:
                             # Special handling for deep_think
                             if act == 'deep_think':
                                 console.print(f"\n[bold magenta]═══ CALLING STRATEGIST FOR DEEP ANALYSIS ═══[/bold magenta]")
+                                try:
+                                    strat_cfg = (self.config or {}).get('models', {}).get('strategist', {})
+                                    eff = strat_cfg.get('hypothesize_reasoning_effort') or strat_cfg.get('reasoning_effort')
+                                    if hasattr(self.agent, 'guidance_client') and self.agent.guidance_client:
+                                        prov = getattr(self.agent.guidance_client, 'provider_name', 'unknown')
+                                        mdl = getattr(self.agent.guidance_client, 'model', 'unknown')
+                                        console.print(f"[dim]Strategist model: {prov}/{mdl} | effort: {eff or 'default'}[/dim]")
+                                except Exception:
+                                    pass
                                 console.print(f"[yellow]Strategist is analyzing the collected context...[/yellow]")
                             
                             # Update agent log
@@ -1506,13 +1515,24 @@ class AgentRunner:
                                         console.print(Panel(full_response, border_style="green", title="Strategist Output"))
                                     
                                     hypotheses_formed = result.get('hypotheses_formed', 0)
+                                    hyp_info = result.get('hypotheses_info') or []
                                     if hypotheses_formed > 0:
                                         console.print(f"[bold green]✓ Added {hypotheses_formed} hypothesis(es) to global store[/bold green]")
-                                        titles = result.get('hypothesis_titles') or []
-                                        if titles:
+                                        if hyp_info:
                                             console.print("[bold cyan]New hypotheses:[/bold cyan]")
-                                            for t in titles[:5]:
-                                                console.print(f"  • {t}")
+                                            for h in hyp_info[:5]:
+                                                title = h.get('title','Hypothesis')
+                                                sev = h.get('severity','medium')
+                                                conf = h.get('confidence',0)
+                                                console.print(f"  • {title} [dim](severity={sev}, confidence={conf})[/dim]")
+                                                reason = (h.get('reasoning') or '')
+                                                if reason:
+                                                    console.print(f"    [dim]{(reason[:200] + '...') if len(reason)>200 else reason}[/dim]")
+                                elif result.get('status') == 'skipped':
+                                    # Graceful messaging when guardrail defers deep_think
+                                    msg = result.get('summary', 'Deep analysis deferred due to insufficient context')
+                                    console.print(f"\n[yellow]{msg}[/yellow]")
+                                    console.print("[yellow]Continuing exploration to gather more evidence...[/yellow]")
                                 else:
                                     error_msg = result.get('error', 'Unknown error')
                                     console.print(f"\n[bold red]Strategist Error:[/bold red] {error_msg}")
@@ -1617,6 +1637,28 @@ class AgentRunner:
         console.print(f"  Cards analyzed: {coverage_stats['cards']['visited']}/{coverage_stats['cards']['total']} ([cyan]{coverage_stats['cards']['percent']:.1f}%[/cyan])")
         
         console.print(f"\n[green]Session details saved to:[/green] sessions/{self.session_id}.json")
+
+        # Finalize debug log if enabled
+        try:
+            if self.debug and getattr(self, 'agent', None) and getattr(self.agent, 'debug_logger', None):
+                # Build a concise summary
+                token_tracker = get_token_tracker()
+                summary = {
+                    'planning_batches': planned_round,
+                    'hypotheses_total': 0,
+                }
+                try:
+                    # If we recorded investigations, sum hypotheses proposed
+                    sess = self.session_tracker.session_data if self.session_tracker else {}
+                    invs = sess.get('investigations', []) if isinstance(sess, dict) else []
+                    summary['hypotheses_total'] = sum(int(i.get('hypotheses', {}).get('total', 0)) for i in invs)
+                except Exception:
+                    pass
+                summary['total_api_calls'] = token_tracker.get_summary().get('total_usage', {}).get('call_count', 0)
+                log_path = self.agent.debug_logger.finalize(summary=summary)
+                console.print(f"[cyan]Debug log saved:[/cyan] {log_path}")
+        except Exception:
+            pass
     
     def _generate_enhanced_summary(self):
         """Deprecated in unified agent flow; retained for API compatibility."""

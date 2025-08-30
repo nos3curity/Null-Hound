@@ -1067,6 +1067,7 @@ What is your next action? Respond ONLY with a valid JSON object in this exact fo
 DO NOT include any text before or after the JSON object."""
         
         # Use raw JSON output - works across all providers
+        response = None  # Ensure defined even if the provider call raises
         try:
             # First try raw call with JSON instruction
             response = self.llm.raw(
@@ -1649,17 +1650,36 @@ DO NOT include any text before or after the JSON object."""
     def _deep_think(self) -> Dict:
         """Delegate deep analysis to the Strategist and form hypotheses accordingly."""
         try:
+            # Guardrail to avoid "empty" escalations. Keep it simple and documented:
+            # Only escalate when we have a minimum number of loaded nodes for this aspect.
+            # This reduces fast, low-signal calls and nudges the agent to explore more first.
+            MIN_NODES_FOR_DEEP_THINK = 8
+            try:
+                loaded_nodes = len(self.loaded_data.get('nodes', {})) if isinstance(self.loaded_data.get('nodes'), dict) else 0
+            except Exception:
+                loaded_nodes = 0
+            if loaded_nodes < MIN_NODES_FOR_DEEP_THINK:
+                return {
+                    'status': 'skipped',
+                    'summary': (
+                        f'Deep analysis deferred: insufficient context '
+                        f'({loaded_nodes} < {MIN_NODES_FOR_DEEP_THINK} loaded nodes). '
+                        'Load more relevant nodes/code before calling deep_think.'
+                    )
+                }
             context = self._build_context()
             from .strategist import Strategist
             # Pass debug and session_id to strategist for deep_think prompt saving
             strategist = Strategist(
                 config=self.config or {}, 
                 debug=self.debug, 
-                session_id=self.session_id
+                session_id=self.session_id,
+                debug_logger=getattr(self, 'debug_logger', None)
             )
             items = strategist.deep_think(context=context) or []
             added = 0
             titles: list[str] = []
+            hyp_info: list[dict] = []
             guidance_model_info = None
             if hasattr(self, 'guidance_client') and self.guidance_client:
                 try:
@@ -1683,9 +1703,28 @@ DO NOT include any text before or after the JSON object."""
                     added += 1
                     try:
                         titles.append(params.get('description', 'Hypothesis'))
+                        hyp_info.append({
+                            'title': params.get('description', 'Hypothesis'),
+                            'severity': params.get('severity', 'medium'),
+                            'confidence': params.get('confidence', 0.6),
+                            'reasoning': params.get('reasoning', '')[:500],
+                        })
                     except Exception:
                         pass
-            return {'status': 'success', 'summary': f'Deep analysis added {added} hypotheses', 'hypotheses_formed': added, 'hypothesis_titles': titles}
+            # Include raw strategist output if available for CLI display
+            full_raw = None
+            try:
+                full_raw = getattr(strategist, 'last_raw', None)
+            except Exception:
+                full_raw = None
+            return {
+                'status': 'success',
+                'summary': f'Deep analysis added {added} hypotheses',
+                'hypotheses_formed': added,
+                'hypothesis_titles': titles,
+                'hypotheses_info': hyp_info,
+                'full_response': full_raw or ''
+            }
         except Exception as e:
             return {'status': 'error', 'error': str(e)}
     

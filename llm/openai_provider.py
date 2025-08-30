@@ -184,17 +184,24 @@ class OpenAIProvider(BaseLLMProvider):
         for attempt in range(self.retries):
             try:
                 if self.use_responses:
-                    # Favor JSON output; no schema binding on raw path
+                    # Favor JSON output only when caller explicitly asks for strict JSON in the system message.
+                    # This keeps deep_think and other free-text prompts working as normal text.
                     text_params: Dict[str, Any] = {}
                     if self.text_verbosity:
                         text_params['verbosity'] = self.text_verbosity
-                    text_params['format'] = {'type': 'json'}
                     params: Dict[str, Any] = {
                         'model': self.model_name,
                         'input': user,
                         'instructions': system or '',
-                        'text': text_params,
                     }
+                    # Heuristic: if system asks for "valid JSON", request json_object formatting.
+                    try:
+                        if isinstance(system, str) and 'valid json' in system.lower():
+                            text_params['format'] = {'type': 'json_object'}
+                    except Exception:
+                        pass
+                    if text_params:
+                        params['text'] = text_params
                     eff = reasoning_effort or self.reasoning_effort
                     if eff:
                         params['reasoning'] = {'effort': eff}
@@ -210,7 +217,21 @@ class OpenAIProvider(BaseLLMProvider):
                             }
                     except Exception:
                         pass
-                    return getattr(resp, 'output_text', None) or ""
+                    # Prefer SDK convenience property; fall back to concatenating text parts when absent
+                    out = getattr(resp, 'output_text', None)
+                    if out is not None:
+                        return out
+                    try:
+                        # Aggregate any text parts from the response
+                        chunks = []
+                        for item in getattr(resp, 'output', []) or []:
+                            for c in getattr(item, 'content', []) or []:
+                                t = getattr(c, 'text', None)
+                                if t and getattr(t, 'value', None):
+                                    chunks.append(t.value)
+                        return '\n'.join(chunks)
+                    except Exception:
+                        return ""
                 else:
                     completion = self.client.chat.completions.create(
                         model=self.model_name,

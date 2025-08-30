@@ -39,13 +39,13 @@ def _choose_profile(cfg: Dict[str, Any]) -> str:
 class Strategist:
     """Senior planning agent."""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None, debug: bool = False, session_id: Optional[str] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, debug: bool = False, session_id: Optional[str] = None, debug_logger=None):
         self.config = config or {}
         profile = _choose_profile(self.config)
         
-        # Initialize debug logger if needed
-        self.debug_logger = None
-        if debug:
+        # Initialize or reuse debug logger
+        self.debug_logger = debug_logger
+        if debug and self.debug_logger is None:
             from analysis.debug_logger import DebugLogger
             self.debug_logger = DebugLogger(session_id or "strategist")
         
@@ -58,6 +58,14 @@ class Strategist:
         """Plan the next n investigations from comprehensive audit context.
 
         Returns a list of dicts compatible with downstream display and PlanStore.
+
+        Prompt design notes (simple and commented for clarity):
+        - Planning should start broad (aspect frames) then home in (suspicions) as evidence accumulates.
+        - We do NOT encode a rigid slot ratio here – we instruct the model to maintain a sensible
+          balance (e.g., ~60% aspects early, shifting to more suspicions later). This keeps logic simple
+          and avoids brittle heuristics in code.
+        - Each item must include a clear rationale; we ask the model to fold "why now" and
+          "exit criteria" into the single 'reasoning' field, avoiding schema churn.
         """
         system = (
             "You are a senior smart-contract security auditor planning an audit roadmap.\n"
@@ -67,6 +75,9 @@ class Strategist:
             "2. Look for CONTRADICTIONS between assumptions and observations - these often reveal bugs\n"
             "3. Focus on areas where security controls intersect\n"
             "4. Reorganize priorities based on new findings - what seemed low-priority may become critical\n\n"
+            "BREADTH→DEPTH MIX (guidance, not rigid):\n"
+            "- Early batches: keep most items as broad ASPECT frames; reserve at least one slot for the strongest EVIDENCE-BASED SUSPICION.\n"
+            "- As evidence accumulates (hypotheses/signals), increase SUSPICION items and revisit aspects only if coverage holes or contradictions persist.\n\n"
             "INVESTIGATION STRATEGY:\n"
             "- Start with HIGH-LEVEL security aspects and broad architectural patterns\n"
             "- As understanding accumulates, become progressively more specific\n"
@@ -81,7 +92,9 @@ class Strategist:
             "- Build upon existing hypotheses - if we found issue X, check for related issue Y\n"
             "- Focus on uncovered nodes that handle value, permissions, or state changes\n"
             "- Avoid repeating completed investigations unless new evidence suggests revisiting\n"
-            "- Provide exactly the requested number of items\n"
+            "- Provide exactly the requested number of items\n\n"
+            "FOR EACH ITEM include in 'reasoning': (a) WHY NOW (signal/coverage need), and (b) EXIT CRITERIA (what evidence ends this thread).\n"
+            "Use 'category' as 'aspect' or 'suspicion' and set 'expected_impact' realistically.\n"
         )
 
         completed_str = "\n".join(f"- {c}" for c in completed) if completed else "(none)"
@@ -100,14 +113,15 @@ class Strategist:
             f"AUDIT PROGRESS:\n"
             f"- Planning iteration: {planning_iteration}\n"
             f"- Investigations completed: {len(completed)}\n\n"
-            f"Plan the top {n} NEW investigations.\n\n"
+            f"Plan the top {n} NEW investigations balancing breadth (ASPECTS) and depth (SUSPICIONS).\n"
+            f"Favor ~60% ASPECTS early; shift toward SUSPICIONS as evidence accumulates.\n\n"
             f"PRIORITIZATION CRITERIA (in order):\n"
             f"1. Contradictions between assumptions and observations in the graphs\n"
             f"2. High-risk areas not yet covered\n"
             f"3. Patterns suggested by existing findings (if we found X, check for Y)\n"
             f"4. Complex interactions between multiple components\n"
             f"5. Areas with suspicious observations or questionable assumptions\n\n"
-            f"For each investigation, explain WHY it's high-priority and what critical issue it might uncover."
+            f"For each investigation, include WHY NOW and EXIT CRITERIA in 'reasoning'."
         )
 
         # Allow fine-grained reasoning control for planning step
@@ -140,15 +154,25 @@ class Strategist:
           description, details, vulnerability_type, severity, confidence, node_ids, reasoning
         """
         system = (
-            "You are a deep-thinking smart-contract security auditor.\n"
-            "Analyze the agent's exploration context to identify real, non-trivial vulnerabilities.\n"
-            "Return hypotheses as ONE-LINE entries using '|' separators."
+            "You are a deep-thinking senior smart-contract security auditor.\n"
+            "Your job is to: (1) think deeply about the active investigation aspect,\n"
+            "(2) uncover real, non-trivial vulnerabilities as clear hypotheses, and (3) advise the Scout on next steps.\n\n"
+            "CRITICAL: Base your analysis on the investigation goal and the exploration/history shown in the context.\n"
+            "Be precise, avoid generic statements, and only propose hypotheses you can justify from the provided context.\n"
+            "If you are highly confident there are no vulnerabilities in scope, say so.\n"
         )
         user = (
-            "CONTEXT:\n" + context + "\n\n" +
-            "HYPOTHESES (one per line):\n"
-            "Title | Type | Root Cause | Attack Vector | Affected Nodes | Affected Code | Severity | Confidence | Reasoning\n"
-            "Use: severity=(critical|high|medium|low), confidence=(high|medium|low)."
+            "CONTEXT (includes === INVESTIGATION GOAL === and compressed history):\n" + context + "\n\n"
+            "OUTPUT INSTRUCTIONS:\n"
+            "1) HYPOTHESES (one per line, exactly this pipe-separated format):\n"
+            "   Title | Type | Root Cause | Attack Vector | Affected Nodes | Affected Code | Severity | Confidence | Reasoning\n"
+            "   - severity: critical|high|medium|low; confidence: high|medium|low\n"
+            "   - Keep Title concise and actionable.\n"
+            "   - Affected Code should reference concrete functions/files if possible.\n\n"
+            "2) GUIDANCE (next steps for the Scout):\n"
+            "   - Provide 2–5 concrete next actions to gather evidence or rule in/out the above hypotheses.\n"
+            "   - Reference specific nodes/functions/files the Scout should load or analyze next.\n\n"
+            "3) If NO credible hypothesis is found, include a line: NO_HYPOTHESES: true (still provide GUIDANCE).\n"
         )
 
         # Save deep_think prompts to debug files if debug logger is available
@@ -203,6 +227,11 @@ class Strategist:
             except Exception:
                 hyp_effort = None
             resp = self.llm.raw(system=system, user=user, reasoning_effort=hyp_effort)
+            # Keep raw strategist output for downstream CLI display
+            try:
+                self.last_raw = resp
+            except Exception:
+                pass
         except Exception:
             return []
 
