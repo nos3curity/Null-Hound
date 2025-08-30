@@ -117,6 +117,16 @@ class ProjectManager:
                     graphs_exist = len(list((project_dir / "graphs").glob("*.json"))) > 0
                     sessions_dir = project_dir / "sessions"
                     sessions_count = len(list(sessions_dir.glob("*.json"))) if sessions_dir.exists() else 0
+                    # Count hypotheses if present
+                    hypotheses_count = 0
+                    try:
+                        hyp_file = project_dir / 'hypotheses.json'
+                        if hyp_file.exists():
+                            with open(hyp_file, 'r') as hf:
+                                hyp_data = json.load(hf)
+                                hypotheses_count = len((hyp_data or {}).get('hypotheses', {}))
+                    except Exception:
+                        hypotheses_count = 0
                     
                     projects.append({
                         "name": name,
@@ -126,6 +136,7 @@ class ProjectManager:
                         "last_accessed": config.get("last_accessed", ""),
                         "has_graphs": graphs_exist,
                         "sessions": sessions_count,
+                        "hypotheses": hypotheses_count,
                         "path": str(project_dir)
                     })
         
@@ -331,6 +342,7 @@ def list_projects_cmd(output_json: bool):
     table.add_column("Source", style="white")
     table.add_column("Graphs", style="green")
     table.add_column("Sessions", style="yellow")
+    table.add_column("Hypotheses", style="magenta", justify="right")
     table.add_column("Last Activity", style="dim")
     
     for proj in sorted(projects, key=lambda x: x["created_at"], reverse=True):
@@ -346,6 +358,7 @@ def list_projects_cmd(output_json: bool):
             source_display,
             "✓" if proj["has_graphs"] else "-",
             str(proj["sessions"]) if proj["sessions"] > 0 else "-",
+            str(proj.get("hypotheses", 0)) if proj.get("hypotheses", 0) > 0 else "-",
             last_activity_date
         )
     
@@ -1062,4 +1075,3 @@ def plan(project_name: str, session_id: Optional[str], output_json: bool):
         table.add_row(sess, status, prio, q, refs)
 
     console.print(table)
-
