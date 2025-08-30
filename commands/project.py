@@ -115,7 +115,8 @@ class ProjectManager:
                     
                     # Check for analysis results
                     graphs_exist = len(list((project_dir / "graphs").glob("*.json"))) > 0
-                    runs_count = len(list((project_dir / "agent_runs").glob("*.json")))
+                    sessions_dir = project_dir / "sessions"
+                    sessions_count = len(list(sessions_dir.glob("*.json"))) if sessions_dir.exists() else 0
                     
                     projects.append({
                         "name": name,
@@ -124,7 +125,7 @@ class ProjectManager:
                         "created_at": config["created_at"],
                         "last_accessed": config.get("last_accessed", ""),
                         "has_graphs": graphs_exist,
-                        "agent_runs": runs_count,
+                        "sessions": sessions_count,
                         "path": str(project_dir)
                     })
         
@@ -213,11 +214,12 @@ class ProjectManager:
             has_data = False
             if project_dir.exists():
                 graphs_count = len(list((project_dir / "graphs").glob("*.json")))
-                runs_count = len(list((project_dir / "agent_runs").glob("*.json")))
-                has_data = graphs_count > 0 or runs_count > 0
+                sessions_dir = project_dir / "sessions"
+                sessions_count = len(list(sessions_dir.glob("*.json"))) if sessions_dir.exists() else 0
+                has_data = graphs_count > 0 or sessions_count > 0
             
             if has_data and not Confirm.ask(
-                f"[yellow]Project '{name}' contains {graphs_count} graphs and {runs_count} agent runs. "
+                f"[yellow]Project '{name}' contains {graphs_count} graphs and {sessions_count} sessions. "
                 "Delete anyway?[/yellow]"
             ):
                 return False
@@ -325,22 +327,24 @@ def list_projects_cmd(output_json: bool):
     table = Table(title="[bold bright_cyan]Hound Projects[/bold bright_cyan]")
     table.add_column("Name", style="cyan")
     table.add_column("Source", style="white")
-    table.add_column("Description", style="dim")
     table.add_column("Graphs", style="green")
-    table.add_column("Runs", style="yellow")
-    table.add_column("Created", style="dim")
+    table.add_column("Sessions", style="yellow")
+    table.add_column("Last Activity", style="dim")
     
     for proj in sorted(projects, key=lambda x: x["created_at"], reverse=True):
         source = Path(proj["source_path"])
         source_display = f".../{source.parent.name}/{source.name}" if len(str(source)) > 40 else str(source)
         
+        # Use last_accessed if available, otherwise created_at
+        last_activity = proj.get("last_accessed", proj["created_at"])
+        last_activity_date = last_activity.split("T")[0] if last_activity else "Never"
+        
         table.add_row(
             proj["name"],
             source_display,
-            proj["description"][:30] + "..." if len(proj["description"]) > 30 else proj["description"],
             "✓" if proj["has_graphs"] else "-",
-            str(proj["agent_runs"]) if proj["agent_runs"] > 0 else "-",
-            proj["created_at"].split("T")[0]
+            str(proj["sessions"]) if proj["sessions"] > 0 else "-",
+            last_activity_date
         )
     
     console.print(table)
@@ -368,8 +372,24 @@ def info(name: str):
     # Gather statistics
     graphs_files = list((project_dir / "graphs").glob("*.json"))
     manifest_files = list((project_dir / "manifest").glob("*"))
-    agent_runs = list((project_dir / "agent_runs").glob("*.json"))
+    sessions_dir = project_dir / "sessions"
+    sessions = list(sessions_dir.glob("*.json")) if sessions_dir.exists() else []
     reports = list((project_dir / "reports").glob("*"))
+    
+    # Get coverage statistics from latest session
+    coverage_stats = {"nodes": {"visited": 0, "total": 0, "percent": 0}, 
+                     "cards": {"visited": 0, "total": 0, "percent": 0}}
+    latest_session = None
+    if sessions:
+        # Get most recent session
+        latest_session_file = max(sessions, key=lambda x: x.stat().st_mtime)
+        try:
+            with open(latest_session_file, 'r') as f:
+                latest_session = json.load(f)
+                if 'coverage' in latest_session:
+                    coverage_stats = latest_session['coverage']
+        except Exception:
+            pass
     
     # Check for hypotheses
     hypothesis_stats = {"total": 0, "confirmed": 0, "high_confidence": 0}
@@ -387,6 +407,31 @@ def info(name: str):
     
     # Display info
     tag = random.choice(["📁", "🗂️", "📜"]) 
+    
+    # Format coverage section
+    coverage_section = ""
+    if coverage_stats['nodes']['total'] > 0 or coverage_stats['cards']['total'] > 0:
+        coverage_section = (
+            f"\n[bold]Coverage:[/bold]\n"
+            f"  • Nodes: {coverage_stats['nodes']['visited']}/{coverage_stats['nodes']['total']} "
+            f"([cyan]{coverage_stats['nodes']['percent']:.1f}%[/cyan])\n"
+            f"  • Cards: {coverage_stats['cards']['visited']}/{coverage_stats['cards']['total']} "
+            f"([cyan]{coverage_stats['cards']['percent']:.1f}%[/cyan])\n"
+        )
+    
+    # Format session info
+    session_info = ""
+    if latest_session:
+        models = latest_session.get('models', {})
+        scout_model = models.get('scout', 'unknown')
+        strategist_model = models.get('strategist', 'unknown')
+        session_info = (
+            f"\n[bold]Latest Session:[/bold]\n"
+            f"  • Scout: {scout_model}\n"
+            f"  • Strategist: {strategist_model}\n"
+            f"  • Status: {latest_session.get('status', 'unknown')}\n"
+        )
+    
     console.print(Panel(
         f"[bold bright_cyan]{tag} {project['name']}[/bold bright_cyan]\n\n"
         f"[bold]Source:[/bold] {project['source_path']}\n"
@@ -396,11 +441,13 @@ def info(name: str):
         f"[bold]Analysis Results:[/bold]\n"
         f"  • Graphs: {len(graphs_files)} files\n"
         f"  • Manifest: {len(manifest_files)} files\n"
-        f"  • Agent runs: {len(agent_runs)}\n"
+        f"  • Sessions: {len(sessions)}\n"
         f"  • Reports: {len(reports)}\n"
         f"  • Hypotheses: {hypothesis_stats['total']} total"
         f" ([green]{hypothesis_stats['confirmed']} confirmed[/green],"
-        f" [yellow]{hypothesis_stats['high_confidence']} high-confidence[/yellow])\n\n"
+        f" [yellow]{hypothesis_stats['high_confidence']} high-confidence[/yellow])"
+        f"{coverage_section}"
+        f"{session_info}\n"
         f"[dim]Project directory: {project_dir}[/dim]",
         title="[bold bright_cyan]Project Information[/bold bright_cyan]",
         border_style="bright_cyan"
@@ -411,10 +458,18 @@ def info(name: str):
         for graph_file in sorted(graphs_files, key=lambda x: x.stat().st_mtime, reverse=True)[:5]:
             console.print(f"  • {graph_file.name}")
     
-    if agent_runs:
-        console.print("\n[bold]Recent agent runs:[/bold]")
-        for run_file in sorted(agent_runs, key=lambda x: x.stat().st_mtime, reverse=True)[:5]:
-            console.print(f"  • {run_file.name}")
+    if sessions:
+        console.print("\n[bold]Recent sessions:[/bold]")
+        for session_file in sorted(sessions, key=lambda x: x.stat().st_mtime, reverse=True)[:5]:
+            # Try to get session details
+            try:
+                with open(session_file, 'r') as f:
+                    sess_data = json.load(f)
+                    sess_id = sess_data.get('session_id', session_file.stem)
+                    sess_status = sess_data.get('status', 'unknown')
+                    console.print(f"  • {sess_id} [{sess_status}]")
+            except:
+                console.print(f"  • {session_file.name}")
     
     # Show top hypotheses if any exist
     if hypothesis_file.exists() and hypothesis_stats["total"] > 0:
@@ -651,6 +706,59 @@ def path(name: str):
     else:
         console.print(f"[red]Project '{name}' not found.[/red]", err=True)
         raise click.Exit(1)
+
+
+@project.command()
+@click.argument('name')
+@click.option('--force', '-f', is_flag=True, help="Force reset without confirmation")
+def reset_hypotheses(name: str, force: bool):
+    """Reset (clear) the hypotheses store for a project."""
+    manager = ProjectManager()
+    project = manager.get_project(name)
+    
+    if not project:
+        console.print(f"[red]Project '{name}' not found.[/red]")
+        raise click.Exit(1)
+    
+    project_dir = Path(project["path"])
+    hypothesis_file = project_dir / "hypotheses.json"
+    
+    if not hypothesis_file.exists():
+        console.print(f"[yellow]No hypotheses file found for project '{name}'.[/yellow]")
+        return
+    
+    # Load current hypotheses to show what will be deleted
+    try:
+        with open(hypothesis_file, 'r') as f:
+            hyp_data = json.load(f)
+            hypotheses = hyp_data.get("hypotheses", {})
+            num_hypotheses = len(hypotheses)
+    except Exception:
+        num_hypotheses = 0
+    
+    if num_hypotheses == 0:
+        console.print(f"[yellow]No hypotheses to reset for project '{name}'.[/yellow]")
+        return
+    
+    # Confirm deletion if not forced
+    if not force:
+        if not Confirm.ask(
+            f"[yellow]This will permanently delete {num_hypotheses} hypotheses for project '{name}'. Continue?[/yellow]"
+        ):
+            console.print("[dim]Reset cancelled.[/dim]")
+            return
+    
+    # Backup the file before deletion (just rename it)
+    backup_file = hypothesis_file.with_suffix(f'.json.backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
+    hypothesis_file.rename(backup_file)
+    
+    console.print(f"[bright_green]✓ Reset {num_hypotheses} hypotheses for project '{name}'.[/bright_green]")
+    console.print(f"[dim]Backup saved to: {backup_file.name}[/dim]")
+    console.print(random.choice([
+        "[white]Clean slate achieved — ready for fresh insights.[/white]",
+        "[white]Hypotheses cleared — the investigation begins anew.[/white]",
+        "[white]Tabula rasa — your audit canvas is pristine.[/white]",
+    ]))
 
 
 @project.command()

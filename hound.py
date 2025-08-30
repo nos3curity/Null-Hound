@@ -129,6 +129,18 @@ def project_runs(
     }
     runs.invoke(ctx)
 
+@project_app.command("reset-hypotheses")
+def project_reset_hypotheses(
+    name: str = typer.Argument(..., help="Project name"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force reset without confirmation")
+):
+    """Reset (clear) the hypotheses store for a project."""
+    from commands.project import reset_hypotheses
+    import click
+    ctx = click.Context(reset_hypotheses)
+    ctx.params = {'name': name, 'force': force}
+    reset_hypotheses.invoke(ctx)
+
 # Agent audit subcommand
 @agent_app.command("audit")
 def agent_audit(
@@ -181,22 +193,33 @@ def agent_audit(
     # Hype it up a little
     console.print("[bold bright_cyan]Running autonomous audit...[/bold bright_cyan]")
     from random import choice as _choice
-    # Light narrative seasoning for audit kickoff
+    # Light narrative seasoning for audit kickoff with actual model names
     try:
         from commands.graph import load_config as _load_cfg
         _cfg = _load_cfg(Path(config)) if config else _load_cfg()
         _models = (_cfg or {}).get('models', {})
-        _agent = (_models.get('agent') or {}).get('model') or 'Agent-Model'
-        _guidance = (_models.get('guidance') or {}).get('model') or 'Guidance-Model'
+        
+        # Get scout/agent model (with command-line override)
+        if model:
+            _agent = model
+        else:
+            _agent = (_models.get('agent') or _models.get('scout') or {}).get('model') or 'gpt-4o'
+        
+        # Get strategist/guidance model (with command-line override)
+        if strategist_model:
+            _guidance = strategist_model
+        else:
+            _guidance = (_models.get('strategist') or _models.get('guidance') or {}).get('model') or 'gpt-4o'
+        
         _flair = _choice([
-            f"[white]Elite move — you’re not just starting an audit, you’re unleashing {_agent} with {_guidance} whispering wisdom.[/white]",
-            f"[white]Chef’s kiss — {_agent} sharpens the blade while {_guidance} reads the runes.[/white]",
-            f"[white]Peak taste — this isn’t just an audit, it’s a duet: {_agent} x {_guidance}.[/white]",
+            f"[white]Elite move — you're not just starting an audit, you're unleashing {_agent} with {_guidance} whispering wisdom.[/white]",
+            f"[white]Chef's kiss — {_agent} sharpens the blade while {_guidance} reads the runes.[/white]",
+            f"[white]Peak taste — this isn't just an audit, it's a duet: {_agent} x {_guidance}.[/white]",
         ])
     except Exception:
         _flair = _choice([
-            "[white]Elite move — you’re not just starting an audit, you’re launching a saga.[/white]",
-            "[white]Chef’s kiss — you’re not just auditing, you’re orchestrating genius.[/white]",
+            "[white]Elite move — you're not just starting an audit, you're launching a saga.[/white]",
+            "[white]Chef's kiss — you're not just auditing, you're orchestrating genius.[/white]",
             "[white]Peak taste — not just a run, a renaissance.[/white]",
         ])
     console.print(_flair)
