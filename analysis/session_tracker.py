@@ -277,6 +277,13 @@ class SessionTracker:
             self.session_data['coverage'] = self.coverage.get_stats()
             self._save()
     
+    def set_status(self, status: str):
+        """Set current session status without finalizing."""
+        with self.lock:
+            self.session_data['status'] = status
+            # Do not touch end_time here; only set on finalize
+            self._save()
+    
     def _save(self):
         """Save session data to file (call within lock)."""
         try:

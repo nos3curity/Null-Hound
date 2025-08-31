@@ -111,7 +111,7 @@ def project_hypotheses(
 @project_app.command("plan")
 def project_plan(
     project_name: str = typer.Argument(..., help="Project name"),
-    session_id: str = typer.Argument(None, help="Session ID to filter (optional)"),
+    session_id: str = typer.Argument(..., help="Session ID"),
     output_json: bool = typer.Option(False, "--json", help="Output as JSON")
 ):
     """Show planned investigations from the PlanStore."""
@@ -164,7 +164,6 @@ def agent_audit(
     plan_n: int = typer.Option(5, "--plan-n", help="Number of investigations to plan per batch (default: 5)"),
     time_limit: int = typer.Option(None, "--time-limit", help="Time limit in minutes"),
     config: str = typer.Option(None, "--config", help="Configuration file"),
-    resume: bool = typer.Option(False, "--resume", help="Resume from previous session"),
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging"),
     project: str = typer.Option(None, "--project", "-p", help="Use existing project"),
     platform: str = typer.Option(None, "--platform", help="Override scout platform (e.g., openai, anthropic, mock)"),
@@ -250,7 +249,7 @@ def agent_audit(
         'plan_n': plan_n,
         'time_limit': time_limit,
         'config': config,
-        'resume': resume,
+        
         'debug': debug,
         'platform': platform,
         'model': model,

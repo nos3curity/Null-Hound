@@ -54,12 +54,12 @@ Configure models in `config.yaml`:
 
 graph:
     platform: openai
-    model: gpt-4.1  
+    model: gpt-4.1
 
 models:
   scout:      # Junior auditor
     platform: openai
-    model: gpt-4.1
+    model: gpt-5-mini
   
   strategist: # Senior auditopr
     platform: openai
@@ -111,11 +111,8 @@ Hound inspects the codebase and creates graphs for different aspects. Each graph
 The audit phase uses the **senior/junior pattern** with planning and investigation:
 
 ```bash
-# Run a full audit with strategic planning
+# Run a full audit with strategic planning (new session)
 ./hound.py agent audit myaudit
-
-# Customize planning and investigation depth
-./hound.py agent audit myaudit --plan-n 5 --iterations 10
 
 # Use specific models
 ./hound.py agent audit myaudit \
@@ -124,6 +121,9 @@ The audit phase uses the **senior/junior pattern** with planning and investigati
 
 # Enable debug logging (captures all prompts/responses)
 ./hound.py agent audit myaudit --debug
+
+# Attach to an existing session and continue where you left off
+./hound.py agent audit myaudit --session <session_id>
 ```
 
 **What happens during an audit:**
@@ -209,7 +209,12 @@ Review findings and produce professional audit reports:
 
 ## Session Management
 
-Each audit run creates a session with comprehensive tracking:
+Each audit run operates under a session with comprehensive tracking and per-session planning:
+
+- Planning is stored in a per-session PlanStore with statuses: `planned`, `in_progress`, `done`, `dropped`, `superseded`.
+- Existing `planned` items are executed first; Strategist only tops up new items to reach your `--plan-n`.
+- On resume, any stale `in_progress` items are reset to `planned`; completed items remain `done` and are not duplicated.
+- Completed investigations, coverage, and hypotheses are fed back into planning to avoid repeats and guide prioritization.
 
 ```bash
 # View session details
@@ -219,8 +224,7 @@ Each audit run creates a session with comprehensive tracking:
 ./hound.py project sessions myaudit --list
 ./hound.py project sessions myaudit <session_id>
 
-# Show planned investigations (Strategist PlanStore)
-./hound.py project plan myaudit
+# Show planned investigations for a session (Strategist PlanStore)
 ./hound.py project plan myaudit <session_id>
 
 # Session data includes:
@@ -238,7 +242,30 @@ Sessions are stored in `~/.hound/projects/myaudit/sessions/` and contain:
 - `planning_history`: Strategic decisions made
 - `token_usage`: Detailed API usage metrics
 
-Note: The legacy `project runs` command and `agent_runs` files are deprecated and removed. Use the session commands above instead.
+Resume/attach to an existing session during an audit run by passing the session ID:
+
+```bash
+# Attach to a specific session and continue auditing under it
+./hound.py agent audit myaudit --session <session_id>
+```
+
+When you attach to a session, its status is set to `active` while the audit runs and finalized on completion (`completed` or `interrupted` if a time limit was hit). Any `in_progress` plan items are reset to `planned` so you can continue cleanly.
+
+### Simple Planning Examples
+
+```bash
+# Start an audit (creates a session automatically)
+./hound.py agent audit myaudit
+
+# List sessions to get the session id
+./hound.py project sessions myaudit --list
+
+# Show planned investigations for that session
+./hound.py project plan myaudit <session_id>
+
+# Attach later and continue planning/execution under the same session
+./hound.py agent audit myaudit --session <session_id>
+```
 
 ## Managing Hypotheses
 

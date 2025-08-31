@@ -894,13 +894,15 @@ def _list_sessions(sessions_dir: Path, output_json: bool):
             time_str = dt.strftime("%Y-%m-%d %H:%M")
         except:
             time_str = (it['start_time'] or '')[:19]
-        status = it.get('status', 'unknown')
+        status = (it.get('status', 'unknown') or '').lower()
         if status == 'completed':
-            status_style = "[green]✓ completed[/green]"
+            status_style = "[green]completed[/green]"
         elif status == 'active':
-            status_style = "[yellow]⚡ active[/yellow]"
+            status_style = "[green]active[/green]"
+        elif status == 'interrupted':
+            status_style = "[yellow]interrupted[/yellow]"
         else:
-            status_style = status
+            status_style = f"[dim]{status or 'unknown'}[/dim]"
         table.add_row(it['session_id'], time_str, status_style, str(it.get('investigations', 0)))
 
     console.print(table)
@@ -987,9 +989,9 @@ if __name__ == "__main__":
 
 @project.command(name='plan')
 @click.argument('project_name')
-@click.argument('session_id', required=False)
+@click.argument('session_id', required=True)
 @click.option('--json', 'output_json', is_flag=True, help="Output as JSON")
-def plan(project_name: str, session_id: Optional[str], output_json: bool):
+def plan(project_name: str, session_id: str, output_json: bool):
     """Show planned investigations from the PlanStore.
 
     Examples:
@@ -1009,23 +1011,20 @@ def plan(project_name: str, session_id: Optional[str], output_json: bool):
         console.print(f"[yellow]No sessions found for project '{project_name}'.[/yellow]")
         return
 
-    # Resolve session directories to inspect
+    # Resolve the specific session directory to inspect
     session_dirs: List[Path] = []
-    if session_id:
-        cand = sessions_dir / session_id
-        if cand.exists() and cand.is_dir():
-            session_dirs = [cand]
-        else:
-            # Prefix match by folder name
-            matches = [p for p in sessions_dir.glob("*/") if p.name.startswith(session_id)]
-            if matches:
-                session_dirs = [matches[0]]
-            else:
-                console.print(f"[red]Session '{session_id}' not found.[/red]")
-                console.print("[dim]Use 'hound project sessions <project> --list' to view sessions.[/dim]")
-                return
+    cand = sessions_dir / session_id
+    if cand.exists() and cand.is_dir():
+        session_dirs = [cand]
     else:
-        session_dirs = [p for p in sessions_dir.iterdir() if p.is_dir()]
+        # Prefix match by folder name
+        matches = [p for p in sessions_dir.glob("*/") if p.name.startswith(session_id)]
+        if matches:
+            session_dirs = [matches[0]]
+        else:
+            console.print(f"[red]Session '{session_id}' not found.[/red]")
+            console.print("[dim]Use 'hound project sessions <project> --list' to view sessions.[/dim]")
+            return
 
     # Collect plan items across selected sessions
     all_items: List[dict] = []

@@ -696,6 +696,7 @@ class AgentRunner:
         try:
             from analysis.plan_store import PlanStore
             from analysis.session_manager import SessionManager
+            from analysis.plan_store import PlanStatus
             # Create or find session dir
             sm = SessionManager(self.project_dir)
             if not self.session_id:
@@ -707,6 +708,15 @@ class AgentRunner:
             # Plan file in session directory
             plan_path = sinfo.path / "plan.json"
             self.plan_store = PlanStore(plan_path, agent_id=f"runner_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+            # Reset any stale in-progress items to planned (resume-friendly)
+            try:
+                inprog = self.plan_store.list(session_id=self.session_id, status=PlanStatus.IN_PROGRESS)
+                for it in inprog:
+                    fid = it.get('frame_id')
+                    if fid:
+                        self.plan_store.update_status(fid, PlanStatus.PLANNED, rationale='Resuming session: reset from in_progress')
+            except Exception:
+                pass
             # Write/update session state
             try:
                 state_path = sinfo.path / 'state.json'
@@ -905,16 +915,41 @@ class AgentRunner:
 
     def _plan_investigations(self, n: int) -> List[object]:
         """Plan next investigations using Strategist by default."""
-        # Get comprehensive graph summary with all annotations
+        from types import SimpleNamespace
+        # 1) Start with any existing PLANNED items in this session (resume-friendly)
+        prepared: List[object] = []
+        existing_frame_ids = set()
+        ps = self.plan_store
+        try:
+            from analysis.plan_store import PlanStatus
+        except Exception:
+            ps = None
+        if ps is not None and self.session_id:
+            try:
+                pending = ps.list(session_id=self.session_id, status=PlanStatus.PLANNED)
+                # Respect priority order already returned by PlanStore.list
+                for it in pending[:n]:
+                    prepared.append(SimpleNamespace(
+                        goal=it.get('question',''),
+                        focus_areas=it.get('artifact_refs',[]) or [],
+                        priority=int(it.get('priority',5)),
+                        reasoning=it.get('rationale',''),
+                        category='aspect',
+                        expected_impact='medium',
+                        frame_id=it.get('frame_id')
+                    ))
+                    if it.get('frame_id'):
+                        existing_frame_ids.add(it['frame_id'])
+            except Exception:
+                pass
+
+        if len(prepared) >= n:
+            return prepared[:n]
+
+        # 2) Ask Strategist for more to top-up to n
         graphs_summary = self._graph_summary()
-        
-        # Get hypothesis summary
         hypotheses_summary = self._get_hypotheses_summary()
-        
-        # Get investigation results summary (not just goals)
         investigation_results = self._get_investigation_results_summary()
-        
-        # Get coverage summary from session tracker
         coverage_summary = None
         if self.session_tracker:
             cov_stats = self.session_tracker.get_coverage_stats()
@@ -928,30 +963,26 @@ class AgentRunner:
                 coverage_summary += f"\nVisited nodes: {', '.join(cov_stats['visited_node_ids'][:10])}"
                 if len(cov_stats['visited_node_ids']) > 10:
                     coverage_summary += f" ... and {len(cov_stats['visited_node_ids']) - 10} more"
-        
+
         strategist = Strategist(config=self.config, debug=self.debug, session_id=self.session_id)
+        need = max(0, n - len(prepared))
         planned = strategist.plan_next(
             graphs_summary=graphs_summary,
-            completed=investigation_results,  # Now includes results, not just goals
+            completed=investigation_results,
             hypotheses_summary=hypotheses_summary,
             coverage_summary=coverage_summary,
-            n=n
-        )
-        
-        # Track planning in session
+            n=need if need > 0 else 0
+        ) if need > 0 else []
+
         if self.session_tracker and planned:
             self.session_tracker.add_planning(planned)
 
-        # Adapt dicts to the legacy display shape using SimpleNamespace
-        from types import SimpleNamespace
-        ps = self.plan_store
-        try:
-            from analysis.plan_store import PlanStatus  # noqa: F401
-        except Exception:
-            ps = None
-        items = []
+        # 3) Add new items, skipping duplicates and already-done/in-progress
         for d in planned:
+            if len(prepared) >= n:
+                break
             frame_id = None
+            skip = False
             if ps is not None:
                 try:
                     ok, fid = ps.propose(
@@ -963,26 +994,34 @@ class AgentRunner:
                         created_by='strategist'
                     )
                     frame_id = fid
-                    # Record to project-wide ledger
-                    try:
-                        from analysis.plan_ledger import PlanLedger
-                        from llm.unified_client import UnifiedLLMClient
-                        model_sig = None
+                    if not ok:
+                        # Existing frame; decide based on its status
+                        existing = ps.get(fid)
+                        status = (existing or {}).get('status', 'planned')
+                        if status in {'done', 'in_progress'}:
+                            skip = True
+                        elif status == 'planned' and fid in existing_frame_ids:
+                            skip = True
+                    if not skip:
                         try:
-                            # Build strategist model signature from config
-                            strat_cfg = (self.config or {}).get('models', {}).get('strategist')
-                            if strat_cfg:
-                                model_sig = f"{strat_cfg.get('provider','unknown')}:{strat_cfg.get('model','unknown')}"
-                        except Exception:
+                            from analysis.plan_ledger import PlanLedger
                             model_sig = None
-                        if self.project_dir:
-                            ledger = PlanLedger(self.project_dir / 'plan_ledger.json', agent_id='planner')
-                            ledger.record(self.session_id or 'unknown', d.get('goal',''), d.get('focus_areas') or [], model_sig)
-                    except Exception:
-                        pass
+                            try:
+                                strat_cfg = (self.config or {}).get('models', {}).get('strategist')
+                                if strat_cfg:
+                                    model_sig = f"{strat_cfg.get('provider','unknown')}:{strat_cfg.get('model','unknown')}"
+                            except Exception:
+                                model_sig = None
+                            if self.project_dir:
+                                ledger = PlanLedger(self.project_dir / 'plan_ledger.json', agent_id='planner')
+                                ledger.record(self.session_id or 'unknown', d.get('goal',''), d.get('focus_areas') or [], model_sig)
+                        except Exception:
+                            pass
                 except Exception:
                     frame_id = None
-            items.append(SimpleNamespace(
+            if skip:
+                continue
+            prepared.append(SimpleNamespace(
                 goal=d.get('goal', ''),
                 focus_areas=d.get('focus_areas', []),
                 priority=d.get('priority', 5),
@@ -991,7 +1030,9 @@ class AgentRunner:
                 expected_impact=d.get('expected_impact', 'medium'),
                 frame_id=frame_id
             ))
-        return items
+            if frame_id:
+                existing_frame_ids.add(frame_id)
+        return prepared
 
         class InvestigationItem(BaseModel):
             goal: str = Field(description="Investigation goal or question")
@@ -1188,6 +1229,11 @@ class AgentRunner:
         
         # Initialize session tracker
         self.session_tracker = SessionTracker(sessions_dir, self.session_id)
+        # Mark session as active when attached/started
+        try:
+            self.session_tracker.set_status('active')
+        except Exception:
+            pass
         
         # Initialize coverage tracking
         graphs_dir = project_dir / "graphs"
@@ -1682,7 +1728,6 @@ class AgentRunner:
 @click.option('--plan-n', type=int, default=5, help='Number of investigations to plan per batch (default: 5)')
 @click.option('--time-limit', type=int, help='Time limit in minutes')
 @click.option('--config', type=click.Path(exists=True), help='Configuration file')
-@click.option('--resume', is_flag=True, help='Resume from previous session')
 @click.option('--debug', is_flag=True, help='Enable debug logging of prompts and responses')
 @click.option('--platform', default=None, help='Override scout platform (e.g., openai, anthropic, mock)')
 @click.option('--model', default=None, help='Override scout model (e.g., gpt-5, gpt-4o-mini, mock)')
@@ -1692,14 +1737,10 @@ class AgentRunner:
 @click.option('--new-session', is_flag=True, help='Create a new session')
 @click.option('--session-private-hypotheses', is_flag=True, help='Keep new hypotheses private to this session')
 def agent(project_id: str, iterations: Optional[int], plan_n: int, time_limit: Optional[int], 
-          config: Optional[str], resume: bool, debug: bool, platform: Optional[str], model: Optional[str],
+          config: Optional[str], debug: bool, platform: Optional[str], model: Optional[str],
           strategist_platform: Optional[str], strategist_model: Optional[str],
           session: Optional[str], new_session: bool, session_private_hypotheses: bool):
     """Run autonomous security analysis agent."""
-    
-    if resume:
-        console.print("[yellow]Resume functionality not yet implemented[/yellow]")
-        return
     
     config_path = Path(config) if config else None
     
