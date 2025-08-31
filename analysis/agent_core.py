@@ -921,6 +921,11 @@ It can ONLY analyze the context you prepare - if you don't load it, it can't ana
 
 Your task is to investigate the system and identify potential vulnerabilities. The system architecture graph is automatically loaded and visible. You can see all available graphs and which are loaded.
 
+OPERATING CONSTRAINTS (IMPORTANT):
+- Hound cannot run code, connect to RPC, fork a chain, deploy contracts, or query on-chain state.
+- Do NOT propose or assume live on-chain probing (e.g., calling initialize on proxies, running fork-based tests, deploying mocks).
+- All actions here are CODE-ONLY: loading/reading nodes, updating observations, and calling deep_think for analysis. Keep guidance and reasoning aligned with this constraint.
+
 CRITICAL RULES FOR NODE AND GRAPH NAMES:
 - ALWAYS use EXACT node IDs as shown in the graphs (in square brackets like [node_id])
 - NEVER guess, modify, or create node names
