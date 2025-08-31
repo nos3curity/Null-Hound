@@ -1433,6 +1433,7 @@ class AgentRunner:
                 if reasoning:
                     console.print(f"     [dim]Reasoning: {reasoning}[/dim]")
             
+            executed_frames = set()
             # Execute investigations with proper logging
             for idx, inv in enumerate(items):
                 # Check time limit before starting each investigation
@@ -1445,6 +1446,20 @@ class AgentRunner:
                     if remaining_minutes < 2:
                         console.print(f"\n[yellow]Warning: Only {remaining_minutes:.1f} minutes remaining[/yellow]")
                 
+                # Skip duplicate frame_ids within the same run to avoid loops
+                try:
+                    if getattr(inv, 'frame_id', None) and inv.frame_id in executed_frames:
+                        console.print(f"[yellow]Skipping duplicate investigation frame:[/yellow] {inv.frame_id} ({inv.goal})")
+                        try:
+                            if self.plan_store:
+                                from analysis.plan_store import PlanStatus
+                                self.plan_store.update_status(inv.frame_id, PlanStatus.DROPPED, rationale='Skipped duplicate within run')
+                        except Exception:
+                            pass
+                        continue
+                except Exception:
+                    pass
+
                 # Log current investigation with updated coverage
                 console.print(f"\n[bold magenta]═══ Starting Investigation {idx+1}/{len(items)} ═══[/bold magenta]")
                 console.print(f"[bold]Goal:[/bold] {inv.goal}")
@@ -1462,6 +1477,7 @@ class AgentRunner:
                 max_iters = self.agent.max_iterations if self.agent.max_iterations else 5
 
                 self.start_time = time.time()
+                started_at_iso = datetime.now().isoformat()
                 try:
                     # Enhanced progress callback that logs model actions and thoughts
                     def _cb(info: dict):
@@ -1624,11 +1640,21 @@ class AgentRunner:
                     results.append((inv, report))
                     # Track completed investigation
                     self.completed_investigations.append(inv.goal)
+                    try:
+                        if getattr(inv, 'frame_id', None):
+                            executed_frames.add(inv.frame_id)
+                    except Exception:
+                        pass
                     # Update session tracker with investigation and token usage
                     self.session_tracker.add_investigation({
                         'goal': inv.goal,
                         'priority': getattr(inv, 'priority', 0),
                         'category': getattr(inv, 'category', None),
+                        'frame_id': getattr(inv, 'frame_id', None),
+                        'planned_batch': planned_round,
+                        'planned_index': idx + 1,
+                        'started_at': started_at_iso,
+                        'ended_at': datetime.now().isoformat(),
                         'iterations_completed': report.get('iterations_completed', 0) if report else 0,
                         'hypotheses': report.get('hypotheses', {}) if report else {}
                     })
@@ -1672,6 +1698,29 @@ class AgentRunner:
             except Exception:
                 console.print(f"\n[bold]Iterations:[/bold] {last_report.get('iterations_completed', 0)}")
                 console.print(f"[bold]Hypotheses:[/bold] {last_report.get('hypotheses', {})}")
+
+        # Plan execution summary (exact steps)
+        try:
+            from rich.table import Table as _Tbl
+            exec_table = _Tbl(show_header=True, header_style="bold cyan")
+            exec_table.add_column("#", style="dim", width=4)
+            exec_table.add_column("Frame", style="yellow")
+            exec_table.add_column("Goal", style="white")
+            exec_table.add_column("Batch", style="magenta", width=7)
+            exec_table.add_column("Pos", style="magenta", width=4)
+            exec_table.add_column("Iters", justify="right", width=6)
+            exec_table.add_column("Hyps", justify="right", width=5)
+            rown = 0
+            for (inv, rep) in results:
+                rown += 1
+                fid = getattr(inv, 'frame_id', '') or ''
+                iters = (rep or {}).get('iterations_completed', 0)
+                hyps = (rep or {}).get('hypotheses', {}).get('total', 0)
+                exec_table.add_row(str(rown), str(fid), getattr(inv, 'goal',''), str(planned_round), str(rown), str(iters), str(hyps))
+            console.print("\n[bold cyan]Plan Execution Summary[/bold cyan]")
+            console.print(exec_table)
+        except Exception:
+            pass
 
         # Finalize session tracker with final token usage
         self.session_tracker.update_token_usage(token_tracker.get_summary())

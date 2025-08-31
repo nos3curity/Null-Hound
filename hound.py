@@ -88,6 +88,12 @@ def project_coverage(name: str = typer.Argument(..., help="Project name")):
     console.print(f"Nodes: {stats['nodes']['visited']} / {stats['nodes']['total']} ({stats['nodes']['percent']}%)")
     console.print(f"Cards: {stats['cards']['visited']} / {stats['cards']['total']} ({stats['cards']['percent']}%)")
 
+@project_app.command("path")
+def project_path_cmd(name: str = typer.Argument(..., help="Project name")):
+    """Print the filesystem path for a project."""
+    from commands.project import path as _path
+    _invoke_click(_path, {'name': name})
+
 @project_app.command("delete")
 def project_delete(
     name: str = typer.Argument(..., help="Project name"),
