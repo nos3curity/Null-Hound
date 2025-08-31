@@ -18,7 +18,7 @@
 
 ## Overview
 
-Hound is a security audit automation pipeline for AI-assisted code review that mirrors how expert auditors think, learn, and collaborate. Read the [blog post](https://muellerberndt.medium.com/unleashing-the-hound-how-ai-agents-find-deep-logic-bugs-in-any-codebase-64c2110e3a6f) to learn more.
+Hound is a security audit automation pipeline for AI-assisted code review that mirrors how expert auditors think, learn, and collaborate. 
 
 ### How It Works
 
@@ -33,6 +33,12 @@ Hound's cognitive architecture mirrors how expert auditors think:
 The system employs a **senior/junior agent pattern**: a Strategist (senior) reviews graphs to identify contradictions and plan investigations, while a Scout (junior) executes targeted code analysis. This mirrors real audit teams where seniors direct while juniors investigate.
 
 Each audit creates a **session** that tracks coverage, findings, and token usage. Knowledge accumulates across sessions, building deeper understanding over time.
+
+### Links
+
+- [Original blog post](https://muellerberndt.medium.com/unleashing-the-hound-how-ai-agents-find-deep-logic-bugs-in-any-codebase-64c2110e3a6f)
+- [Hound benchmarking pipeline](https://github.com/muellerberndt/hound-empirical-development)
+- [Smart contract audit benchmarks datasets and tooling](https://github.com/muellerberndt/scabench)
 
 ## Installation
 
@@ -328,6 +334,8 @@ Monitor audit progress and completeness:
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+
+If you have a good idea for improving the analysis, please fork this repository and run comparative benchmarks in the [test environment](https://github.com/muellerberndt/hound-empirical-development).
 
 ## License
 
