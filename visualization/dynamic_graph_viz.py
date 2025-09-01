@@ -857,7 +857,7 @@ def generate_dynamic_visualization(
                 html += '<div class="legend-section">';
                 html += '<div class="legend-section-title">Node Types</div>';
                 Array.from(nodeTypes).sort().forEach(type => {{
-                    const color = typeColors[type] || typeColors['custom'];
+                    const color = typeColors[type?.toLowerCase()] || typeColors['custom'];
                     html += `<div class="legend-item">
                         <div class="legend-color" style="background: ${{color}};"></div>
                         <span>${{type}}</span>
