@@ -38,65 +38,29 @@ def build_custom_graph(
     # Load config using the same function as graph build
     config = load_config(config_path)
     
-    # First, load some code samples to understand the codebase
+    # Load cards and manifest using GraphBuilder's method
     manifest_dir = project_path / "manifest"
-    if not manifest_dir.exists():
-        raise ValueError(f"No manifest found at {manifest_dir}. Run 'graph build' first.")
+    cards, manifest = GraphBuilder.load_cards_from_manifest(manifest_dir)
     
-    import json as json_lib
-    with open(manifest_dir / "manifest.json") as f:
-        manifest = json_lib.load(f)
-    
-    repo_root = None
-    repo_path = manifest.get('repo_path')
-    if repo_path:
-        repo_root = Path(repo_path)
-    
-    from analysis.cards import extract_card_content
-    
-    cards = []
-    with open(manifest_dir / "cards.jsonl") as f:
-        for line in f:
-            card = json_lib.loads(line)
-            if not card.get('content') and repo_root:
-                card['content'] = extract_card_content(card, repo_root)
-            cards.append(card)
-    
-    total_size = sum(
-        len(card.get("content", "")) if card.get("content") else
-        (len(card.get("peek_head", "")) + len(card.get("peek_tail", "")))
-        for card in cards
-    )
-    
-    # Use same adaptive sampling logic as main builder
-    original_count = len(cards)
+    # Create builder and use its methods for sampling and context preparation
     builder = GraphBuilder(config, debug=False)
-    cards = builder._sample_cards(cards, target_size_mb=2.0)
     
-    sampled_size = sum(
-        len(card.get("content", "")) if card.get("content") else
-        (len(card.get("peek_head", "")) + len(card.get("peek_tail", "")))
-        for card in cards
-    )
+    # Sample cards using the builder's method
+    sampled_cards, original_count, sampled_count = builder.sample_cards_for_prompt(cards)
     
-    if len(cards) == original_count:  # If no sampling occurred
-        console.print(f"[dim]Using all {len(cards)} cards ({sampled_size:,} chars) for schema design[/dim]")
+    if sampled_count == original_count:
+        console.print(f"[dim]Using all {sampled_count} cards for schema design[/dim]")
     else:
-        console.print(f"[dim]Sampled {len(cards)} from {original_count} cards ({sampled_size:,} chars) for schema design[/dim]")
+        console.print(f"[dim]Sampled {sampled_count} from {original_count} cards for schema design[/dim]")
+    
+    # Prepare code context using builder's method
+    code_context = builder.prepare_code_context(sampled_cards)
     
     # Design the graph specification using agent model WITH CODE CONTEXT
     llm_agent = LLMClient(config, profile='agent')
     
     system_prompt = """Design a graph specification for the user's request BASED ON THE ACTUAL CODE.
     Analyze the code samples to understand what this codebase does, then design a graph that makes sense for THIS specific system."""
-    
-    code_context = []
-    for card in cards:
-        code_context.append({
-            "file": card.get("relpath", "unknown"),
-            "type": card.get("type", "unknown"),
-            "content": card.get("content", "")
-        })
     
     user_prompt = f"""
     User wants a graph for: {description}
@@ -106,7 +70,7 @@ def build_custom_graph(
     Files: {manifest.get('num_files', 0)}
     
     Code samples from the repository:
-    {json_lib.dumps(code_context, indent=2)}
+    {json.dumps(code_context, indent=2)}
     
     Based on THIS SPECIFIC CODE, create a specification that defines:
     1. A meaningful, descriptive name for this graph (e.g., "MonetaryFlows", "AuthorizationModel", "DataPipeline")
@@ -161,14 +125,12 @@ def build_custom_graph(
         )
     
     # Now use the main graph builder with this forced specification
-    manifest_dir = project_path / "manifest"
+    # manifest_dir already loaded above
     graphs_dir = project_path / "graphs"
     
-    if not manifest_dir.exists():
-        raise ValueError(f"No manifest found at {manifest_dir}. Run 'graph build' first.")
-    
-    # Create the graph builder
-    builder = GraphBuilder(config, debug=debug)
+    # builder already created above, but recreate with debug flag if needed
+    if debug and not builder.debug:
+        builder = GraphBuilder(config, debug=debug)
     
     # Build with forced graph specification that includes the full user description
     # Make sure the graph name doesn't get truncated

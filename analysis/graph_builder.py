@@ -750,6 +750,65 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
         return nodes_added, edges_added
     
     
+    @staticmethod
+    def load_cards_from_manifest(manifest_dir: Path) -> tuple[List[Dict], Dict]:
+        """
+        Load cards and manifest from a project's manifest directory.
+        Returns: (cards, manifest)
+        """
+        import json
+        
+        if not manifest_dir.exists():
+            raise ValueError(f"No manifest found at {manifest_dir}")
+        
+        # Load manifest
+        with open(manifest_dir / "manifest.json") as f:
+            manifest = json.load(f)
+        
+        # Load cards
+        cards = []
+        repo_root = None
+        repo_path = manifest.get('repo_path')
+        if repo_path:
+            repo_root = Path(repo_path)
+        
+        from analysis.cards import extract_card_content
+        
+        with open(manifest_dir / "cards.jsonl") as f:
+            for line in f:
+                card = json.loads(line)
+                if not card.get('content') and repo_root:
+                    card['content'] = extract_card_content(card, repo_root)
+                cards.append(card)
+        
+        return cards, manifest
+    
+    def prepare_code_context(self, cards: List[Dict]) -> List[Dict]:
+        """
+        Prepare code context from cards for LLM prompts.
+        Filters out redundant fields and returns clean context.
+        """
+        code_context = []
+        for card in cards:
+            context_item = {
+                "file": card.get("relpath", "unknown"),
+                "content": card.get("content", "")
+            }
+            # Only include type if it exists
+            if card.get("type"):
+                context_item["type"] = card["type"]
+            code_context.append(context_item)
+        return code_context
+    
+    def sample_cards_for_prompt(self, cards: List[Dict]) -> tuple[List[Dict], int, int]:
+        """
+        Sample cards for LLM prompt, returning sampled cards and counts.
+        Returns: (sampled_cards, original_count, sampled_count)
+        """
+        original_count = len(cards)
+        sampled_cards = self._sample_cards(cards)
+        return sampled_cards, original_count, len(sampled_cards)
+    
     def _sample_cards(
         self,
         cards: List[Dict],
@@ -757,15 +816,15 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
     ) -> List[Dict]:
         """Adaptive sampling based on token count to stay within context limits"""
         
-        # Get max tokens from config (default to 300k)
-        max_context_tokens = self.config.get("context", {}).get("max_tokens", 300000)
+        # Get max tokens from config (default to 256k)
+        max_context_tokens = self.config.get("context", {}).get("max_tokens", 256000)
         
-        # Reserve tokens for system prompt and response (roughly 50k)
-        reserved_tokens = 50000
+        # Reserve tokens for system prompt and response (30k should be enough)
+        reserved_tokens = 30000
         available_tokens = max_context_tokens - reserved_tokens
         
-        # Target to use 60% of available tokens for safety
-        target_tokens = int(available_tokens * 0.6)
+        # Target to use 80% of available tokens (more aggressive usage)
+        target_tokens = int(available_tokens * 0.8)
         
         # Estimate tokens for all cards (only content and path, no peek fields)
         total_tokens = 0
