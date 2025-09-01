@@ -323,8 +323,15 @@ class GraphBuilder:
                 print(f"  Iteration {i+1}/{max_iterations}")
             self._emit("building", f"Building graphs: iteration {i+1}/{max_iterations}")
             
-            # Build/refine graphs (no early stopping)
-            self._build_iteration(cards)
+            # Build/refine graphs with early stopping if complete
+            had_updates = self._build_iteration(cards)
+            
+            # Early exit if no graphs were updated (all complete)
+            if not had_updates and i > 0:  # Allow at least 2 iterations
+                self._emit("early_exit", f"All graphs complete after {i+1} iterations")
+                if self.debug:
+                    print(f"  Early exit: All graphs complete after {i+1} iterations")
+                break
         
         # Phase 3: Save results
         self._emit("phase", "Saving Results")
@@ -443,11 +450,13 @@ The FIRST must be the system/component/flow overview."""
         if discovery.suggested_edge_types:
             self._emit("note", f"Custom edge types: {', '.join(discovery.suggested_edge_types)}")
     
-    def _build_iteration(self, cards: List[Dict]):
+    def _build_iteration(self, cards: List[Dict]) -> bool:
         """
         Single iteration to build/refine graphs.
-        Continues through all iterations without early stopping.
+        Returns True if any graph was updated, False if all graphs are complete.
         """
+        
+        any_updates = False
         
         # Always try to use ALL cards for maximum context
         # The model needs to see the entire codebase to make good decisions
@@ -470,11 +479,14 @@ The FIRST must be the system/component/flow overview."""
                 new_orphan_count = len(self._get_orphaned_nodes(graph))
                 if nodes_added > 0 or edges_added > 0:
                     self._emit("update", f"Added: {nodes_added} nodes, {edges_added} edges (orphans {orphan_count}->{new_orphan_count})")
+                    any_updates = True
                 else:
                     self._emit("update", f"No new nodes/edges added (duplicates filtered, orphans: {new_orphan_count})")
                     # If no new nodes or edges were added, the graph might be complete
                     if self.iteration > 0:  # Only after first iteration
                         self._emit("complete", f"Graph '{graph_name}' appears complete (no new nodes/edges found)")
+        
+        return any_updates
     
     def _get_orphaned_nodes(self, graph: KnowledgeGraph) -> set:
         """Find nodes with no edges (neither incoming nor outgoing)"""
