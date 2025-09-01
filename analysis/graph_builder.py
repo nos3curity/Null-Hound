@@ -13,6 +13,7 @@ import time
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from llm.client import LLMClient
+from llm.tokenization import count_tokens
 from pydantic import BaseModel, Field
 
 
@@ -372,7 +373,8 @@ class GraphBuilder:
         # Use adaptive sampling based on content size, not count
         self._emit("discover", "Analyzing codebase for graph discovery...")
         # Auto-sample based on content size to stay within context limits
-        code_samples = self._sample_cards(cards, target_size_mb=4.0)  # Increased for comprehensive discovery
+        # Reduced from 4.0 to 1.5 MB to avoid exceeding context limits
+        code_samples = self._sample_cards(cards, target_size_mb=1.5)
         
         # Allow forcing specific graph type through focus_areas (backward compatibility)
         if focus_areas and "call_graph" in focus_areas:
@@ -416,10 +418,24 @@ The FIRST must be the system/component/flow overview."""
             "instruction": "Determine what knowledge graphs to build and what custom types are needed"
         }
         
+        # Estimate token counts for the request
+        user_prompt_str = json.dumps(user_prompt, indent=2)
+        system_tokens = count_tokens(system_prompt, "openai", self.config.get("llm_agent_model", "gpt-5-mini"))
+        user_tokens = count_tokens(user_prompt_str, "openai", self.config.get("llm_agent_model", "gpt-5-mini"))
+        total_tokens = system_tokens + user_tokens
+        
+        # Log token counts
+        self._emit("debug", f"Initial graph design prompt tokens: system={system_tokens:,}, user={user_tokens:,}, total={total_tokens:,}")
+        
+        # Check if we're approaching context limit
+        max_context = 400000  # 400k context for GPT-5 models
+        if total_tokens > max_context * 0.9:
+            self._emit("warning", f"Token count ({total_tokens:,}) approaching context limit ({max_context:,})")
+        
         # Use agent model for discovery (better reasoning)
         discovery = self.llm_agent.parse(
             system=system_prompt,
-            user=json.dumps(user_prompt, indent=2),
+            user=user_prompt_str,
             schema=GraphDiscovery
         )
         
@@ -471,7 +487,7 @@ The FIRST must be the system/component/flow overview."""
             self._emit("graph_build", f"{graph_name}: {len(graph.nodes)}N/{len(graph.edges)}E, {orphan_count} orphans")
             
             # Try to use ALL cards if possible, increase limit for comprehensive modeling
-            relevant_cards = self._sample_cards(cards, target_size_mb=4.0)  # Increased from 2.0 for better coverage
+            relevant_cards = self._sample_cards(cards, target_size_mb=1.5)  # Balanced to avoid context limit issues
             if len(relevant_cards) != len(cards):
                 self._emit("sample", f"WARNING: Sampled {len(relevant_cards)} cards from {len(cards)} total due to context limits - graph may be incomplete")
             
@@ -507,13 +523,22 @@ The FIRST must be the system/component/flow overview."""
     def _update_graph(self, graph: KnowledgeGraph, cards: List[Dict]) -> Optional[GraphUpdate]:
         """Update graph with new nodes and edges based on current state"""
         
-        # Store cards for later retrieval
+        # Store cards for later retrieval - filter out redundant peek fields
         cards_with_ids = []
         for card in cards:
             card_id = card.get("id", f"card_{len(self.card_store)}_{len(cards_with_ids)}")
             self.card_store[card_id] = card
-            card_with_id = dict(card)
-            card_with_id["id"] = card_id
+            # Create a filtered version without peek_head/peek_tail for the prompt
+            card_with_id = {
+                "id": card_id,
+                "relpath": card.get("relpath", ""),
+                "content": card.get("content", "")
+            }
+            # Only include other fields if they exist and are meaningful
+            if card.get("type"):
+                card_with_id["type"] = card["type"]
+            if card.get("description"):
+                card_with_id["description"] = card["description"]
             cards_with_ids.append(card_with_id)
         
         # Adaptive prompting based on graph state
@@ -728,36 +753,49 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
     def _sample_cards(
         self,
         cards: List[Dict],
-        target_size_mb: float = 4.0  # Increased default for comprehensive modeling
+        target_size_mb: float = 1.5  # Not used anymore, kept for compatibility
     ) -> List[Dict]:
-        """Adaptive sampling based on content size"""
+        """Adaptive sampling based on token count to stay within context limits"""
         
-        total_size = sum(
-            len(card.get("content", "")) if card.get("content") else
-            (len(card.get("peek_head", "")) + len(card.get("peek_tail", "")))
-            for card in cards
-        )
+        # Get max tokens from config (default to 300k)
+        max_context_tokens = self.config.get("context", {}).get("max_tokens", 300000)
         
-        # Convert MB to bytes
-        size_threshold = int(target_size_mb * 1_000_000)
+        # Reserve tokens for system prompt and response (roughly 50k)
+        reserved_tokens = 50000
+        available_tokens = max_context_tokens - reserved_tokens
+        
+        # Target to use 60% of available tokens for safety
+        target_tokens = int(available_tokens * 0.6)
+        
+        # Estimate tokens for all cards (only content and path, no peek fields)
+        total_tokens = 0
+        card_tokens = []
+        model = self.config.get("llm_agent_model", "gpt-5-mini")
+        
+        for card in cards:
+            # Only count the fields we'll actually send
+            card_text = f"{card.get('relpath', '')}\n{card.get('content', '')}"
+            tokens = count_tokens(card_text, "openai", model)
+            card_tokens.append(tokens)
+            total_tokens += tokens
         
         # If under threshold, use all cards
-        if total_size <= size_threshold:
+        if total_tokens <= target_tokens:
             if self.debug:
-                print(f"      Using ALL {len(cards)} cards (total size: {total_size:,} chars < {size_threshold:,} threshold)")
+                print(f"      Using ALL {len(cards)} cards (total tokens: {total_tokens:,} < {target_tokens:,} target)")
             return cards
         
-        # Calculate proportional sample size to stay under threshold
-        ratio = size_threshold / total_size
+        # Calculate proportional sample size to stay under token limit
+        ratio = target_tokens / total_tokens
         sample_size = max(1, int(len(cards) * ratio))
         
         if self.debug:
-            print(f"      WARNING: Large codebase - sampling {sample_size} cards from {len(cards)} total (size: {total_size:,} chars > {size_threshold:,} threshold, ratio: {ratio:.3f})")
+            print(f"      WARNING: Large codebase - sampling {sample_size} cards from {len(cards)} total (tokens: {total_tokens:,} > {target_tokens:,} target, ratio: {ratio:.3f})")
         
         # Use original file diversity sampling logic
         import random
         
-        # Try to sample from different files if possible
+        # Sample cards ensuring file diversity - no hardcoded priorities
         files_to_cards = {}
         for card in cards:
             file_path = card.get("relpath", "unknown")
@@ -765,17 +803,25 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
                 files_to_cards[file_path] = []
             files_to_cards[file_path].append(card)
         
-        # Sample cards ensuring file diversity
+        # Sample cards ensuring we get representation from many files
         sampled = []
         files = list(files_to_cards.keys())
-        random.shuffle(files)
+        random.shuffle(files)  # Random order to avoid bias
+        
+        # Calculate cards per file to maximize coverage
+        if len(files) > 0:
+            cards_per_file = max(1, sample_size // len(files))
+            # But cap at 2-3 cards per file to ensure diversity
+            cards_per_file = min(cards_per_file, 3)
+        else:
+            cards_per_file = sample_size
         
         for file_path in files:
             if len(sampled) >= sample_size:
                 break
-            # Take 1-2 cards from each file
             file_cards = files_to_cards[file_path]
-            num_from_file = min(2, len(file_cards), sample_size - len(sampled))
+            # Take up to cards_per_file from each file
+            num_from_file = min(cards_per_file, len(file_cards), sample_size - len(sampled))
             sampled.extend(random.sample(file_cards, num_from_file))
         
         # Fill up with random cards if needed
@@ -784,32 +830,33 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
             additional = min(sample_size - len(sampled), len(remaining))
             sampled.extend(random.sample(remaining, additional))
         
-        # Verify we're under the size threshold, trim if needed
-        sampled_size = sum(
-            len(card.get("content", "")) + 
-            len(card.get("peek_head", "")) + 
-            len(card.get("peek_tail", ""))
-            for card in sampled
-        )
+        # Verify we're under the token threshold, trim if needed
+        sampled_tokens = 0
+        for card in sampled:
+            card_text = f"{card.get('relpath', '')}\n{card.get('content', '')}"
+            sampled_tokens += count_tokens(card_text, "openai", model)
         
         # If still over threshold, remove cards until we fit
-        while sampled_size > size_threshold and len(sampled) > 1:
+        while sampled_tokens > target_tokens and len(sampled) > 1:
             # Remove the smallest card
             smallest_idx = 0
-            smallest_size = len(sampled[0].get("content", ""))
+            smallest_tokens = count_tokens(
+                f"{sampled[0].get('relpath', '')}\n{sampled[0].get('content', '')}", 
+                "openai", model
+            )
             for i, card in enumerate(sampled[1:], 1):
-                card_size = len(card.get("content", ""))
-                if card_size < smallest_size:
-                    smallest_size = card_size
+                card_text = f"{card.get('relpath', '')}\n{card.get('content', '')}"
+                card_tokens = count_tokens(card_text, "openai", model)
+                if card_tokens < smallest_tokens:
+                    smallest_tokens = card_tokens
                     smallest_idx = i
             
             removed_card = sampled.pop(smallest_idx)
-            sampled_size -= (len(removed_card.get("content", "")) + 
-                           len(removed_card.get("peek_head", "")) + 
-                           len(removed_card.get("peek_tail", "")))
+            removed_text = f"{removed_card.get('relpath', '')}\n{removed_card.get('content', '')}"
+            sampled_tokens -= count_tokens(removed_text, "openai", model)
         
         if self.debug:
-            print(f"      Sampled {len(sampled)} cards from {len(set(c.get('relpath', 'unknown') for c in sampled))} files (final size: {sampled_size:,} chars)")
+            print(f"      Sampled {len(sampled)} cards from {len(set(c.get('relpath', 'unknown') for c in sampled))} files (final tokens: {sampled_tokens:,})")
         
         return sampled
     
