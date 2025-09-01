@@ -626,8 +626,8 @@ def generate_dynamic_visualization(
                     const confidence = d.confidence || 1;
                     return 10 + confidence * 8;
                 }})
-                .attr("fill", d => typeColors[d.type] || typeColors['custom'])
-                .attr("stroke", d => typeColors[d.type] || typeColors['custom'])
+                .attr("fill", d => typeColors[d.type?.toLowerCase()] || typeColors['custom'])
+                .attr("stroke", d => typeColors[d.type?.toLowerCase()] || typeColors['custom'])
                 .attr("fill-opacity", 0.8);
             
             // Node label
@@ -891,7 +891,7 @@ def generate_dynamic_visualization(
         }}
         
         function showNodeDetails(node) {{
-            const nodeColor = typeColors[node.type] || typeColors['custom'];
+            const nodeColor = typeColors[node.type?.toLowerCase()] || typeColors['custom'];
             let html = `<h4 style="margin: 0 0 10px 0; color: ${{nodeColor}};">${{node.label}}</h4>`;
             html += `<div style="color: #8b949e;"><strong>Type:</strong> <span style="color: ${{nodeColor}};">${{node.type}}</span></div>`;
             html += `<div style="color: #8b949e;"><strong>ID:</strong> <span style="color: #7d8590; font-family: 'JetBrains Mono', monospace; font-size: 11px;">${{node.id}}</span></div>`;
