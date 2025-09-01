@@ -218,6 +218,9 @@ class GraphBuilder:
         self.iteration = 0
         # External progress sink
         self._progress_callback = None
+        
+        # Repository root for extracting full content
+        self._repo_root: Optional[Path] = None
 
     def _emit(self, status: str, message: str, **kwargs):
         """Emit progress events to callback and optionally print when debug."""
@@ -260,14 +263,14 @@ class GraphBuilder:
         start_time = time.time()
         self._progress_callback = progress_callback
         
-        # Load code cards (minimal preprocessing)
+        # Load code cards with full content
         manifest, cards = self._load_manifest(manifest_dir)
         
         # Calculate statistics
-        total_chars = sum(len(card.get("content", "")) + 
-                         len(card.get("peek_head", "")) + 
-                         len(card.get("peek_tail", "")) 
-                         for card in cards)
+        total_chars = sum(
+            len(card.get("content", "")) if card.get("content") else
+            (len(card.get("peek_head", "")) + len(card.get("peek_tail", "")))
+            for card in cards)
         # Estimate lines from peek content
         total_lines = sum(
             card.get("peek_head", "").count('\n') + 
@@ -638,13 +641,11 @@ Return empty lists only if graph is fully connected."""
         cards: List[Dict],
         target_size_mb: float = 2.0
     ) -> List[Dict]:
-        """Adaptive sampling based on content size instead of count"""
+        """Adaptive sampling based on content size"""
         
-        # Calculate total size of cards
         total_size = sum(
-            len(card.get("content", "")) + 
-            len(card.get("peek_head", "")) + 
-            len(card.get("peek_tail", ""))
+            len(card.get("content", "")) if card.get("content") else
+            (len(card.get("peek_head", "")) + len(card.get("peek_tail", "")))
             for card in cards
         )
         
@@ -724,15 +725,24 @@ Return empty lists only if graph is fully connected."""
         return sampled
     
     def _load_manifest(self, manifest_dir: Path) -> tuple:
-        """Load manifest and cards"""
+        """Load manifest and cards with full content extraction"""
         
         with open(manifest_dir / "manifest.json") as f:
             manifest = json.load(f)
         
+        repo_path = manifest.get('repo_path')
+        if repo_path:
+            self._repo_root = Path(repo_path)
+        
+        from .cards import extract_card_content
+        
         cards = []
         with open(manifest_dir / "cards.jsonl") as f:
             for line in f:
-                cards.append(json.loads(line))
+                card = json.loads(line)
+                if not card.get('content') and self._repo_root:
+                    card['content'] = extract_card_content(card, self._repo_root)
+                cards.append(card)
         
         return manifest, cards
     

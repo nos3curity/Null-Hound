@@ -43,21 +43,28 @@ def build_custom_graph(
     if not manifest_dir.exists():
         raise ValueError(f"No manifest found at {manifest_dir}. Run 'graph build' first.")
     
-    # Load manifest and ALL cards to understand the codebase
     import json as json_lib
     with open(manifest_dir / "manifest.json") as f:
         manifest = json_lib.load(f)
     
+    repo_root = None
+    repo_path = manifest.get('repo_path')
+    if repo_path:
+        repo_root = Path(repo_path)
+    
+    from analysis.cards import extract_card_content
+    
     cards = []
     with open(manifest_dir / "cards.jsonl") as f:
         for line in f:
-            cards.append(json_lib.loads(line))
+            card = json_lib.loads(line)
+            if not card.get('content') and repo_root:
+                card['content'] = extract_card_content(card, repo_root)
+            cards.append(card)
     
-    # Calculate total size
     total_size = sum(
-        len(card.get("content", "")) + 
-        len(card.get("peek_head", "")) + 
-        len(card.get("peek_tail", ""))
+        len(card.get("content", "")) if card.get("content") else
+        (len(card.get("peek_head", "")) + len(card.get("peek_tail", "")))
         for card in cards
     )
     
@@ -67,9 +74,8 @@ def build_custom_graph(
     cards = builder._sample_cards(cards, target_size_mb=2.0)
     
     sampled_size = sum(
-        len(card.get("content", "")) + 
-        len(card.get("peek_head", "")) + 
-        len(card.get("peek_tail", ""))
+        len(card.get("content", "")) if card.get("content") else
+        (len(card.get("peek_head", "")) + len(card.get("peek_tail", "")))
         for card in cards
     )
     
@@ -84,13 +90,12 @@ def build_custom_graph(
     system_prompt = """Design a graph specification for the user's request BASED ON THE ACTUAL CODE.
     Analyze the code samples to understand what this codebase does, then design a graph that makes sense for THIS specific system."""
     
-    # Prepare code context
     code_context = []
     for card in cards:
         code_context.append({
             "file": card.get("relpath", "unknown"),
             "type": card.get("type", "unknown"),
-            "content": card.get("content", "")  # Use full content like main builder
+            "content": card.get("content", "")
         })
     
     user_prompt = f"""
