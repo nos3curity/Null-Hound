@@ -21,6 +21,7 @@ from rich import box
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from analysis.graph_builder import GraphBuilder
+from analysis.debug_logger import DebugLogger
 from llm.token_tracker import get_token_tracker
 import random
 from ingest.manifest import RepositoryManifest
@@ -90,6 +91,11 @@ def build(
         "[white]Normal mapping guides; YOUR mapping makes pathways beg to be used.[/white]",
     ]))
     
+    # Create debug logger if needed
+    debug_logger = None
+    if debug:
+        debug_logger = DebugLogger(session_id=f"graph_{repo_name}_{int(time.time())}")
+    
     try:
         files_to_include = [f.strip() for f in file_filter.split(",")] if file_filter else None
         if files_to_include and debug:
@@ -151,7 +157,7 @@ def build(
             if focus_list:
                 log_line('build', f"Focus areas: {', '.join(focus_list)}")
 
-            builder = GraphBuilder(config, debug=debug)
+            builder = GraphBuilder(config, debug=debug, debug_logger=debug_logger)
 
             # Narrative model names
             models = (config or {}).get('models', {})
@@ -314,6 +320,11 @@ def build(
                 console.print(f"\n[bold]Open in browser:[/bold] [link]file://{html_path.resolve()}[/link]")
                 console.print(f"\n[dim]Tip: Use 'hound graph export {repo_name} --open' to regenerate and open visualization[/dim]")
     
+        # Finalize debug log if enabled
+        if debug and debug_logger:
+            log_path = debug_logger.finalize()
+            console.print(f"\n[cyan]Debug log saved:[/cyan] {log_path}")
+        
         console.print(Panel.fit(
             "[green]✓[/green] Graph building complete!",
             box=box.ROUNDED,
@@ -322,6 +333,10 @@ def build(
     
     except Exception as e:
         console.print(f"[red]Error during graph building: {e}[/red]")
+        # Finalize debug log on error
+        if debug and debug_logger:
+            log_path = debug_logger.finalize()
+            console.print(f"\n[cyan]Debug log saved:[/cyan] {log_path}")
         raise
 
 

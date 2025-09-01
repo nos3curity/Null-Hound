@@ -63,11 +63,38 @@ class KnowledgeGraph:
     edges: Dict[str, DynamicEdge] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
     
-    def add_node(self, node: DynamicNode):
+    def add_node(self, node: DynamicNode) -> bool:
+        """Add a node. Returns True if node was actually added (not duplicate)."""
+        if node.id in self.nodes:
+            # Node already exists, merge source_refs if provided
+            existing_node = self.nodes[node.id]
+            if node.source_refs:
+                existing_refs = set(existing_node.source_refs)
+                existing_refs.update(node.source_refs)
+                existing_node.source_refs = list(existing_refs)
+            return False
         self.nodes[node.id] = node
+        return True
     
-    def add_edge(self, edge: DynamicEdge):
+    def add_edge(self, edge: DynamicEdge) -> bool:
+        """Add an edge. Returns True if edge was actually added (not duplicate)."""
+        # Check for duplicate edges (same source, target, and type)
+        for existing_edge in self.edges.values():
+            if (existing_edge.source_id == edge.source_id and 
+                existing_edge.target_id == edge.target_id and 
+                existing_edge.type == edge.type):
+                # Edge already exists, merge evidence if provided
+                if hasattr(edge, 'evidence') and edge.evidence:
+                    if hasattr(existing_edge, 'evidence'):
+                        # Merge evidence lists, avoiding duplicates
+                        existing_evidence = set(existing_edge.evidence)
+                        existing_evidence.update(edge.evidence)
+                        existing_edge.evidence = list(existing_evidence)
+                return False  # Skip adding duplicate edge
+        
+        # No duplicate found, add the edge
         self.edges[edge.id] = edge
+        return True
     
     def get_neighbors(self, node_id: str, edge_type: Optional[str] = None) -> List[str]:
         """Get neighboring nodes, optionally filtered by edge type"""
@@ -191,19 +218,20 @@ class GraphBuilder:
     4. Minimal pre-processing - just code cards
     """
     
-    def __init__(self, config: Dict, debug: bool = False):
+    def __init__(self, config: Dict, debug: bool = False, debug_logger=None):
         self.config = config
         self.debug = debug
+        self.debug_logger = debug_logger
         
         # Initialize LLM clients - guidance for discovery, graph for building
         # Graph model for building graphs
-        self.llm = LLMClient(config, profile="graph")
+        self.llm = LLMClient(config, profile="graph", debug_logger=debug_logger)
         if debug:
             graph_model = config.get("models", {}).get("graph", {}).get("model", "unknown")
             print(f"[*] Graph model: {graph_model}")
         
         # Guidance model for initial discovery (heavier reasoning)
-        self.llm_agent = LLMClient(config, profile="guidance")
+        self.llm_agent = LLMClient(config, profile="guidance", debug_logger=debug_logger)
         if debug:
             agent_model = config.get("models", {}).get("guidance", {}).get("model", "unknown")
             print(f"[*] Agent model: {agent_model} (for discovery)")
@@ -436,16 +464,17 @@ The FIRST must be the system/component/flow overview."""
             update = self._update_graph(graph, relevant_cards)
             
             if update:
-                # Apply whatever updates were found (could be empty lists)
-                added_nodes = len(update.new_nodes)
-                added_edges = len(update.new_edges)
-                self._apply_update(graph, update)
+                # Apply updates and track what was actually added (deduplication happens in add_node/add_edge)
+                nodes_added, edges_added = self._apply_update(graph, update)
                 
                 new_orphan_count = len(self._get_orphaned_nodes(graph))
-                if added_nodes > 0 or added_edges > 0:
-                    self._emit("update", f"Added: {added_nodes} nodes, {added_edges} edges (orphans {orphan_count}->{new_orphan_count})")
+                if nodes_added > 0 or edges_added > 0:
+                    self._emit("update", f"Added: {nodes_added} nodes, {edges_added} edges (orphans {orphan_count}->{new_orphan_count})")
                 else:
-                    self._emit("update", f"No new nodes/edges (orphans: {new_orphan_count})")
+                    self._emit("update", f"No new nodes/edges added (duplicates filtered, orphans: {new_orphan_count})")
+                    # If no new nodes or edges were added, the graph might be complete
+                    if self.iteration > 0:  # Only after first iteration
+                        self._emit("complete", f"Graph '{graph_name}' appears complete (no new nodes/edges found)")
     
     def _get_orphaned_nodes(self, graph: KnowledgeGraph) -> set:
         """Find nodes with no edges (neither incoming nor outgoing)"""
@@ -489,6 +518,8 @@ Nodes: id (unique string), type, label, refs (array of card IDs that contain thi
   - Prefer function-level and storage-level nodes; contract-level nodes are acceptable but should not crowd out finer nodes.
   - MUST be defined in the project's source files (not just imported/used)
 Edges: type, src (source NODE ID), dst (target NODE ID), refs (array of card IDs evidencing this relationship)
+
+CRITICAL: Check existing_edges list and DO NOT recreate edges that already exist!
 
 CRITICAL - refs field:
 - Each node MUST have a refs array containing the IDs of cards where this node appears
@@ -534,28 +565,41 @@ Nodes: If adding new nodes, include refs array with card IDs where they appear; 
   - MUST be defined in the project's source files (not just imported/used)
 Edges: type, src (existing NODE id), dst (existing NODE id), refs (card IDs evidencing the relationship). 
 IMPORTANT: Use existing node IDs! Check the existing_nodes list.
+CRITICAL: Check existing_edges list and DO NOT recreate edges that already exist!
 For any new nodes, include refs field with card IDs from code_samples.
 Return empty lists only if graph is fully connected."""
         
-        # Build user prompt with existing nodes for reference
+        # Build user prompt with existing nodes AND edges for reference
         existing_nodes_list = []
-        if self.iteration > 0 and len(graph.nodes) > 0:
+        existing_edges_list = []
+        
+        if self.iteration > 0:
             # Provide existing nodes to help model make connections
-            for node_id, node in graph.nodes.items():
-                existing_nodes_list.append({
-                    "id": node_id,
-                    "type": node.type,
-                    "label": node.label
-                })
+            if len(graph.nodes) > 0:
+                for node_id, node in graph.nodes.items():
+                    existing_nodes_list.append({
+                        "id": node_id,
+                        "type": node.type,
+                        "label": node.label
+                    })
+            
+            # Provide existing edges to avoid duplicates
+            if len(graph.edges) > 0:
+                for edge_id, edge in graph.edges.items():
+                    existing_edges_list.append({
+                        "type": edge.type,
+                        "src": edge.source_id,
+                        "dst": edge.target_id
+                    })
         
         user_prompt = {
             "graph_name": graph.name,
             "graph_focus": graph.focus,
             "existing_nodes": existing_nodes_list if existing_nodes_list else f"{len(graph.nodes)} nodes",
-            "existing_edges": len(graph.edges),
+            "existing_edges": existing_edges_list if existing_edges_list else f"{len(graph.edges)} edges",
             "code_samples": cards_with_ids,
             "iteration": self.iteration,
-            "instruction": "Update graph. Use NODE IDs for edges. Include refs arrays for nodes AND edges with card IDs from code_samples that evidence them."
+            "instruction": "Update graph. ONLY add NEW nodes/edges that don't already exist. Check existing_edges to avoid duplicates. Use NODE IDs for edges. Include refs arrays for nodes AND edges with card IDs from code_samples that evidence them."
         }
         
         try:
@@ -571,8 +615,11 @@ Return empty lists only if graph is fully connected."""
             return None
     
     
-    def _apply_update(self, graph: KnowledgeGraph, update: GraphUpdate):
-        """Apply an update to a graph"""
+    def _apply_update(self, graph: KnowledgeGraph, update: GraphUpdate) -> tuple[int, int]:
+        """Apply an update to a graph. Returns (nodes_added, edges_added)."""
+        
+        nodes_added = 0
+        edges_added = 0
         
         # Add new nodes
         for node_spec in update.new_nodes:
@@ -593,9 +640,10 @@ Return empty lists only if graph is fully connected."""
                 observations=[],
                 assumptions=[]
             )
-            graph.add_node(node)
+            if graph.add_node(node):
+                nodes_added += 1
         
-        # Add new edges
+        # Add new edges (will be deduplicated in add_edge method)
         for edge_spec in update.new_edges:
             edge = DynamicEdge(
                 id=self._generate_id("edge"),
@@ -609,7 +657,8 @@ Return empty lists only if graph is fully connected."""
                 created_by=f"iteration_{self.iteration}",
                 iteration=self.iteration
             )
-            graph.add_edge(edge)
+            if graph.add_edge(edge):
+                edges_added += 1
         
         # Update existing nodes
         for node_update in update.node_updates:
@@ -630,7 +679,7 @@ Return empty lists only if graph is fully connected."""
                 for assum in node_update.new_assumptions:
                     node.assumptions.append(assum.model_dump())
         
-        # Updates complete
+        return nodes_added, edges_added
     
     
     def _sample_cards(

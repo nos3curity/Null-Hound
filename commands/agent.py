@@ -216,12 +216,6 @@ def run_investigation(project_path: str, prompt: str, iterations: Optional[int] 
                     'rejected': report['hypotheses']['rejected']
                 })
                 console.print(f"\n[cyan]Debug log saved:[/cyan] {log_path}")
-                console.print(f"[dim]Open in browser: file://{log_path}[/dim]")
-                try:
-                    import webbrowser
-                    webbrowser.open(f"file://{log_path}")
-                except Exception:
-                    pass
             
         except Exception as e:
             console.print(f"[red]Investigation failed: {e}[/red]")
@@ -231,12 +225,6 @@ def run_investigation(project_path: str, prompt: str, iterations: Optional[int] 
                 if agent and agent.debug_logger:
                     log_path = agent.debug_logger.finalize()
                     console.print(f"\n[cyan]Debug log saved:[/cyan] {log_path}")
-                    console.print(f"[dim]Open in browser: file://{log_path}[/dim]")
-                    try:
-                        import webbrowser
-                        webbrowser.open(f"file://{log_path}")
-                    except Exception:
-                        pass
 
 def display_investigation_report(report: dict):
     """Display investigation report in a nice format."""
