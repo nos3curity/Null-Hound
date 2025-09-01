@@ -180,7 +180,7 @@ def build(
                     console=progress_console,
                     transient=True,
                 ) as progress:
-                    task = progress.add_task(f"Constructing graphs (iteration 0/{iteration_total})...", total=iteration_total)
+                    task = progress.add_task(f"Constructing graphs (iteration 0/{iteration_total})...", total=iteration_total, completed=0)
 
                     def builder_callback(info):
                         # Handles dict payloads from GraphBuilder._emit
@@ -202,7 +202,20 @@ def build(
                                     msg,
                                 ])
                                 log_line(kind, line)
-                                progress.update(task, description=_short(line, 80))
+                                
+                                # Parse iteration from building messages
+                                import re
+                                m = re.search(r"iteration\s+(\d+)/(\d+)", msg)
+                                if m:
+                                    cur = int(m.group(1))
+                                    total = int(m.group(2))
+                                    if total != progress.tasks[task].total:
+                                        progress.update(task, total=total)
+                                    # Update both completed and description
+                                    completed = min(cur, total)
+                                    progress.update(task, completed=completed, description=f"Constructing graphs (iteration {cur}/{total})...")
+                                else:
+                                    progress.update(task, description=_short(line, 80))
                             elif kind == 'update':
                                 line = random.choice([
                                     f"🔧 {graph_model} chisels the graph: {msg}",
