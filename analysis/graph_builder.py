@@ -231,10 +231,10 @@ class GraphBuilder:
             graph_model = config.get("models", {}).get("graph", {}).get("model", "unknown")
             print(f"[*] Graph model: {graph_model}")
         
-        # Guidance model for initial discovery (heavier reasoning)
-        self.llm_agent = LLMClient(config, profile="guidance", debug_logger=debug_logger)
+        # Strategist model for initial discovery (heavier reasoning)
+        self.llm_agent = LLMClient(config, profile="strategist", debug_logger=debug_logger)
         if debug:
-            agent_model = config.get("models", {}).get("guidance", {}).get("model", "unknown")
+            agent_model = config.get("models", {}).get("strategist", {}).get("model", "unknown")
             print(f"[*] Agent model: {agent_model} (for discovery)")
         
         # Knowledge graphs storage
@@ -370,10 +370,10 @@ class GraphBuilder:
                 self._emit("graph", f"Created graph: {graph_spec['name']} (focus: {focus})")
             return
         
-        # Use adaptive sampling based on token count
+        # Use adaptive sampling based on token count for discovery phase
         self._emit("discover", "Analyzing codebase for graph discovery...")
-        # Sample cards to stay within context limits
-        code_samples = self._sample_cards(cards)
+        # Sample cards to stay within STRATEGIST model's context limits (not graph model's)
+        code_samples = self._sample_cards_for_discovery(cards)
         
         # Allow forcing specific graph type through focus_areas (backward compatibility)
         if focus_areas and "call_graph" in focus_areas:
@@ -426,10 +426,11 @@ The FIRST must be the system/component/flow overview."""
         # Log token counts
         self._emit("debug", f"Initial graph design prompt tokens: system={system_tokens:,}, user={user_tokens:,}, total={total_tokens:,}")
         
-        # Check if we're approaching context limit
-        max_context = 400000  # 400k context for GPT-5 models
-        if total_tokens > max_context * 0.9:
-            self._emit("warning", f"Token count ({total_tokens:,}) approaching context limit ({max_context:,})")
+        # Check if we're approaching context limit for strategist/discovery model
+        strategist_model_config = self.config.get("models", {}).get("strategist", {})
+        strategist_max_context = strategist_model_config.get("max_context", 400000)  # Default 400k for discovery
+        if total_tokens > strategist_max_context * 0.9:
+            self._emit("warning", f"Token count ({total_tokens:,}) approaching context limit ({strategist_max_context:,})")
         
         # Use agent model for discovery (better reasoning)
         discovery = self.llm_agent.parse(
@@ -808,14 +809,127 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
         sampled_cards = self._sample_cards(cards)
         return sampled_cards, original_count, len(sampled_cards)
     
+    def _sample_cards_for_discovery(self, cards: List[Dict]) -> List[Dict]:
+        """
+        Sample cards specifically for the discovery phase.
+        Uses strategist model's context limit or global default, NOT graph model's limit.
+        """
+        # Get context limit for strategist/discovery model
+        strategist_model_config = self.config.get("models", {}).get("strategist", {})
+        strategist_max_context = strategist_model_config.get("max_context")
+        
+        if strategist_max_context:
+            max_context_tokens = strategist_max_context
+            if self.debug:
+                print(f"      Discovery: Using strategist model's max_context: {max_context_tokens:,} tokens")
+        else:
+            # Fall back to global context limit
+            max_context_tokens = self.config.get("context", {}).get("max_tokens", 256000)
+            if self.debug:
+                print(f"      Discovery: Using global max_context: {max_context_tokens:,} tokens")
+        
+        # Reserve more tokens for discovery (system prompt is larger, needs more response space)
+        reserved_tokens = 50000  # More conservative reservation for discovery
+        available_tokens = max_context_tokens - reserved_tokens
+        target_tokens = int(available_tokens * 0.7)  # More conservative: 70% instead of 80%
+        
+        # Get the strategist model for token counting
+        model = strategist_model_config.get("model", "gpt-4")
+        
+        # Count tokens for all cards
+        total_tokens = 0
+        card_tokens = []
+        for card in cards:
+            card_text = f"{card.get('relpath', '')}\n{card.get('content', '')}"
+            tokens = count_tokens(card_text, "openai", model)
+            card_tokens.append(tokens)
+            total_tokens += tokens
+        
+        # If under threshold, use all cards
+        if total_tokens <= target_tokens:
+            if self.debug:
+                usage_pct = (total_tokens * 100) // max_context_tokens
+                print(f"      Discovery: Using ALL {len(cards)} cards ({total_tokens:,} tokens, {usage_pct}% of context)")
+            return cards
+        
+        # Need to sample - use same diversity logic
+        ratio = target_tokens / total_tokens
+        sample_size = max(1, int(len(cards) * ratio))
+        
+        if self.debug:
+            print(f"      Discovery: Sampling {sample_size} cards from {len(cards)} total (tokens: {total_tokens:,} > {target_tokens:,} target)")
+        
+        import random
+        
+        # Sample with file diversity
+        files_to_cards = {}
+        for card in cards:
+            file_path = card.get("relpath", "unknown")
+            if file_path not in files_to_cards:
+                files_to_cards[file_path] = []
+            files_to_cards[file_path].append(card)
+        
+        sampled = []
+        files = list(files_to_cards.keys())
+        random.shuffle(files)
+        
+        # Take cards from different files
+        cards_per_file = max(1, min(3, sample_size // len(files))) if len(files) > 0 else sample_size
+        
+        for file_path in files:
+            if len(sampled) >= sample_size:
+                break
+            file_cards = files_to_cards[file_path]
+            num_from_file = min(cards_per_file, len(file_cards), sample_size - len(sampled))
+            sampled.extend(random.sample(file_cards, num_from_file))
+        
+        # Fill remaining if needed
+        if len(sampled) < sample_size:
+            remaining = [c for c in cards if c not in sampled]
+            additional = min(sample_size - len(sampled), len(remaining))
+            if additional > 0:
+                sampled.extend(random.sample(remaining, additional))
+        
+        # Final safety check - verify we're under limit
+        final_tokens = 0
+        for card in sampled:
+            card_text = f"{card.get('relpath', '')}\n{card.get('content', '')}"
+            final_tokens += count_tokens(card_text, "openai", model)
+        
+        # If still over, remove cards until we fit
+        while final_tokens > target_tokens and len(sampled) > 1:
+            # Remove a random card
+            removed_idx = random.randint(0, len(sampled) - 1)
+            removed_card = sampled.pop(removed_idx)
+            removed_text = f"{removed_card.get('relpath', '')}\n{removed_card.get('content', '')}"
+            final_tokens -= count_tokens(removed_text, "openai", model)
+            if self.debug:
+                print(f"      Discovery: Removing card to fit in context (now {final_tokens:,} tokens)")
+        
+        if self.debug:
+            print(f"      Discovery: Final sample: {len(sampled)} cards, {final_tokens:,} tokens (target was {target_tokens:,})")
+        
+        return sampled
+    
     def _sample_cards(
         self,
         cards: List[Dict]
     ) -> List[Dict]:
         """Adaptive sampling based on token count to stay within context limits"""
         
-        # Get max tokens from config (default to 256k)
-        max_context_tokens = self.config.get("context", {}).get("max_tokens", 256000)
+        # Get max tokens for graph model specifically, if configured
+        # First check if graph model has its own max_context setting
+        graph_model_config = self.config.get("models", {}).get("graph", {})
+        graph_max_context = graph_model_config.get("max_context")
+        
+        if graph_max_context:
+            # Use graph model's specific context limit
+            max_context_tokens = graph_max_context
+            if self.debug:
+                print(f"      Using graph model's max_context: {max_context_tokens:,} tokens")
+        else:
+            # Fall back to global context limit
+            max_context_tokens = self.config.get("context", {}).get("max_tokens", 256000)
         
         # Reserve tokens for system prompt and response (30k should be enough)
         reserved_tokens = 30000
@@ -827,7 +941,8 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
         # Estimate tokens for all cards (only content and path, no peek fields)
         total_tokens = 0
         card_tokens = []
-        model = self.config.get("llm_agent_model", "gpt-5-mini")
+        # Use the actual graph model for token counting
+        model = graph_model_config.get("model", "gpt-4")
         
         for card in cards:
             # Only count the fields we'll actually send
@@ -839,7 +954,9 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
         # If under threshold, use all cards
         if total_tokens <= target_tokens:
             if self.debug:
+                usage_pct = (total_tokens * 100) // max_context_tokens
                 print(f"      Using ALL {len(cards)} cards (total tokens: {total_tokens:,} < {target_tokens:,} target)")
+                print(f"      Context usage: {usage_pct}% of {max_context_tokens:,} available tokens")
             return cards
         
         # Calculate proportional sample size to stay under token limit

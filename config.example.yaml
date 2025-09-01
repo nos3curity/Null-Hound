@@ -1,0 +1,80 @@
+# Example configuration showing model-specific context limits
+
+# API keys configuration
+openai:
+  api_key_env: OPENAI_API_KEY
+
+gemini:
+  api_key_env: GOOGLE_API_KEY
+
+anthropic:
+  api_key_env: ANTHROPIC_API_KEY
+
+xai:
+  api_key_env: XAI_API_KEY
+
+# Model configuration with context limits
+models:
+  # Graph building model - can have very large context
+  # Used for graph building iterations (NOT for initial graph discovery/design)
+  graph:
+    provider: openai
+    model: gpt-4.1
+    max_context: 1000000  # 1M tokens for GPT-4.1 - leverages full context for graph building iterations
+  
+  # Strategist model - used for initial graph discovery/design phase and hypothesis generation
+  # Should have reasonable context to avoid token limit errors
+  strategist:
+    provider: openai
+    model: gpt-4
+    # max_context not specified - will use global default (256k)
+    # This is intentional to keep discovery phase manageable
+  
+  # Scout/agent model for exploration
+  scout:
+    provider: openai
+    model: gpt-4.1
+    max_context: 500000   # Can set different limit per model
+    # reasoning_effort: low
+  
+  # Strategic thinking model
+  strategist:
+    provider: openai
+    model: gpt-5
+    max_context: 400000   # 400k tokens
+    plan_reasoning_effort: low
+    hypothesize_reasoning_effort: high
+  
+  # Finalization model
+  finalize:
+    provider: openai
+    model: gpt-5-nano
+    # No max_context specified - will use global default
+  
+  # Reporting model
+  reporting:
+    provider: openai
+    model: gpt-5-nano
+    # No max_context specified - will use global default
+
+# Global context settings (used when model doesn't specify max_context)
+context:
+  max_tokens: 256000          # Default for models without specific max_context
+  compression_threshold: 0.75  # Compress history when 75% full
+
+# Timeouts and retries
+timeouts:
+  request_seconds: 30
+
+retries:
+  max_attempts: 1
+  backoff_min_seconds: 1
+  backoff_max_seconds: 2
+
+# Notes:
+# - Each model can have its own max_context setting
+# - Graph model uses large context for building iterations (sees more code)
+# - Guidance model uses smaller context for initial discovery/design phase
+# - Discovery phase and building iterations use different context limits
+# - Models without max_context use the global context.max_tokens value
+# - Token counting is done using the specific model for accuracy

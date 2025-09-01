@@ -136,7 +136,7 @@ class TestGraphBuilderContentLoading(unittest.TestCase):
         config = {
             "models": {
                 "graph": {"provider": "mock", "model": "mock"},
-                "guidance": {"provider": "mock", "model": "mock"}
+                "strategist": {"provider": "mock", "model": "mock"}
             }
         }
         builder = GraphBuilder(config, debug=True)
@@ -257,7 +257,7 @@ class TestGraphBuilderContentLoading(unittest.TestCase):
                 "models": {
                     "agent": {"provider": "mock", "model": "mock"},
                     "graph": {"provider": "mock", "model": "mock"},
-                    "guidance": {"provider": "mock", "model": "mock"}
+                    "strategist": {"provider": "mock", "model": "mock"}
                 }
             }
             
