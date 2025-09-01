@@ -370,11 +370,10 @@ class GraphBuilder:
                 self._emit("graph", f"Created graph: {graph_spec['name']} (focus: {focus})")
             return
         
-        # Use adaptive sampling based on content size, not count
+        # Use adaptive sampling based on token count
         self._emit("discover", "Analyzing codebase for graph discovery...")
-        # Auto-sample based on content size to stay within context limits
-        # Reduced from 4.0 to 1.5 MB to avoid exceeding context limits
-        code_samples = self._sample_cards(cards, target_size_mb=1.5)
+        # Sample cards to stay within context limits
+        code_samples = self._sample_cards(cards)
         
         # Allow forcing specific graph type through focus_areas (backward compatibility)
         if focus_areas and "call_graph" in focus_areas:
@@ -486,8 +485,8 @@ The FIRST must be the system/component/flow overview."""
             orphan_count = len(self._get_orphaned_nodes(graph))
             self._emit("graph_build", f"{graph_name}: {len(graph.nodes)}N/{len(graph.edges)}E, {orphan_count} orphans")
             
-            # Try to use ALL cards if possible, increase limit for comprehensive modeling
-            relevant_cards = self._sample_cards(cards, target_size_mb=1.5)  # Balanced to avoid context limit issues
+            # Try to use ALL cards if possible within token limits
+            relevant_cards = self._sample_cards(cards)
             if len(relevant_cards) != len(cards):
                 self._emit("sample", f"WARNING: Sampled {len(relevant_cards)} cards from {len(cards)} total due to context limits - graph may be incomplete")
             
@@ -811,8 +810,7 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
     
     def _sample_cards(
         self,
-        cards: List[Dict],
-        target_size_mb: float = 1.5  # Not used anymore, kept for compatibility
+        cards: List[Dict]
     ) -> List[Dict]:
         """Adaptive sampling based on token count to stay within context limits"""
         
