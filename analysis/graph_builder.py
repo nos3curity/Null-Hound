@@ -369,7 +369,7 @@ class GraphBuilder:
         # Use adaptive sampling based on content size, not count
         self._emit("discover", "Analyzing codebase for graph discovery...")
         # Auto-sample based on content size to stay within context limits
-        code_samples = self._sample_cards(cards, target_size_mb=2.0)
+        code_samples = self._sample_cards(cards, target_size_mb=4.0)  # Increased for comprehensive discovery
         
         # Allow forcing specific graph type through focus_areas (backward compatibility)
         if focus_areas and "call_graph" in focus_areas:
@@ -420,6 +420,9 @@ The FIRST must be the system/component/flow overview."""
             schema=GraphDiscovery
         )
         
+        # Store discovery for later reference in prompts
+        self._discovery = discovery
+        
         # Create the suggested graphs (limited to max_graphs)
         graphs_to_create = discovery.graphs_needed[:max_graphs]
         if len(discovery.graphs_needed) > max_graphs:
@@ -464,10 +467,10 @@ The FIRST must be the system/component/flow overview."""
             orphan_count = len(self._get_orphaned_nodes(graph))
             self._emit("graph_build", f"{graph_name}: {len(graph.nodes)}N/{len(graph.edges)}E, {orphan_count} orphans")
             
-            # Use adaptive sampling based on content size to respect context limits
-            relevant_cards = self._sample_cards(cards, target_size_mb=2.0)
+            # Try to use ALL cards if possible, increase limit for comprehensive modeling
+            relevant_cards = self._sample_cards(cards, target_size_mb=4.0)  # Increased from 2.0 for better coverage
             if len(relevant_cards) != len(cards):
-                self._emit("sample", f"Sampled {len(relevant_cards)} cards from {len(cards)} total for context limits")
+                self._emit("sample", f"WARNING: Sampled {len(relevant_cards)} cards from {len(cards)} total due to context limits - graph may be incomplete")
             
             # Update the graph
             update = self._update_graph(graph, relevant_cards)
@@ -513,8 +516,17 @@ The FIRST must be the system/component/flow overview."""
         # Adaptive prompting based on graph state
         if self.iteration == 0:
             # Initial build - focus on discovering CONNECTED nodes
-            system_prompt = f"""Build {graph.focus} graph.
-FOCUS: Find core nodes AND their connections at fine granularity.
+            # Include suggested types in prompt if available
+            type_guidance = ""
+            if hasattr(self, '_discovery') and self._discovery:
+                if self._discovery.suggested_node_types:
+                    type_guidance += f"\n\nRECOMMENDED NODE TYPES (use these!):\n{', '.join(self._discovery.suggested_node_types[:15])}"
+                if self._discovery.suggested_edge_types:
+                    type_guidance += f"\n\nRECOMMENDED EDGE TYPES (use these!):\n{', '.join(self._discovery.suggested_edge_types[:15])}"
+            
+            system_prompt = f"""Build {graph.focus} graph.{type_guidance}
+FOCUS: COMPREHENSIVELY model ALL aspects of this graph's focus.
+You MUST capture the COMPLETE structure - don't leave anything out!
 
 IMPORTANT: This is ONLY structural discovery - do NOT add observations or assumptions.
 Those will be added later during analysis.
@@ -544,7 +556,8 @@ IMPORTANT:
 - Edge src/dst must reference node IDs you created, NOT card IDs!
 - Every node should have at least one edge (incoming or outgoing)
 - Prioritize connected components over isolated nodes
-Target: 15-25 nodes with strong connectivity."""
+Target: 20-40 nodes minimum (more if needed for completeness). Every significant component should be represented.
+Prioritize COMPLETENESS over simplicity - it's better to have too many nodes than to miss important parts."""
         else:
             # Refinement - strongly prioritize connecting existing nodes
             orphaned_nodes = self._get_orphaned_nodes(graph)
@@ -553,14 +566,29 @@ Target: 15-25 nodes with strong connectivity."""
             if orphan_count > 5:
                 # Many orphaned nodes - focus on connecting them
                 orphan_sample = list(orphaned_nodes)[:10]  # Show first 10
-                focus_instruction = f"CRITICAL: {orphan_count} nodes have NO connections! Connect these orphans: {orphan_sample}"
-            elif len(graph.edges) < len(graph.nodes):
-                focus_instruction = f"PRIORITY: Find EDGES for existing {len(graph.nodes)} nodes. Each node needs connections!"
+                focus_instruction = f"CRITICAL: {orphan_count} nodes have NO connections! Connect these orphans: {orphan_sample}\nEvery node should have at least one edge!"
+            elif len(graph.edges) < len(graph.nodes) * 1.5:
+                focus_instruction = f"PRIORITY: Find MORE EDGES! With {len(graph.nodes)} nodes, you should have at least {int(len(graph.nodes) * 1.5)} edges. Look for all relationships!"
             else:
-                focus_instruction = "Balance nodes and edges. Ensure all nodes are connected."
+                focus_instruction = "Continue adding nodes and edges to ensure COMPLETE coverage. Look for any missing components or relationships."
+            
+            # Include type guidance in refinement too
+            type_guidance = ""
+            if hasattr(self, '_discovery') and self._discovery:
+                if self._discovery.suggested_node_types:
+                    unused_node_types = [t for t in self._discovery.suggested_node_types if not any(n.type == t for n in graph.nodes.values())]
+                    if unused_node_types:
+                        type_guidance += f"\n\nUNUSED NODE TYPES (consider using): {', '.join(unused_node_types[:10])}"
+                if self._discovery.suggested_edge_types:
+                    unused_edge_types = [t for t in self._discovery.suggested_edge_types if not any(e.type == t for e in graph.edges.values())]
+                    if unused_edge_types:
+                        type_guidance += f"\n\nUNUSED EDGE TYPES (consider using): {', '.join(unused_edge_types[:10])}"
             
             system_prompt = f"""Refine {graph.focus}. Current: {len(graph.nodes)}N/{len(graph.edges)}E, {orphan_count} orphans.
 {focus_instruction}
+
+GOAL: Create a COMPREHENSIVE model that captures ALL aspects of {graph.focus}.
+The graph should be COMPLETE - every important component, relationship, and interaction should be represented.{type_guidance}
 
 IMPORTANT: This is ONLY structural discovery - do NOT add observations or assumptions.
 Those will be added later during analysis.
@@ -579,7 +607,7 @@ Edges: type, src (existing NODE id), dst (existing NODE id), refs (card IDs evid
 IMPORTANT: Use existing node IDs! Check the existing_nodes list.
 CRITICAL: Check existing_edges list and DO NOT recreate edges that already exist!
 For any new nodes, include refs field with card IDs from code_samples.
-Return empty lists only if graph is fully connected."""
+Return empty lists only if graph is TRULY complete and comprehensive."""
         
         # Build user prompt with existing nodes AND edges for reference
         existing_nodes_list = []
@@ -697,7 +725,7 @@ Return empty lists only if graph is fully connected."""
     def _sample_cards(
         self,
         cards: List[Dict],
-        target_size_mb: float = 2.0
+        target_size_mb: float = 4.0  # Increased default for comprehensive modeling
     ) -> List[Dict]:
         """Adaptive sampling based on content size instead of count"""
         
