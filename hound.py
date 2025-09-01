@@ -689,7 +689,8 @@ def report(
     format: str = typer.Option("html", "--format", "-f", help="Report format (html/markdown)"),
     title: Optional[str] = typer.Option(None, "--title", "-t", help="Custom report title"),
     auditors: str = typer.Option("Security Team", "--auditors", "-a", help="Comma-separated auditor names"),
-    debug: bool = typer.Option(False, "--debug", help="Enable debug mode")
+    debug: bool = typer.Option(False, "--debug", help="Enable debug mode"),
+    all: bool = typer.Option(False, "--all", help="Include ALL hypotheses (not just confirmed) - WARNING: No QA performed, may contain false positives")
 ):
     """Generate a professional security audit report."""
     from commands.report import report as report_command
@@ -706,7 +707,8 @@ def report(
         'title': title,
         'auditors': auditors,
         'debug': debug,
-        'show_prompt': False  # Add missing parameter
+        'show_prompt': False,  # Add missing parameter
+        'include_all': all  # Pass the --all flag as include_all
     }
     
     try:

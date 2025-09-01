@@ -14,11 +14,12 @@ from llm.unified_client import UnifiedLLMClient
 class ReportGenerator:
     """Generate professional security audit reports."""
     
-    def __init__(self, project_dir: Path, config: Dict, debug: bool = False):
+    def __init__(self, project_dir: Path, config: Dict, debug: bool = False, include_all: bool = False):
         """Initialize report generator."""
         self.project_dir = project_dir
         self.config = config
         self.debug = debug
+        self.include_all = include_all  # Flag to include all hypotheses, not just confirmed
         
         # Initialize reporting LLM
         self.llm = UnifiedLLMClient(
@@ -506,10 +507,12 @@ class ReportGenerator:
         executive_summary = sections.get('executive_summary', '')
         system_overview = sections.get('system_overview', '')
         
-        # Get confirmed findings (if any)
-        self._emit_progress('findings', 'Collecting confirmed findings')
+        # Get findings (confirmed or all based on include_all flag)
+        findings_msg = 'Collecting ALL hypotheses (no QA performed)' if self.include_all else 'Collecting confirmed findings'
+        self._emit_progress('findings', findings_msg)
         confirmed_findings = self._get_confirmed_findings()
-        self._emit_progress('findings_done', f"Processed {len(confirmed_findings)} findings")
+        findings_label = 'hypotheses' if self.include_all else 'findings'
+        self._emit_progress('findings_done', f"Processed {len(confirmed_findings)} {findings_label}")
         
         # No longer generating appendix
         # tested_hypotheses = self._get_all_hypotheses()
@@ -588,23 +591,35 @@ class ReportGenerator:
         if not models_used:
             models_used = ['unspecified']
 
+        # Add warning about unreviewed findings if include_all is True
+        qa_warning = ""
+        findings_label = "Confirmed vulnerabilities"
+        if self.include_all:
+            qa_warning = """
+IMPORTANT NOTE: This report includes ALL hypotheses generated during analysis, not just confirmed findings.
+No quality assurance or review process has been performed on these findings.
+This report may contain false positives and should be treated as a preliminary analysis only.
+"""
+            findings_label = "Total hypotheses (UNREVIEWED)"
+
         prompt = f"""You are a senior security auditor writing the executive summary for a professional audit report.
 
 Project: {project_name}
 Source: {project_source}
-
+{qa_warning}
 System Characteristics (from architecture analysis):
 {graph_summary}
 
 Audit Statistics:
 - Total security concerns investigated: {total_investigations}
-- Confirmed vulnerabilities: {confirmed_count}
+- {findings_label}: {confirmed_count}
 {findings_summary}
 
 Write a professional executive summary (2-3 paragraphs) that:
-1) States that the Hound security team conducted this comprehensive security audit of {project_name}.
+1) States that the Hound security team conducted this {'preliminary' if self.include_all else 'comprehensive'} security audit of {project_name}.
 2) Describes WHAT the system does (type and core purpose) based on the components above.
 3) Summarizes the security posture and any findings discovered.
+{f'4) CRITICAL: Include a clear warning that this report contains UNREVIEWED findings that have not undergone quality assurance and may contain false positives.' if self.include_all else ''}
 
 CRITICAL INSTRUCTIONS:
 - DO NOT mention any specific model names (GPT-5, Claude, etc.) - a table below will show this
@@ -614,7 +629,8 @@ CRITICAL INSTRUCTIONS:
 - Focus on the AUDIT RESULTS not the audit process
 - NEVER use: "hypothesis", "AI", "model", "automated", "LLM", or made-up names
 - ALWAYS use: "findings", "security concerns", "team", "analysis"
-- Present this as a professional security audit by the Hound team"""
+- Present this as a professional security audit by the Hound team
+{f'- MUST include clear warning about unreviewed findings and potential false positives' if self.include_all else ''}"""
 
         try:
             summary = self.llm.raw(
@@ -745,12 +761,13 @@ and systematic vulnerability assessment across all identified attack surfaces.""
         return '\n'.join(f"- {part}" for part in scope_parts)
     
     def _get_confirmed_findings(self) -> List[Dict]:
-        """Get confirmed vulnerability findings."""
+        """Get confirmed vulnerability findings (or all if include_all is True)."""
         findings = []
         
-        # First collect all confirmed findings
+        # Collect findings based on include_all flag
         for hyp_id, hyp in self.hypotheses.items():
-            if hyp.get('status') == 'confirmed':
+            # Include all hypotheses if flag is set, otherwise only confirmed
+            if self.include_all or hyp.get('status') == 'confirmed':
                 finding = {
                     'id': hyp_id,
                     'title': hyp.get('title', 'Unknown'),
@@ -1680,7 +1697,8 @@ External dependencies are limited and clearly defined."""
         {self._generate_statistics_section_html(kwargs['findings'])}
         
         <div class="section">
-            <h2>Findings</h2>
+            <h2>{'All Hypotheses (UNREVIEWED)' if self.include_all else 'Findings'}</h2>
+            {self._add_unreviewed_warning_html() if self.include_all else ''}
             {self._format_findings_html(kwargs['findings'])}
         </div>
         
@@ -1898,10 +1916,26 @@ External dependencies are limited and clearly defined."""
         
         return '\n'.join(items)
     
+    def _add_unreviewed_warning_html(self) -> str:
+        """Add a warning box for unreviewed findings."""
+        return """
+        <div style="background: #fff3cd; border: 2px solid #ffc107; border-radius: 8px; padding: 15px; margin-bottom: 20px;">
+            <h3 style="color: #856404; margin-top: 0;">⚠️ WARNING: Unreviewed Findings</h3>
+            <p style="color: #856404; margin-bottom: 0;">
+                This report includes ALL hypotheses generated during the analysis, not just confirmed findings.
+                No quality assurance or review process has been performed. These findings may contain false positives
+                and should be independently verified before taking action.
+            </p>
+        </div>
+        """
+    
     def _format_findings_html(self, findings: List[Dict]) -> str:
         """Format findings into HTML with code samples."""
         if not findings:
-            return '<p><em>No confirmed vulnerabilities were identified during this audit.</em></p>'
+            if self.include_all:
+                return '<p><em>No hypotheses were generated during this analysis.</em></p>'
+            else:
+                return '<p><em>No confirmed vulnerabilities were identified during this audit.</em></p>'
         
         html_parts = []
         for finding in findings:

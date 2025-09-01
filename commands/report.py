@@ -27,8 +27,9 @@ console = Console()
 @click.option('--auditors', '-a', help="Comma-separated list of auditor names", default="Security Team")
 @click.option('--debug', is_flag=True, help="Enable debug mode")
 @click.option('--show-prompt', is_flag=True, help="Show the LLM prompt and response used to generate the report")
+@click.option('--all', 'include_all', is_flag=True, help="Include ALL hypotheses (not just confirmed) - WARNING: No QA performed, may contain false positives")
 def report(project_name: str, output: Optional[str], format: str, 
-          title: Optional[str], auditors: str, debug: bool, show_prompt: bool):
+          title: Optional[str], auditors: str, debug: bool, show_prompt: bool, include_all: bool):
     """
     Generate a professional security audit report for a project.
     
@@ -70,14 +71,19 @@ def report(project_name: str, output: Optional[str], format: str,
     else:
         output_path = Path(output)
     
+    warning_text = ""
+    if include_all:
+        warning_text = f"\n[bold yellow]⚠️  WARNING:[/bold yellow] Including ALL hypotheses (no QA performed)\n[yellow]Report may contain false positives![/yellow]\n"
+    
     console.print(Panel(
         f"[bold bright_cyan]Generating Security Audit Report[/bold bright_cyan]\n\n"
         f"[bold]Project:[/bold] {project_name}\n"
         f"[bold]Format:[/bold] {format.upper()}\n"
         f"[bold]Output:[/bold] {output_path.name}\n"
-        f"[bold]Hypotheses Tested:[/bold] {len(hypotheses)}",
+        f"[bold]Hypotheses Tested:[/bold] {len(hypotheses)}"
+        f"{warning_text}",
         title="[bold]Report Generation[/bold]",
-        border_style="bright_cyan"
+        border_style="bright_cyan" if not include_all else "yellow"
     ))
     # A little pep talk
     from random import choice as _choice
@@ -96,7 +102,8 @@ def report(project_name: str, output: Optional[str], format: str,
     generator = ReportGenerator(
         project_dir=project_dir,
         config=config,
-        debug=debug
+        debug=debug,
+        include_all=include_all  # Pass the flag to include all hypotheses
     )
     
     # Resolve model names for narrative flavor
