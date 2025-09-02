@@ -60,6 +60,7 @@ models:
   finalize:
     provider: openai
     model: gpt-5
+    reasoning_effort: medium  # Reasoning effort for finalization (GPT-5 models only)
 
   reporting:             # Any cheap model
     provider: openai

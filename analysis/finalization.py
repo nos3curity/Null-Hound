@@ -112,10 +112,13 @@ class Finalizer(AutonomousAgent):
             if determination['verdict'] == 'confirmed':
                 self.finalize_store.adjust_confidence(hyp_id, 1.0, determination['reasoning'])
 
-                # Update status directly
+                # Update status and store QA comment
                 def update_status(data):
                     if hyp_id in data["hypotheses"]:
                         data["hypotheses"][hyp_id]["status"] = "confirmed"
+                        # Store QA comment for confirmed hypotheses
+                        if determination.get('reasoning'):
+                            data["hypotheses"][hyp_id]["qa_comment"] = determination['reasoning']
                         data["metadata"]["confirmed"] = sum(
                             1 for h in data["hypotheses"].values()
                             if h["status"] == "confirmed"
@@ -143,10 +146,13 @@ class Finalizer(AutonomousAgent):
             elif determination['verdict'] == 'rejected':
                 self.finalize_store.adjust_confidence(hyp_id, 0.0, determination['reasoning'])
 
-                # Update status directly
+                # Update status and store QA comment
                 def update_status(data):
                     if hyp_id in data["hypotheses"]:
                         data["hypotheses"][hyp_id]["status"] = "rejected"
+                        # Store QA comment for rejected hypotheses
+                        if determination.get('reasoning'):
+                            data["hypotheses"][hyp_id]["qa_comment"] = determination['reasoning']
                     return data, True
 
                 self.finalize_store.update_atomic(update_status)
@@ -238,21 +244,38 @@ Examine the specific functions mentioned and trace the data flow.
 Provide your determination in this EXACT JSON format:
 {{
     "verdict": "confirmed|rejected|uncertain",
-    "reasoning": "Brief explanation (max 100 chars)",
+    "reasoning": "A detailed one-paragraph explanation (100-200 words) suitable for inclusion in a professional security report. Start with 'Upon reviewing...' or 'After analyzing...' and explain what you examined, what you found, and why you reached your conclusion. Be specific about the code elements you reviewed.",
     "confidence": 0.0-1.0
 }}
 
 Rules:
 - "confirmed" = Vulnerability clearly exists in the code with exploitable path
-- "rejected" = Code analysis shows this is a false positive or mitigated
-- "uncertain" = Need more code context to determine
+  Example reasoning: "After analyzing the TokenManager contract's transfer function at line 142, I confirmed this reentrancy vulnerability is exploitable. The function updates state variables after making external calls to untrusted contracts, allowing attackers to recursively call back into the function before the initial execution completes. The lack of reentrancy guards and the specific ordering of operations creates a clear attack vector that could drain funds from the contract."
 
-Be conservative - only confirm if the code clearly shows the vulnerability.
+- "rejected" = Code analysis shows this is a false positive or mitigated  
+  Example reasoning: "Upon reviewing the alleged integer overflow in the calculateRewards function, I determined this is a false positive. The function properly uses SafeMath operations throughout, and all arithmetic operations are protected against overflow. Additionally, the input validation at line 87 ensures that values cannot exceed safe bounds. The initial hypothesis appears to have misidentified standard safe arithmetic patterns as vulnerable code."
+
+- "uncertain" = Need human analysis to be sure
+  Example reasoning: "After examining the access control implementation, I cannot definitively confirm or reject this authorization bypass vulnerability. While the code does implement role-based checks, the interaction between multiple proxy contracts and delegatecall patterns creates complex control flows that require deeper analysis. The specific initialization sequence and upgrade mechanisms would need manual review to determine if the theoretical attack vector is actually exploitable in practice."
+
+Be conservative - only confirm if there is clearly an exploitable vulnerability.
 """
 
         try:
+            # Get reasoning effort from config if available
+            finalize_effort = None
+            try:
+                mdl_cfg = (self.config or {}).get('models', {}).get('finalize', {})
+                finalize_effort = mdl_cfg.get('reasoning_effort')
+            except Exception:
+                pass
+            
             # Request JSON and parse robustly
-            response_text = self.llm.raw(system="You are a security expert. Respond only with valid JSON.", user=context)
+            response_text = self.llm.raw(
+                system="You are a security expert. Respond only with valid JSON.", 
+                user=context,
+                reasoning_effort=finalize_effort
+            )
             from utils.json_utils import extract_json_object
             obj = extract_json_object(response_text)
             if isinstance(obj, dict):

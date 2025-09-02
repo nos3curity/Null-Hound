@@ -16,7 +16,6 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 import random
 
 from analysis.concurrent_knowledge import HypothesisStore
-from analysis.finalization_prefilter import pre_filter_hypotheses, apply_filter_decisions
 from commands.project import ProjectManager
 
 console = Console()
@@ -25,18 +24,16 @@ console = Console()
 @click.command()
 @click.argument('project_name')
 @click.option('--threshold', '-t', default=0.5, help="Confidence threshold for hypothesis review (default: 0.5 or 50%)")
-@click.option('--skip-filter', is_flag=True, help="Skip pre-filtering of hypotheses")
 @click.option('--debug', is_flag=True, help="Enable debug mode")
 @click.option('--platform', default=None, help='Override QA platform (e.g., openai, anthropic, mock)')
 @click.option('--model', default=None, help='Override QA model (e.g., gpt-4o-mini)')
-def finalize(project_name: str, threshold: float, skip_filter: bool, debug: bool, platform: str | None, model: str | None):
+def finalize(project_name: str, threshold: float, debug: bool, platform: str | None, model: str | None):
     """
     Finalize hypotheses in a project by reviewing high-confidence findings.
     
     This command:
-    1. Pre-filters hypotheses to remove false positives
-    2. Reviews remaining hypotheses with full source code context
-    3. Confirms or rejects each hypothesis with reasoning
+    1. Reviews hypotheses above the confidence threshold with full source code context
+    2. Confirms or rejects each hypothesis with reasoning
     """
     # Convert percentage values (>1) to decimal
     if threshold > 1:
@@ -92,31 +89,15 @@ def finalize(project_name: str, threshold: float, skip_filter: bool, debug: bool
         if h.get("confidence", 0) >= threshold and h.get("status") not in ["confirmed", "rejected"]
     }
     
-    # Initialize filter debug logger variable at outer scope
-    filter_debug_logger = None
-    
-    # Pre-filter hypotheses
-    if skip_filter:
-        candidates = [(hid, h) for hid, h in above_threshold.items()]
-        filtered_out = []
-    else:
-        # Initialize LLM for pre-filtering
-        from llm.unified_client import UnifiedLLMClient
-        # Create debug logger for pre-filtering if debug is enabled
-        if debug:
-            from analysis.debug_logger import DebugLogger
-            filter_debug_logger = DebugLogger(f"prefilter_{project_name}")
-            console.print(f"[dim]Pre-filter debug log: {filter_debug_logger.log_file}[/dim]")
-        filter_llm = UnifiedLLMClient(cfg=config, profile="finalize", debug_logger=filter_debug_logger)
-        candidates, filtered_out = pre_filter_hypotheses(above_threshold, threshold, llm=filter_llm, debug=debug)
+    # Get all candidates above threshold
+    candidates = [(hid, h) for hid, h in above_threshold.items()]
     
     # Display summary
     summary_panel = Panel(
         f"[bold]Hypothesis Finalization[/bold]\n\n"
         f"Project: {project_name}\n"
         f"Total hypotheses: {len(all_hypotheses)}\n"
-        f"Above threshold: {len(above_threshold)}\n"
-        f"Pre-filtered: [red]{len(filtered_out)} removed[/red]\n"
+        f"Above threshold ({threshold:.0%}): {len(above_threshold)}\n"
         f"To review: [green]{len(candidates)} hypotheses[/green]",
         title="[bold bright_cyan]Finalization Summary[/bold bright_cyan]",
         expand=False
@@ -132,16 +113,9 @@ def finalize(project_name: str, threshold: float, skip_filter: bool, debug: bool
         "[white]Normal judgment closes loops; YOUR judgment defines the standard.[/white]",
     ]))
     
-    if not candidates and not filtered_out:
+    if not candidates:
         console.print("\n[yellow]No hypotheses meet the threshold criteria.[/yellow]")
         sys.exit(0)
-    
-    # Show what was filtered - show ALL filtered hypotheses
-    if filtered_out:
-        console.print("\n[bold]Pre-filtered hypotheses (automatically rejected):[/bold]")
-        for hid, hyp, reason in filtered_out:  # Show ALL filtered hypotheses
-            title = hyp.get("title", "Unknown")[:50]
-            console.print(f"  [red]✗[/red] {title} - [dim]{reason}[/dim]")
     
     # Show candidates
     if candidates:
@@ -180,9 +154,7 @@ def finalize(project_name: str, threshold: float, skip_filter: bool, debug: bool
     from llm.unified_client import UnifiedLLMClient
     llm = UnifiedLLMClient(cfg=config, profile="finalize", debug_logger=debug_logger)
     
-    # Process filtered hypotheses first
-    if filtered_out and not skip_filter:
-        apply_filter_decisions(store, filtered_out, debug=debug)
+    # No pre-filtering, proceed directly to review
     
     # Load manifest for source code access
     manifest_dir = project_dir / "manifest"
@@ -287,14 +259,19 @@ Focus on:
 Provide your determination in this EXACT JSON format:
 {
     "verdict": "confirmed" or "rejected" or "uncertain",
-    "reasoning": "Brief explanation (max 100 chars)",
+    "reasoning": "A detailed one-paragraph explanation (100-200 words) suitable for a security report. Start with 'Upon reviewing...' or 'After analyzing...' and explain what you examined, what you found, and why you reached your conclusion. Be specific about code elements, line numbers, and functions you reviewed.",
     "confidence": 0.0 to 1.0
 }
 
 Rules:
 - "confirmed" = Vulnerability clearly exists in the code with exploitable path
+  Write like: "After analyzing the [specific function/contract] at [location], I confirmed this [vulnerability type] is exploitable. [Explain what makes it vulnerable, specific code patterns observed, and why existing protections are insufficient]."
+
 - "rejected" = Code analysis shows this is a false positive or mitigated
+  Write like: "Upon reviewing the alleged [vulnerability type] in [specific location], I determined this is a false positive. [Explain what protections exist, why the vulnerability cannot be exploited, or what was misunderstood in the initial hypothesis]."
+
 - "uncertain" = Need more code context to determine
+  Write like: "After examining the [specific area], I cannot definitively confirm or reject this [vulnerability type]. [Explain what was reviewed, what remains unclear, and what additional analysis would be needed for a definitive verdict]."
 
 Be conservative - only confirm if the code clearly shows the vulnerability.
 """
@@ -337,8 +314,9 @@ Be conservative - only confirm if the code clearly shows the vulnerability.
                     confirmed += 1
                     
                     progress.console.print(f"  [green]✓ CONFIRMED:[/green] {hypothesis.get('title', '')[:60]}")
-                    if debug:
-                        progress.console.print(f"    [dim]{result.reasoning[:100]}...[/dim]")
+                    if result.reasoning:
+                        # Always show justification for confirmed findings
+                        progress.console.print(f"    [bold cyan]Justification:[/bold cyan] {result.reasoning}")
                 
                 elif result.verdict == "rejected":
                     # Mark as rejected
@@ -354,12 +332,16 @@ Be conservative - only confirm if the code clearly shows the vulnerability.
                     rejected += 1
                     
                     progress.console.print(f"  [red]✗ REJECTED:[/red] {hypothesis.get('title', '')[:60]}")
-                    if debug:
-                        progress.console.print(f"    [dim]{result.reasoning[:100]}...[/dim]")
+                    if result.reasoning:
+                        # Always show justification for rejected findings
+                        progress.console.print(f"    [bold yellow]Reason:[/bold yellow] {result.reasoning}")
                 
                 else:
                     uncertain += 1
                     progress.console.print(f"  [yellow]? UNCERTAIN:[/yellow] {hypothesis.get('title', '')[:60]}")
+                    if result.reasoning:
+                        # Always show justification for uncertain findings
+                        progress.console.print(f"    [bold magenta]Note:[/bold magenta] {result.reasoning}")
             
             except Exception as e:
                 uncertain += 1

@@ -651,7 +651,7 @@ def graph_reset(
 @app.command()
 def finalize(
     project: str = typer.Argument(..., help="Project name"),
-    threshold: float = typer.Option(0.75, "--threshold", "-t", help="Confidence threshold for review"),
+    threshold: float = typer.Option(0.5, "--threshold", "-t", help="Confidence threshold for review"),
     debug: bool = typer.Option(False, "--debug", help="Enable debug mode"),
     platform: str = typer.Option(None, "--platform", help="Override QA platform (e.g., openai, anthropic, mock)"),
     model: str = typer.Option(None, "--model", help="Override QA model (e.g., gpt-4o-mini)")
@@ -667,7 +667,6 @@ def finalize(
     ctx.params = {
         'project_name': project,
         'threshold': threshold,
-        'skip_filter': False,  # Default to not skipping the filter
         'debug': debug,
         'platform': platform,
         'model': model

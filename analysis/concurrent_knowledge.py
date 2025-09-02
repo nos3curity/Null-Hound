@@ -258,13 +258,17 @@ class HypothesisStore(ConcurrentFileStore):
         return self.update_atomic(update)
     
     def adjust_confidence(self, hypothesis_id: str, confidence: float, reason: str) -> bool:
-        """Adjust hypothesis confidence."""
+        """Adjust hypothesis confidence and optionally add QA comment."""
         def update(data):
             if hypothesis_id not in data["hypotheses"]:
                 return data, False
             
             hyp = data["hypotheses"][hypothesis_id]
             hyp["confidence"] = confidence
+            
+            # Store QA comment/reasoning if provided (backwards compatible)
+            if reason:
+                hyp["qa_comment"] = reason
             
             # Auto-update status (analysis agent can only reject, not confirm)
             # Only the finalize agent can set status to "confirmed"

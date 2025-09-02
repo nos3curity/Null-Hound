@@ -14,7 +14,7 @@ from analysis.finalization import Finalizer
 class DummyLLM:
     def __init__(self, json_payload):
         self._payload = json_payload
-    def raw(self, *, system: str, user: str) -> str:
+    def raw(self, *, system: str, user: str, reasoning_effort=None) -> str:
         # Return as fenced json to test parser
         return f"```json\n{json.dumps(self._payload)}\n```"
 

@@ -780,7 +780,8 @@ and systematic vulnerability assessment across all identified attack surfaces.""
                     'junior_model': hyp.get('junior_model'),
                     'senior_model': hyp.get('senior_model'),
                     'supporting_evidence': hyp.get('supporting_evidence', []),
-                    'properties': hyp.get('properties', {})
+                    'properties': hyp.get('properties', {}),
+                    'qa_comment': hyp.get('qa_comment', '')  # Include QA comment if available
                 }
                 findings.append(finding)
         
@@ -1955,6 +1956,15 @@ External dependencies are limited and clearly defined."""
                 </div>
                 '''
             
+            # Add QA comment if available
+            qa_comment_html = ''
+            if finding.get('qa_comment'):
+                qa_comment_html = f'''
+                <div class="qa-comment" style="margin-top: 1em; padding: 10px; background: #f0f8ff; border-left: 3px solid #4682b4;">
+                    <strong>QA Review:</strong> {self._escape_html(finding['qa_comment'])}
+                </div>
+                '''
+            
             html_parts.append(f'''
             <div class="finding {severity}">
                 <span class="severity-badge severity-{severity}">{severity}</span>
@@ -1963,6 +1973,7 @@ External dependencies are limited and clearly defined."""
                     {self._format_paragraphs_html(finding.get('professional_description', finding['description']))}
                 </div>
                 <p><strong>Affected Components:</strong> {finding.get('affected_description', self._describe_affected_components(finding.get('affected', [])))}</p>
+                {qa_comment_html}
                 {code_html}
             </div>
             ''')
@@ -2239,11 +2250,16 @@ The audit employed a comprehensive security assessment methodology including:
         
         md_parts = []
         for finding in findings:
+            # Include QA comment if available
+            qa_comment = ''
+            if finding.get('qa_comment'):
+                qa_comment = f"\n\n**QA Review:** {finding['qa_comment']}"
+            
             md_parts.append(f"""### [{finding['severity'].upper()}] {finding['title']}
 
 **Affected:** {finding.get('affected_description', self._describe_affected_components(finding.get('affected', [])))}  
 
-{finding.get('professional_description', finding['description'])}
+{finding.get('professional_description', finding['description'])}{qa_comment}
 
 ---""")
         

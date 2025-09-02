@@ -158,6 +158,10 @@ class Strategist:
         Returns a list of dicts with keys:
           description, details, vulnerability_type, severity, confidence, node_ids, reasoning
         """
+        # Extract valid node IDs from context for validation
+        import re
+        node_id_pattern = r'\[([a-zA-Z0-9_]+)\]'
+        valid_node_ids = set(re.findall(node_id_pattern, context))
         system = (
             "You are a deep-thinking senior smart-contract security auditor.\n"
             "Your job is to: (1) think deeply about the active investigation aspect,\n"
@@ -175,9 +179,12 @@ class Strategist:
             "CONTEXT (includes === INVESTIGATION GOAL === and compressed history):\n" + context + "\n\n"
             "OUTPUT INSTRUCTIONS:\n"
             "1) HYPOTHESES (one per line, exactly this pipe-separated format):\n"
-            "   Title | Type | Root Cause | Attack Vector | Affected Nodes | Affected Code | Severity | Confidence | Reasoning\n"
+            "   Title | Type | Root Cause | Attack Vector | Affected Node IDs | Affected Code | Severity | Confidence | Reasoning\n"
             "   - severity: critical|high|medium|low; confidence: high|medium|low\n"
             "   - Keep Title concise and actionable.\n"
+            "   - CRITICAL: Affected Node IDs must be EXACT node IDs from the graphs shown above (e.g., func_transfer, contract_Token, state_balances)\n"
+            "   - Use comma-separated list of actual node IDs from [brackets] in the graphs, NOT descriptions\n"
+            "   - You MUST provide at least one valid node ID for each hypothesis\n"
             "   - Affected Code should reference concrete functions/files if possible.\n\n"
             "2) GUIDANCE (next steps for the Scout):\n"
             "   - Provide 2–5 concrete CODE-ONLY actions to gather evidence or rule in/out the hypotheses (load/read specific files, trace auth/dataflow, check invariants).\n"
@@ -266,7 +273,26 @@ class Strategist:
             elif 'low' in conf_word:
                 confidence = 0.4
 
-            node_ids = [n.strip() for n in affected_nodes.split(',') if n.strip()] or ['system']
+            # Parse and validate node IDs
+            raw_node_ids = [n.strip() for n in affected_nodes.split(',') if n.strip()]
+            node_ids = []
+            
+            for nid in raw_node_ids:
+                # Check if this looks like a valid node ID (no spaces, reasonable length)
+                if nid in valid_node_ids:
+                    # It's a valid node ID from the context
+                    node_ids.append(nid)
+                elif len(nid) < 50 and ' ' not in nid and nid != '':
+                    # Might be a node ID not in context but looks valid
+                    node_ids.append(nid)
+                # Otherwise skip it (it's likely a description)
+            
+            # Skip hypotheses with no valid node IDs
+            if not node_ids:
+                # Log this for debugging if needed
+                print(f"[WARNING] Skipping hypothesis with no valid node IDs: {title}")
+                continue
+            
             details = (
                 f"VULNERABILITY TYPE: {vuln_type}\n"
                 f"ROOT CAUSE: {root_cause}\n"

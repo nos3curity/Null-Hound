@@ -20,41 +20,35 @@ models:
   graph:
     provider: openai
     model: gpt-4.1
-    max_context: 1000000  # 1M tokens for GPT-4.1 - leverages full context for graph building iterations
-  
-  # Strategist model - used for initial graph discovery/design phase and hypothesis generation
-  # Should have reasonable context to avoid token limit errors
-  strategist:
-    provider: openai
-    model: gpt-4
-    # max_context not specified - will use global default (256k)
-    # This is intentional to keep discovery phase manageable
-  
+    max_context: 1000000  # 1M tokens for GPT-4.1
+    
   # Scout/agent model for exploration
   scout:
     provider: openai
     model: gpt-4.1
-    max_context: 500000   # Can set different limit per model
+    max_context: 1000000
     # reasoning_effort: low
   
   # Strategic thinking model
   strategist:
     provider: openai
     model: gpt-5
-    max_context: 400000   # 400k tokens
-    plan_reasoning_effort: low
+    max_context: 256000
+    plan_reasoning_effort: medium
     hypothesize_reasoning_effort: high
   
   # Finalization model
   finalize:
     provider: openai
-    model: gpt-5-nano
+    model: gpt-5
+    reasoning_effort: high
     # No max_context specified - will use global default
+    # reasoning_effort: medium  # Options: low, medium, high (GPT-5 models only)
   
   # Reporting model
   reporting:
     provider: openai
-    model: gpt-5-nano
+    model: gpt-4o
     # No max_context specified - will use global default
 
 # Global context settings (used when model doesn't specify max_context)
