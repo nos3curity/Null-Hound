@@ -78,7 +78,7 @@ models:
     model: gpt-5
 ```
 
-## Audit Workflow Walkthrough
+## Complete Audit Workflow
 
 ### Step 1: Create a Project
 
@@ -183,7 +183,28 @@ Hypotheses Status:
   Confirmed: 3
 ```
 
-### Step 4: Run Targeted Investigations
+### Step 4: Monitor Progress
+
+Check audit progress and findings at any time:
+
+```bash
+# View current hypotheses (findings)
+./hound.py hypotheses list myaudit
+
+# See detailed hypothesis information
+./hound.py hypotheses list myaudit --verbose
+
+# Filter by confidence level
+./hound.py hypotheses list myaudit --min-confidence 0.8
+
+# Check coverage statistics
+./hound.py project coverage myaudit
+
+# View session details
+./hound.py project info myaudit
+```
+
+### Step 5: Run Targeted Investigations
 
 For specific concerns, run focused investigations without full planning:
 
@@ -196,7 +217,7 @@ For specific concerns, run focused investigations without full planning:
   --iterations 5
 ```
 
-### Step 5: Finalize and Generate Reports
+### Step 6: Finalize Findings
 
 Review findings and produce professional audit reports:
 
@@ -210,6 +231,88 @@ Review findings and produce professional audit reports:
   --model gpt-4o
 
 # View the generated report
+./hound.py report view myaudit
+```
+
+### Step 7: Generate Proof-of-Concepts
+
+Create and manage proof-of-concept exploits for confirmed vulnerabilities:
+
+```bash
+# Generate PoC prompts for confirmed vulnerabilities
+./hound.py poc make-prompt myaudit
+
+# Generate for a specific hypothesis
+./hound.py poc make-prompt myaudit --hypothesis hyp_12345
+
+# Import existing PoC files
+./hound.py poc import myaudit hyp_12345 exploit.sol test.js \
+  --description "Demonstrates reentrancy exploit"
+
+# List all imported PoCs
+./hound.py poc list myaudit
+```
+
+The PoC workflow:
+1. **make-prompt** generates detailed prompts for coding agents (like Claude Code) to create exploits
+2. **import** adds your PoC files to the project, linking them to specific vulnerabilities
+3. Imported PoCs are automatically included in the final report with syntax highlighting
+
+### Step 8: Generate Professional Reports
+
+Produce comprehensive audit reports with all findings and PoCs:
+
+```bash
+# Generate HTML report (includes imported PoCs)
+./hound.py report myaudit
+
+# View the generated report
+./hound.py report view myaudit
+
+# Export report to specific location
+./hound.py report myaudit --output /path/to/report.html
+```
+
+Reports include:
+- Executive summary
+- Detailed vulnerability descriptions
+- Affected code snippets
+- Proof-of-concept exploits (if imported)
+- Severity ratings and confidence scores
+
+## Complete Example Workflow
+
+Here's a full audit from start to finish:
+
+```bash
+# 1. Create project
+./hound.py project create myaudit /path/to/code
+
+# 2. Build knowledge graphs
+./hound.py graph build myaudit --graphs 5 --iterations 3
+
+# 3. Run initial audit
+./hound.py agent audit myaudit --time-limit 30
+
+# 4. Check findings
+./hound.py hypotheses list myaudit
+
+# 5. Continue audit if needed
+./hound.py agent audit myaudit --session <session_id> --time-limit 20
+
+# 6. Finalize high-confidence findings
+./hound.py finalize myaudit --confidence-threshold 0.7
+
+# 7. Generate PoC prompts
+./hound.py poc make-prompt myaudit
+
+# 8. Import PoCs (after creating them)
+./hound.py poc import myaudit hyp_abc123 exploit.sol
+
+# 9. Generate final report
+./hound.py report myaudit
+
+# 10. View results
 ./hound.py report view myaudit
 ```
 
@@ -275,21 +378,35 @@ When you attach to a session, its status is set to `active` while the audit runs
 
 ## Managing Hypotheses
 
-Hypotheses accumulate across sessions as the agent learns:
+Hypotheses are the core findings that accumulate across sessions:
 
 ```bash
 # List all hypotheses with confidence scores
-./hound.py project hypotheses myaudit
+./hound.py hypotheses list myaudit
 
-# View detailed hypothesis information
-./hound.py project hypotheses myaudit --details
+# View with full details
+./hound.py hypotheses list myaudit --verbose
+
+# Filter by status or confidence
+./hound.py hypotheses list myaudit --status confirmed
+./hound.py hypotheses list myaudit --min-confidence 0.8
+
+# Update hypothesis status
+./hound.py hypotheses update myaudit hyp_12345 --status confirmed
 
 # Reset hypotheses (creates backup)
-./hound.py project reset-hypotheses myaudit
+./hound.py hypotheses reset myaudit
 
 # Force reset without confirmation
-./hound.py project reset-hypotheses myaudit --force
+./hound.py hypotheses reset myaudit --force
 ```
+
+Hypothesis statuses:
+- **proposed**: Initial finding, needs review
+- **investigating**: Under active investigation
+- **confirmed**: Verified vulnerability
+- **rejected**: False positive
+- **resolved**: Fixed in code
 
 ## Advanced Features
 

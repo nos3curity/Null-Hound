@@ -36,15 +36,15 @@ progress_console = Console(file=sys.stderr)
 
 def load_config(config_path: Optional[Path] = None) -> dict:
     """Load configuration from YAML file."""
-    if config_path is None:
-        config_path = Path("config.yaml")
+    from utils.config_loader import load_config as _load_config
+    config = _load_config(config_path)
     
-    if not config_path.exists():
+    if not config and config_path:
+        # Only error if a specific path was requested but not found
         console.print(f"[red]Error: Config file not found: {config_path}[/red]")
         sys.exit(1)
     
-    with open(config_path) as f:
-        return yaml.safe_load(f)
+    return config
 
 
 def build(

@@ -119,14 +119,19 @@ class ProjectManager:
                     sessions_count = len(list(sessions_dir.glob("*.json"))) if sessions_dir.exists() else 0
                     # Count hypotheses if present
                     hypotheses_count = 0
+                    confirmed_count = 0
                     try:
                         hyp_file = project_dir / 'hypotheses.json'
                         if hyp_file.exists():
                             with open(hyp_file, 'r') as hf:
                                 hyp_data = json.load(hf)
-                                hypotheses_count = len((hyp_data or {}).get('hypotheses', {}))
+                                hypotheses = (hyp_data or {}).get('hypotheses', {})
+                                hypotheses_count = len(hypotheses)
+                                # Count confirmed hypotheses
+                                confirmed_count = sum(1 for h in hypotheses.values() if h.get('status') == 'confirmed')
                     except Exception:
                         hypotheses_count = 0
+                        confirmed_count = 0
                     
                     projects.append({
                         "name": name,
@@ -137,6 +142,7 @@ class ProjectManager:
                         "has_graphs": graphs_exist,
                         "sessions": sessions_count,
                         "hypotheses": hypotheses_count,
+                        "confirmed": confirmed_count,
                         "path": str(project_dir)
                     })
         
@@ -342,7 +348,8 @@ def list_projects_cmd(output_json: bool):
     table.add_column("Source", style="white")
     table.add_column("Graphs", style="green")
     table.add_column("Sessions", style="yellow")
-    table.add_column("Hypotheses", style="magenta", justify="right")
+    table.add_column("Hypo", style="magenta", justify="right")
+    table.add_column("Confirmed", style="red", justify="right")
     table.add_column("Last Activity", style="dim")
     
     for proj in sorted(projects, key=lambda x: x["created_at"], reverse=True):
@@ -359,6 +366,7 @@ def list_projects_cmd(output_json: bool):
             "✓" if proj["has_graphs"] else "-",
             str(proj["sessions"]) if proj["sessions"] > 0 else "-",
             str(proj.get("hypotheses", 0)) if proj.get("hypotheses", 0) > 0 else "-",
+            str(proj.get("confirmed", 0)) if proj.get("confirmed", 0) > 0 else "-",
             last_activity_date
         )
     

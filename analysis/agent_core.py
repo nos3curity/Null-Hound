@@ -95,7 +95,7 @@ class AutonomousAgent:
         
         # Use provided config or load defaults
         if config is None:
-            from commands.graph import load_config
+            from utils.config_loader import load_config
             config = load_config()
         
         # Save config for later utilities

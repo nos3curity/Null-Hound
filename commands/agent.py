@@ -35,7 +35,7 @@ def run_investigation(project_path: str, prompt: str, iterations: Optional[int] 
     console = Console()
     
     # Load config properly
-    from commands.graph import load_config
+    from utils.config_loader import load_config
     config = None
     
     try:
@@ -45,9 +45,8 @@ def run_investigation(project_path: str, prompt: str, iterations: Optional[int] 
                 config = load_config(config_path)
         else:
             # Try default config.yaml
-            default_config = Path("config.yaml")
-            if default_config.exists():
-                config = load_config(default_config)
+            # Load config using default search order
+            config = load_config()
     except Exception as e:
         console.print(f"[yellow]Warning: Could not load config: {e}[/yellow]")
         console.print("[yellow]Using default configuration[/yellow]")
@@ -638,7 +637,7 @@ class AgentRunner:
             return False
         
         # Load config properly using the standard method
-        from commands.graph import load_config
+        from utils.config_loader import load_config
         if self.config_path and self.config_path.exists():
             config = load_config(self.config_path)
         else:

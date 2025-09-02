@@ -13,7 +13,7 @@ import random
 from llm.client import LLMClient
 from pydantic import BaseModel, Field
 from typing import List as ListType
-from commands.graph import load_config
+from utils.config_loader import load_config
 
 
 class CustomGraphSpec(BaseModel):

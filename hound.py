@@ -26,6 +26,10 @@ app.add_typer(project_app, name="project")
 agent_app = typer.Typer(help="Run security analysis agents")
 app.add_typer(agent_app, name="agent")
 
+# Create poc subcommand group
+poc_app = typer.Typer(help="Manage proof-of-concept exploits")
+app.add_typer(poc_app, name="poc")
+
 # Helper to invoke Click command functions without noisy tracebacks
 def _invoke_click(cmd_func, params: dict):
     import click
@@ -215,7 +219,7 @@ def agent_audit(
     from random import choice as _choice
     # Light narrative seasoning for audit kickoff with actual model names
     try:
-        from commands.graph import load_config as _load_cfg
+        from utils.config_loader import load_config as _load_cfg
         _cfg = _load_cfg(Path(config)) if config else _load_cfg()
         _models = (_cfg or {}).get('models', {})
         
@@ -712,8 +716,54 @@ def report(
     
     try:
         report_command.invoke(ctx)
-    except click.Exit as e:
+    except click.exceptions.Exit as e:
         raise typer.Exit(e.exit_code)
+    except SystemExit as e:
+        raise typer.Exit(e.code if hasattr(e, 'code') else 1)
+
+
+@poc_app.command("make-prompt")
+def poc_make_prompt(
+    project: str = typer.Argument(..., help="Project name"),
+    hypothesis: Optional[str] = typer.Option(None, "--hypothesis", "-h", help="Specific hypothesis ID to generate PoC for"),
+    debug: bool = typer.Option(False, "--debug", help="Enable debug mode")
+):
+    """Generate proof-of-concept prompts for confirmed vulnerabilities."""
+    from commands.poc import make_prompt
+    
+    console.print("[bold cyan]Generating PoC prompts...[/bold cyan]")
+    
+    # Load config
+    from utils.config_loader import load_config
+    config = load_config()
+    
+    # Run make-prompt command
+    make_prompt(project, hypothesis, config)
+
+@poc_app.command("import")
+def poc_import(
+    project: str = typer.Argument(..., help="Project name"),
+    hypothesis: str = typer.Argument(..., help="Hypothesis ID to import PoC for"),
+    files: list[str] = typer.Argument(..., help="Files to import as PoC"),
+    description: Optional[str] = typer.Option(None, "--description", "-d", help="Description of the PoC files")
+):
+    """Import proof-of-concept files for a hypothesis."""
+    from commands.poc import import_poc
+    
+    console.print(f"[bold cyan]Importing {len(files)} file(s) for hypothesis {hypothesis}...[/bold cyan]")
+    
+    # Run import command
+    import_poc(project, hypothesis, files, description)
+
+@poc_app.command("list")
+def poc_list(
+    project: str = typer.Argument(..., help="Project name")
+):
+    """List all imported PoCs for a project."""
+    from commands.poc import list_pocs
+    
+    # Run list command
+    list_pocs(project)
 
 
 @app.command()

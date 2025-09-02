@@ -33,6 +33,7 @@ class ReportGenerator:
         self.hypotheses = self._load_hypotheses()
         self.hypothesis_metadata = self._load_hypothesis_metadata()
         self.agent_runs = self._load_agent_runs()
+        self.pocs = self._load_pocs()  # Load available PoCs
         # Debug helpers for CLI
         self.last_prompt: Optional[str] = None
         self.last_response: Optional[str] = None
@@ -123,6 +124,52 @@ class ReportGenerator:
                 data = json.load(f)
                 return data.get("metadata", {})
         return {}
+    
+    def _load_pocs(self) -> Dict[str, Dict[str, Any]]:
+        """Load available PoCs for hypotheses."""
+        pocs = {}
+        poc_dir = self.project_dir / "poc"
+        
+        if not poc_dir.exists():
+            return pocs
+        
+        # Scan each hypothesis directory
+        for hyp_dir in poc_dir.iterdir():
+            if not hyp_dir.is_dir():
+                continue
+            
+            hypothesis_id = hyp_dir.name
+            metadata_file = hyp_dir / "metadata.json"
+            
+            if metadata_file.exists():
+                with open(metadata_file, 'r') as f:
+                    metadata = json.load(f)
+                
+                # Load actual PoC files
+                poc_files = []
+                for file_info in metadata.get('files', []):
+                    file_path = hyp_dir / file_info['name']
+                    if file_path.exists():
+                        try:
+                            with open(file_path, 'r') as f:
+                                content = f.read()
+                            poc_files.append({
+                                'name': file_info['name'],
+                                'content': content,
+                                'description': file_info.get('description', '')
+                            })
+                        except Exception as e:
+                            # Skip binary or unreadable files
+                            if self.debug:
+                                print(f"[!] Could not read PoC file {file_path}: {e}")
+                
+                if poc_files:
+                    pocs[hypothesis_id] = {
+                        'metadata': metadata,
+                        'files': poc_files
+                    }
+        
+        return pocs
     
     def _format_graph_name(self, graph_name: str) -> str:
         """Format graph names to be human-readable.
@@ -1365,6 +1412,65 @@ External dependencies are limited and clearly defined."""
             color: #64738c;
         }}
         
+        /* Proof of Concept Styles */
+        .poc-section {{
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background: linear-gradient(135deg, rgba(26,31,46,0.7) 0%, rgba(15,20,25,0.8) 100%);
+            border-radius: 12px;
+            border: 1px solid rgba(100,181,246,0.2);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3),
+                        inset 0 1px 0 rgba(255,255,255,0.05);
+        }}
+        
+        .poc-section h4 {{
+            color: #64b5f6;
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }}
+        
+        .poc-file {{
+            margin-bottom: 1.5rem;
+            background: rgba(20,25,35,0.5);
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid rgba(100,181,246,0.1);
+        }}
+        
+        .poc-file h5 {{
+            color: #90caf9;
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            font-size: 0.95rem;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }}
+        
+        .poc-description {{
+            color: #8892a9;
+            font-style: italic;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+        }}
+        
+        .poc-file pre {{
+            background: rgba(10,12,18,0.7);
+            border: 1px solid rgba(100,181,246,0.1);
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 0;
+        }}
+        
+        .poc-file code {{
+            color: #e0e0e0;
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }}
+        
         /* Statistics Section Styles */
         .stats-section {{
             margin: 60px 0;
@@ -1718,6 +1824,37 @@ External dependencies are limited and clearly defined."""
         paragraphs = (text or '').strip().split('\n\n')
         return '\n'.join(f'<p>{p.strip()}</p>' for p in paragraphs if p.strip())
     
+    def _format_poc_html(self, poc_data: Dict[str, Any]) -> str:
+        """Format PoC files as HTML with syntax highlighting."""
+        if not poc_data or not poc_data.get('files'):
+            return ''
+        
+        html_parts = ['<div class="poc-section">']
+        html_parts.append('<h4>Proof of Concept</h4>')
+        
+        for poc_file in poc_data['files']:
+            name = poc_file['name']
+            content = poc_file['content']
+            description = poc_file.get('description', '')
+            
+            # Detect language from file extension
+            lang = self._detect_language(name)
+            
+            # Format the PoC
+            html_parts.append(f'<div class="poc-file">')
+            html_parts.append(f'<h5>{self._escape_html(name)}</h5>')
+            
+            if description:
+                html_parts.append(f'<p class="poc-description">{self._escape_html(description)}</p>')
+            
+            # Format code with syntax highlighting
+            escaped_content = self._escape_html(content)
+            html_parts.append(f'<pre><code class="language-{lang}">{escaped_content}</code></pre>')
+            html_parts.append('</div>')
+        
+        html_parts.append('</div>')
+        return '\n'.join(html_parts)
+    
     def _format_component_diagram_html(self, diagram: str) -> str:
         """Format component diagram into HTML."""
         if not diagram or not diagram.strip():
@@ -1965,6 +2102,13 @@ External dependencies are limited and clearly defined."""
                 </div>
                 '''
             
+            # Check if there's a PoC for this hypothesis
+            poc_html = ''
+            hypothesis_id = finding.get('id', '')
+            if hypothesis_id and hypothesis_id in self.pocs:
+                poc_data = self.pocs[hypothesis_id]
+                poc_html = self._format_poc_html(poc_data)
+            
             html_parts.append(f'''
             <div class="finding {severity}">
                 <span class="severity-badge severity-{severity}">{severity}</span>
@@ -1975,6 +2119,7 @@ External dependencies are limited and clearly defined."""
                 <p><strong>Affected Components:</strong> {finding.get('affected_description', self._describe_affected_components(finding.get('affected', [])))}</p>
                 {qa_comment_html}
                 {code_html}
+                {poc_html}
             </div>
             ''')
         

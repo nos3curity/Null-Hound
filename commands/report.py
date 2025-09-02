@@ -96,7 +96,7 @@ def report(project_name: str, output: Optional[str], format: str,
     ]))
     
     # Initialize report generator
-    from commands.graph import load_config
+    from utils.config_loader import load_config
     config = load_config()
     
     generator = ReportGenerator(
