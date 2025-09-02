@@ -166,6 +166,22 @@ def project_reset_hypotheses(
     from commands.project import reset_hypotheses
     _invoke_click(reset_hypotheses, {'name': name, 'force': force})
 
+@project_app.command("set-hypothesis-status")
+def project_set_hypothesis_status(
+    project_name: str = typer.Argument(..., help="Project name"),
+    hypothesis_id: str = typer.Argument(..., help="Hypothesis ID (can be partial)"),
+    status: str = typer.Argument(..., help="New status: proposed, confirmed, or rejected"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force status change without confirmation")
+):
+    """Set the status of a hypothesis to proposed, confirmed, or rejected."""
+    from commands.project import set_hypothesis_status
+    _invoke_click(set_hypothesis_status, {
+        'project_name': project_name,
+        'hypothesis_id': hypothesis_id,
+        'status': status,
+        'force': force
+    })
+
 # Agent audit subcommand
 @agent_app.command("audit")
 def agent_audit(

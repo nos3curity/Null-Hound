@@ -769,6 +769,88 @@ def hypotheses(name: str, details: bool = False):
     console.print(f"  [yellow]High confidence (≥75%): {high_conf}[/yellow]")
 
 
+@project.command(name='set-hypothesis-status')
+@click.argument('project_name')
+@click.argument('hypothesis_id')
+@click.argument('status', type=click.Choice(['proposed', 'confirmed', 'rejected'], case_sensitive=False))
+@click.option('--force', '-f', is_flag=True, help="Force status change without confirmation")
+def set_hypothesis_status(project_name: str, hypothesis_id: str, status: str, force: bool):
+    """Set the status of a hypothesis to proposed, confirmed, or rejected."""
+    manager = ProjectManager()
+    project = manager.get_project(project_name)
+    
+    if not project:
+        console.print(f"[red]Project '{project_name}' not found.[/red]")
+        raise click.Exit(1)
+    
+    project_dir = Path(project["path"])
+    hypothesis_file = project_dir / "hypotheses.json"
+    
+    if not hypothesis_file.exists():
+        console.print(f"[yellow]No hypotheses found for project '{project_name}'.[/yellow]")
+        raise click.Exit(1)
+    
+    # Load hypotheses
+    with open(hypothesis_file, 'r') as f:
+        hyp_data = json.load(f)
+    
+    hypotheses = hyp_data.get("hypotheses", {})
+    
+    # Find hypothesis by ID (support partial match)
+    matching_ids = []
+    for hid in hypotheses.keys():
+        if hid.startswith(hypothesis_id):
+            matching_ids.append(hid)
+    
+    if not matching_ids:
+        console.print(f"[red]No hypothesis found matching ID '{hypothesis_id}'.[/red]")
+        raise click.Exit(1)
+    
+    if len(matching_ids) > 1:
+        console.print(f"[red]Multiple hypotheses match '{hypothesis_id}':[/red]")
+        for hid in matching_ids[:5]:  # Show max 5 matches
+            console.print(f"  - {hid[:16]}: {hypotheses[hid].get('title', 'Unknown')[:60]}")
+        console.print("[yellow]Please provide a more specific ID.[/yellow]")
+        raise click.Exit(1)
+    
+    # Found single match
+    full_id = matching_ids[0]
+    hypothesis = hypotheses[full_id]
+    old_status = hypothesis.get("status", "proposed")
+    
+    # Confirm change if not forced
+    if not force:
+        console.print(f"[bold]Hypothesis:[/bold] {hypothesis.get('title', 'Unknown')}")
+        console.print(f"[bold]Current status:[/bold] {old_status}")
+        console.print(f"[bold]New status:[/bold] {status}")
+        if not Confirm.ask(f"[yellow]Change status from '{old_status}' to '{status}'?[/yellow]"):
+            console.print("[dim]Status change cancelled.[/dim]")
+            return
+    
+    # Update status
+    hypothesis["status"] = status.lower()
+    
+    # Save updated hypotheses
+    with open(hypothesis_file, 'w') as f:
+        json.dump(hyp_data, f, indent=2)
+    
+    console.print(f"[bright_green]Updated hypothesis status to '{status}'.[/bright_green]")
+    console.print(f"[dim]ID: {full_id[:16]}[/dim]")
+    console.print(f"[dim]Title: {hypothesis.get('title', 'Unknown')}[/dim]")
+    
+    # Show summary of status counts
+    status_counts = {'proposed': 0, 'confirmed': 0, 'rejected': 0}
+    for h in hypotheses.values():
+        h_status = h.get('status', 'proposed')
+        if h_status in status_counts:
+            status_counts[h_status] += 1
+    
+    console.print(f"\n[bold]Status Summary:[/bold]")
+    console.print(f"  [green]Confirmed: {status_counts['confirmed']}[/green]")
+    console.print(f"  [red]Rejected: {status_counts['rejected']}[/red]")
+    console.print(f"  [dim]Proposed: {status_counts['proposed']}[/dim]")
+
+
 @project.command()
 @click.argument('name')
 def path(name: str):
