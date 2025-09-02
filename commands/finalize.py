@@ -355,9 +355,9 @@ Be conservative - only confirm if the code clearly shows the vulnerability.
     console.print("\n" + "="*60)
     console.print(f"\n[bold]Finalization Complete:[/bold]")
     console.print(f"  [green]✓ Confirmed:[/green] {confirmed}")
-    console.print(f"  [red]✗ Rejected:[/red] {rejected + len(filtered_out)}")
+    console.print(f"  [red]✗ Rejected:[/red] {rejected}")
     console.print(f"  [yellow]? Uncertain:[/yellow] {uncertain}")
-    console.print(f"\n[dim]Total reviewed: {len(candidates) + len(filtered_out)}[/dim]")
+    console.print(f"\n[dim]Total reviewed: {len(candidates)}[/dim]")
     
     # Show confirmed vulnerabilities
     if confirmed > 0:
