@@ -34,6 +34,8 @@ The system employs a **senior/junior agent pattern**: a Strategist (senior) revi
 
 Each audit creates a **session** that tracks coverage, findings, and token usage. Knowledge accumulates across sessions, building deeper understanding over time.
 
+**Codebase size considerations:** While Hound is language-agnostic and can analyze any codebase, it's optimized for small-to-medium sized projects like typical smart contract applications. Large enterprise codebases may exceed context limits and require selective analysis of specific subsystems.
+
 ### Links
 
 - [Original blog post](https://muellerberndt.medium.com/unleashing-the-hound-how-ai-agents-find-deep-logic-bugs-in-any-codebase-64c2110e3a6f)
