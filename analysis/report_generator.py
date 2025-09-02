@@ -2097,8 +2097,9 @@ External dependencies are limited and clearly defined."""
             qa_comment_html = ''
             if finding.get('qa_comment'):
                 qa_comment_html = f'''
-                <div class="qa-comment" style="margin-top: 1em; padding: 10px; background: #f0f8ff; border-left: 3px solid #4682b4;">
-                    <strong>QA Review:</strong> {self._escape_html(finding['qa_comment'])}
+                <div class="qa-comment" style="margin-top: 1em; padding: 15px; background: rgba(70, 130, 180, 0.1); border-left: 3px solid #4682b4; border-radius: 8px;">
+                    <strong style="color: #64b5f6;">QA Review:</strong> 
+                    <span style="color: #c3cfe2; line-height: 1.6;">{self._escape_html(finding['qa_comment'])}</span>
                 </div>
                 '''
             

@@ -65,7 +65,7 @@ graph:
 models:
   scout:      # Junior auditor
     platform: openai
-    model: gpt-5-mini
+    model: gpt-4.1
   
   strategist: # Senior auditopr
     platform: openai
@@ -76,7 +76,35 @@ models:
   finalizer:  # Report generation
     platform: openai
     model: gpt-5
+    reasoning_effort: high
 ```
+
+## Quick Start
+
+Here's the essential workflow:
+
+```bash
+# Setup
+./hound.py project create myaudit /path/to/code
+./hound.py graph build myaudit
+
+# Audit (adjust time based on desired depth)
+./hound.py agent audit myaudit --time-limit 60
+./hound.py hypotheses list myaudit  # Check progress
+
+# Quality assurance
+./hound.py finalize myaudit
+
+# Create PoCs (optional)
+#./hound.py poc (...))
+
+# Create report
+./hound.py report myaudit
+
+
+```
+
+**Note:** Audit quality scales with time and model capability. Use longer runs and advanced models for more complete results.
 
 ## Complete Audit Workflow
 
@@ -97,7 +125,7 @@ Projects organize your audits and store all analysis data:
 
 ### Step 2: Build Knowledge Graphs
 
-Hound analyzes your codebase and builds aspect-oriented knowledge graphs:
+Hound analyzes your codebase and builds aspect-oriented knowledge graphs that serve as the foundation for all subsequent analysis:
 
 ```bash
 # Build graphs (uses scout model by default)
@@ -110,7 +138,13 @@ Hound analyzes your codebase and builds aspect-oriented knowledge graphs:
 ./hound.py graph list myaudit
 ```
 
-Hound inspects the codebase and creates graphs for different aspects. Each graph links abstract concepts to specific code locations, building a semantic understanding of your system.
+**What happens:** Hound inspects the codebase and creates specialized graphs for different aspects (e.g., access control, value flows, state management). Each graph contains:
+- **Nodes**: Key concepts, functions, and state variables
+- **Edges**: Relationships between components
+- **Annotations**: Observations and assumptions tied to specific code locations
+- **Code cards**: Extracted code snippets linked to graph elements
+
+These graphs enable Hound to reason about high-level patterns while maintaining precise code grounding.
 
 ### Step 3: Run the Audit
 
@@ -120,10 +154,8 @@ The audit phase uses the **senior/junior pattern** with planning and investigati
 # Run a full audit with strategic planning (new session)
 ./hound.py agent audit myaudit
 
-# Use specific models
-./hound.py agent audit myaudit \
-  --model gpt-4o-mini \
-  --strategist-model gpt-4o
+# Set time limit (in minutes)
+./hound.py agent audit myaudit --time-limit 30
 
 # Enable debug logging (captures all prompts/responses)
 ./hound.py agent audit myaudit --debug
@@ -131,6 +163,20 @@ The audit phase uses the **senior/junior pattern** with planning and investigati
 # Attach to an existing session and continue where you left off
 ./hound.py agent audit myaudit --session <session_id>
 ```
+
+**Key parameters:**
+- **--time-limit**: Stop after N minutes (useful for incremental audits)
+- **--plan-n**: Number of investigations per planning batch
+- **--session**: Resume a specific session (continues coverage/planning)
+- **--debug**: Save all LLM interactions to `.hound_debug/`
+
+**Audit duration and depth:**
+Hound is designed to deliver increasingly complete results with longer audits. The analyze step can range from:
+- **Quick scan**: 1 hour with fast models (gpt-4o-mini) for initial findings
+- **Standard audit**: 4-8 hours with balanced models for comprehensive coverage
+- **Deep audit**: Multiple days with advanced models (GPT-5) for exhaustive analysis
+
+The quality and duration depend heavily on the models used. Faster models provide quick results but may miss subtle issues, while advanced reasoning models find deeper vulnerabilities but require more time.
 
 **What happens during an audit:**
 
@@ -185,7 +231,7 @@ Hypotheses Status:
 
 ### Step 4: Monitor Progress
 
-Check audit progress and findings at any time:
+Check audit progress and findings at any time during the audit:
 
 ```bash
 # View current hypotheses (findings)
@@ -204,7 +250,14 @@ Check audit progress and findings at any time:
 ./hound.py project info myaudit
 ```
 
-### Step 5: Run Targeted Investigations
+**Understanding hypotheses:** Each hypothesis represents a potential vulnerability with:
+- **Confidence score**: 0.0-1.0 indicating likelihood of being a real issue
+- **Status**: `proposed` (initial), `investigating`, `confirmed`, `rejected`
+- **Severity**: critical, high, medium, low
+- **Type**: reentrancy, access control, logic error, etc.
+- **Annotations**: Exact code locations and evidence
+
+### Step 5: Run Targeted Investigations (Optional)
 
 For specific concerns, run focused investigations without full planning:
 
@@ -215,24 +268,46 @@ For specific concerns, run focused investigations without full planning:
 # Quick investigation with fewer iterations
 ./hound.py agent investigate "Analyze access control in admin functions" myaudit \
   --iterations 5
+
+# Use specific models for investigation
+./hound.py agent investigate "Review emergency functions" myaudit \
+  --model gpt-4o \
+  --strategist-model gpt-5
 ```
 
-### Step 6: Finalize Findings
+**When to use targeted investigations:**
+- Following up on specific concerns after initial audit
+- Testing a hypothesis about a particular vulnerability
+- Quick checks before full audit
+- Investigating areas not covered by automatic planning
 
-Review findings and produce professional audit reports:
+**Note:** These investigations still update the hypothesis store and coverage tracking.
+
+### Step 6: Quality Assurance
+
+A reasoning model reviews all hypotheses and updates their status based on evidence:
 
 ```bash
-# Generate comprehensive audit report
+# Run finalization with quality review
 ./hound.py finalize myaudit
 
-# Customize report generation
+# Customize confidence threshold
 ./hound.py finalize myaudit \
   --confidence-threshold 0.7 \
   --model gpt-4o
 
-# View the generated report
-./hound.py report view myaudit
+# Include all findings (not just confirmed)
+./hound.py finalize myaudit --include-all
 ```
+
+**What happens during finalization:**
+1. A reasoning model (default: GPT-5) reviews each hypothesis
+2. Evaluates the evidence and code context
+3. Updates status to `confirmed` or `rejected` based on analysis
+4. Adjusts confidence scores based on evidence strength
+5. Prepares findings for report generation
+
+**Important:** By default, only `confirmed` findings appear in the final report. Use `--include-all` to include all hypotheses regardless of status.
 
 ### Step 7: Generate Proof-of-Concepts
 
@@ -253,10 +328,19 @@ Create and manage proof-of-concept exploits for confirmed vulnerabilities:
 ./hound.py poc list myaudit
 ```
 
-The PoC workflow:
-1. **make-prompt** generates detailed prompts for coding agents (like Claude Code) to create exploits
-2. **import** adds your PoC files to the project, linking them to specific vulnerabilities
-3. Imported PoCs are automatically included in the final report with syntax highlighting
+**The PoC workflow:**
+1. **make-prompt**: Generates detailed prompts for coding agents (like Claude Code)
+   - Includes vulnerable file paths (project-relative)
+   - Specifies exact functions to target
+   - Provides clear exploit requirements
+   - Saves prompts to `poc_prompts/` directory
+
+2. **import**: Links PoC files to specific vulnerabilities
+   - Files stored in `poc/[hypothesis-id]/`
+   - Metadata tracks descriptions and timestamps
+   - Multiple files per vulnerability supported
+
+3. **Automatic inclusion**: Imported PoCs appear in reports with syntax highlighting
 
 ### Step 8: Generate Professional Reports
 
@@ -266,6 +350,9 @@ Produce comprehensive audit reports with all findings and PoCs:
 # Generate HTML report (includes imported PoCs)
 ./hound.py report myaudit
 
+# Include all hypotheses, not just confirmed
+./hound.py report myaudit --include-all
+
 # View the generated report
 ./hound.py report view myaudit
 
@@ -273,48 +360,70 @@ Produce comprehensive audit reports with all findings and PoCs:
 ./hound.py report myaudit --output /path/to/report.html
 ```
 
-Reports include:
-- Executive summary
-- Detailed vulnerability descriptions
-- Affected code snippets
-- Proof-of-concept exploits (if imported)
-- Severity ratings and confidence scores
+**Report contents:**
+- **Executive summary**: High-level overview and risk assessment
+- **System architecture**: Understanding of the codebase structure
+- **Findings**: Detailed vulnerability descriptions (only `confirmed` by default)
+- **Code snippets**: Relevant vulnerable code with line numbers
+- **Proof-of-concepts**: Any imported PoCs with syntax highlighting
+- **Severity distribution**: Visual breakdown of finding severities
+- **Recommendations**: Suggested fixes and improvements
+
+**Note:** The report uses a professional dark theme and includes all imported PoCs automatically.
 
 ## Complete Example Workflow
 
-Here's a full audit from start to finish:
+Here's a full audit from start to finish with explanations:
 
 ```bash
-# 1. Create project
+# 1. Create project from source code
 ./hound.py project create myaudit /path/to/code
 
-# 2. Build knowledge graphs
+# 2. Build knowledge graphs (foundation for analysis)
 ./hound.py graph build myaudit --graphs 5 --iterations 3
 
-# 3. Run initial audit
-./hound.py agent audit myaudit --time-limit 30
+# 3. Run initial audit (set time limit based on your needs)
+./hound.py agent audit myaudit --time-limit 60  # Adjust as needed
 
-# 4. Check findings
+# 4. Check findings mid-audit
 ./hound.py hypotheses list myaudit
+# Note the session ID from output for resuming
 
-# 5. Continue audit if needed
-./hound.py agent audit myaudit --session <session_id> --time-limit 20
+# 5. Continue audit if coverage < 80% or promising leads remain
+./hound.py agent audit myaudit --session <session_id> --time-limit 60
 
-# 6. Finalize high-confidence findings
+# 6. Run quality assurance (reviews and confirms findings)
 ./hound.py finalize myaudit --confidence-threshold 0.7
 
-# 7. Generate PoC prompts
+# 7. Generate PoC prompts for confirmed vulnerabilities
 ./hound.py poc make-prompt myaudit
+# Copy prompts to Claude Code or another coding agent
 
-# 8. Import PoCs (after creating them)
-./hound.py poc import myaudit hyp_abc123 exploit.sol
+# 8. Import created PoCs
+./hound.py poc import myaudit hyp_abc123 exploit.sol \
+  --description "Reentrancy exploit demonstration"
 
-# 9. Generate final report
+# 9. Generate final professional report
 ./hound.py report myaudit
 
-# 10. View results
+# 10. View results in browser
 ./hound.py report view myaudit
 ```
+
+**Duration guidance:**
+The time for each step varies dramatically based on:
+- **Model selection**: GPT-4o-mini vs GPT-5 can be 10x difference in speed
+- **Codebase size**: From small contracts to large systems
+- **Depth desired**: Quick scan vs exhaustive analysis
+- **Coverage goals**: 50% coverage vs 95% coverage
+
+Typical ranges:
+- **Graph building**: Minutes to hours depending on codebase size and iteration depth
+- **Audit phase**: 1 hour to multiple days - Hound finds more with longer runs
+- **Quality assurance**: Proportional to number of findings
+- **PoC creation**: Varies by complexity of vulnerabilities
+
+**Remember:** Hound is designed for depth. Longer audits with advanced models yield more complete and nuanced findings. Use time limits for incremental progress, then resume to continue deeper analysis.
 
 ## Session Management
 
