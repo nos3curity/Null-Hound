@@ -61,13 +61,13 @@ Configure models in `config.yaml`:
 ```yaml
 
 graph:
-    platform: openai
-    model: gpt-4.1
+    platform: gemini
+    model: gemini-2.5-flash
 
 models:
   scout:      # Junior auditor
     platform: openai
-    model: gpt-4.1
+    model: gpt-5-mini
   
   strategist: # Senior auditopr
     platform: openai
