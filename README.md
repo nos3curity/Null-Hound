@@ -60,25 +60,31 @@ Configure models in `config.yaml`:
 
 ```yaml
 
-graph:
-    platform: gemini
-    model: gemini-2.5-flash
-
-models:
-  scout:      # Junior auditor
-    platform: openai
-    model: gpt-5-mini
-  
-  strategist: # Senior auditopr
-    platform: openai
-    model: gpt-5
-    reasoning_effort: high
-    text_verbosity: low
+  graph:
+    provider: openai
+    model: gpt-4.1
+    max_context: 1000000  # 1M tokens for GPT-4.1
     
-  finalizer:  # Report generation
-    platform: openai
+  scout:
+    provider: openai
+    model: gpt-5-mini
+    max_context: 256000
+  
+  strategist:
+    provider: openai
+    model: gpt-5
+    max_context: 256000
+    plan_reasoning_effort: medium
+    hypothesize_reasoning_effort: high
+  
+  finalize:
+    provider: openai
     model: gpt-5
     reasoning_effort: high
+  
+  reporting:
+    provider: openai
+    model: gpt-4o
 ```
 
 ## Quick Start

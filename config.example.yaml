@@ -18,8 +18,8 @@ models:
   # Graph building model - can have very large context
   # Used for graph building iterations (NOT for initial graph discovery/design)
   graph:
-    provider: gemini
-    model: gemini-2.5-flash
+    provider: openai
+    model: gpt-4.1
     max_context: 1000000  # 1M tokens for GPT-4.1
     
   # Scout/agent model for exploration
