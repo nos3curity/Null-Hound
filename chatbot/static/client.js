@@ -10,6 +10,7 @@ let assistantTranscript = '';
 let activityES = null;
 let pendingEvt = null;
 let nowInvTimer = null;
+let codeViewEl = null;
 
 const AVATARS = {
   neutral: '/static/avatars/neutral.png',
@@ -46,6 +47,42 @@ function chatAppendDelta(role, delta) {
   } else {
     chatAdd(role, delta);
   }
+}
+function esc(s){ return String(s||'').replace(/[&<>]/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function highlightSolidity(src){
+  // Very lightweight highlighter: order matters (comments/strings first)
+  let s = esc(src);
+  // block comments
+  s = s.replace(/\/\*[\s\S]*?\*\//g, m=>`<span class="com">${m}</span>`);
+  // line comments
+  s = s.replace(/(^|\n)\s*\/\/.*?(?=\n|$)/g, m=>`<span class=\"com\">${m}</span>`);
+  // strings
+  s = s.replace(/"([^"\\]|\\.)*"|'([^'\\]|\\.)*'/g, m=>`<span class=\"str\">${m}</span>`);
+  // numbers
+  s = s.replace(/\b\d+\b/g, m=>`<span class=\"num\">${m}</span>`);
+  // keywords/types
+  const kw = ['contract','function','returns','public','external','internal','private','view','pure','payable','if','else','for','while','require','revert','emit','return','modifier','struct','enum','mapping','event','library','using','new','delete','override','virtual','immutable','constant'];
+  const types = ['address','bool','string','bytes','uint','uint256','int','int256','byte','fixed','ufixed'];
+  const kwRe = new RegExp('\\b(' + kw.join('|') + ')\\b','g');
+  const tyRe = new RegExp('\\b(' + types.join('|') + ')\\b','g');
+  s = s.replace(kwRe, m=>`<span class=\"kw\">${m}</span>`);
+  s = s.replace(tyRe, m=>`<span class=\"type\">${m}</span>`);
+  // simple function names (identifier followed by '(')
+  s = s.replace(/\b([A-Za-z_][A-Za-z0-9_]*)\s*(?=\()/g, m=>`<span class=\"fn\">${m}</span>`);
+  return s;
+}
+function renderCode(content, relpath){
+  const ext = (relpath||'').toLowerCase();
+  let html;
+  if (ext.endsWith('.sol')) html = highlightSolidity(content||'');
+  else html = esc(content||'');
+  return `<code>${html}</code>`;
+}
+function showCode(content, relpath){
+  if (!codeViewEl) codeViewEl = document.getElementById('codeView');
+  if (!codeViewEl) return;
+  codeViewEl.innerHTML = renderCode(content||'', relpath||'');
+  try { codeViewEl.scrollTop = 0; } catch(_){ }
 }
 function setAvatar(name) {
   const img = document.getElementById('avatarImg');
@@ -131,13 +168,18 @@ async function sessionConfigure(){
     { type: 'function', name: 'search_graph_nodes', description: 'Search nodes by label/type substring in SystemOverview.', parameters: { type:'object', properties:{ query:{type:'string'}, limit:{type:'number'} }, required: [] } },
     { type: 'function', name: 'get_node_details', description: 'Get compact details + incident edges for a node.', parameters: { type:'object', properties:{ node_id:{type:'string'}, edge_limit:{type:'number'} }, required: ['node_id'] } },
     { type: 'function', name: 'get_file_snippet', description: 'Fetch a small code snippet for a relpath or card_id (uses card store).', parameters: { type:'object', properties:{ relpath:{type:'string'}, card_id:{type:'string'}, max_bytes:{type:'number'} }, required: [] } }
+    ,{ type: 'function', name: 'get_hypothesis_details', description: 'Fetch full hypothesis details by id (node_refs, files, reasoning).', parameters: { type:'object', properties:{ id:{type:'string'} }, required: ['id'] } }
+    ,{ type: 'function', name: 'get_top_hypothesis', description: 'Fetch the highest-confidence hypothesis with enriched details.', parameters: { type:'object', properties:{}, required: [] } }
+    ,{ type: 'function', name: 'list_nodes', description: 'List nodes from the SystemOverview graph.', parameters: { type:'object', properties:{ limit:{type:'number'} }, required: [] } }
+    ,{ type: 'function', name: 'list_files', description: 'List known file relpaths (optionally filter by substring).', parameters: { type:'object', properties:{ limit:{type:'number'}, contains:{type:'string'} }, required: [] } }
+    ,{ type: 'function', name: 'search_repo', description: 'Search repository files for a query and return top file hits with snippets.', parameters: { type:'object', properties:{ query:{type:'string'}, max_files:{type:'number'}, context:{type:'number'}, case_insensitive:{type:'boolean'} }, required: ['query'] } }
   ];
   // Pull active project for persona
   let pid = '';
   try { const r = await fetch('/api/context'); const j = await r.json(); pid = (j && j.project_id) ? j.project_id : ''; } catch(_){}
-  const persona = `You are a junior security auditor (the Scout) assisting on the Hound audit for project: ${pid || '(unset)'}. Speak in first-person singular (“I”). Keep replies BRIEF (ideally 1–2 short sentences). Use DeFi / trader slang naturally (e.g., “gm”, “ser”, “wagmi”) while remaining technically accurate. Start every reply with an over-the-top, creative compliment about the user’s question (enthusiastic, not sarcastic), then give the concise technical answer grounded in the latest plan, investigations, session status, and the SystemOverview graph. Prefer calling functions to retrieve facts instead of guessing. When the user gives audit instructions (e.g., “investigate X”, “check Y next”, “remember Z”), immediately call enqueue_steering with the exact text, then acknowledge briefly. When asked about progress or status, call human_status. When asked what you are doing right now, call get_recent_activity and summarize the current action (mention files or functions if available). To cite code, use get_file_snippet for relevant files/cards and keep snippets short. Do NOT mention raw node counts, card counts, or token usage. If needed, ask for a node_id then fetch details.`;
-  // Fixed energetic speaking style + emotion handling
-  const meta = 'First, set an emotion by calling set_emotion({value}) and do not include any [EMO: ...] tags in your verbal response. Never say the emotion label aloud. Be energetic, enthusiastic, and brisk (≈10–15% faster). Use brief DeFi slang like “ser” / “gm” tastefully. Always begin with an exuberant praise of the user’s question, then deliver the concise technical answer.';
+  const persona = `You are a junior security auditor (the Scout) assisting on the Hound audit for project: ${pid || '(unset)'}. Speak ONLY in first-person singular (“I”). Never use “we”, “we're”, “our”, or “us” — even when referring to the audit team; rephrase as “I”. Keep replies brief (1–2 short sentences), direct, and professional — no flattery or filler. Ground answers in the latest plan, investigations, session status, and the SystemOverview graph. Prefer calling functions to retrieve facts instead of guessing. When the user gives audit instructions (e.g., “investigate X”, “check Y next”, “remember Z”), immediately call enqueue_steering with the exact text, then acknowledge briefly. Answer progress questions flexibly (you may call human_status, but avoid numeric coverage). When asked for more about the current/most promising issue, call get_top_hypothesis (or get_hypothesis_details if an id is given), then display relevant files via get_artifact in the Artifact Viewer. When asked to show a function or contract (e.g., “startIntent” or “DaimoPay.sol”) and the file isn’t known yet, call search_repo to find it, then load it via get_artifact. IMPORTANT: Do NOT paste large code blocks in replies. When you load code, say “Loaded in Artifact Viewer” and summarize only the relevant lines.`;
+  // Energetic but succinct delivery; emotion via function, never spoken
+  const meta = 'First, set an emotion by calling set_emotion({value}) and do not include any [EMO: ...] tags in your verbal response. Never say the emotion label aloud. Deliver answers in a clear, confident, brisk style (≈10–15% faster), staying concise and strictly on-topic.';
   const voiceSelEl = document.getElementById('voiceSel');
   const v = voiceSelEl ? voiceSelEl.value : undefined;
   const sessionCfg = { tools, tool_choice: 'auto', instructions: persona + ' ' + meta };
@@ -212,7 +254,30 @@ function handleEvent(evt){
     // Handle set_emotion locally for immediate UI feedback
     if (name === 'set_emotion' && args && args.value){ setAvatar(String(args.value)); }
     invokeTool(name, args).then((out)=>{
-      sendEvent({ type:'conversation.item.create', item: { type:'function_call_output', call_id: callId, output: JSON.stringify(out) } });
+      try{
+        if (name==='get_file_snippet' && out && out.snippet){ showCode(out.snippet, out.relpath||''); }
+        if (name==='get_artifact' && out && Array.isArray(out.artifacts) && out.artifacts.length){ showCode(out.artifacts[0].content||'', out.artifacts[0].relpath||''); }
+        if ((name==='get_hypothesis_details' || name==='get_top_hypothesis') && out && out.hypothesis && Array.isArray(out.hypothesis.files) && out.hypothesis.files.length){
+          const rel = out.hypothesis.files[0];
+          invokeTool('get_artifact', { relpath: rel, max_bytes: 200000 }).then((o2)=>{
+            if (o2 && Array.isArray(o2.artifacts) && o2.artifacts.length){ showCode(o2.artifacts[0].content||'', o2.artifacts[0].relpath||''); }
+          });
+        }
+      }catch(_){ /* ignore UI errors */ }
+      // Sanitize tool output sent back to the model to prevent it from pasting large code into replies.
+      let outForModel = out;
+      try{
+        if (name === 'get_artifact' && out && Array.isArray(out.artifacts)){
+          outForModel = { ok: out.ok, artifacts: (out.artifacts||[]).map(a=>({ relpath: a.relpath, card_id: a.card_id, size_bytes: a.size_bytes, truncated: a.truncated, displayed_in_viewer: true })) };
+        }
+        if (name === 'get_file_snippet' && out){
+          outForModel = { ok: out.ok, relpath: out.relpath, card_id: out.card_id, displayed_in_viewer: true };
+        }
+        if (name === 'search_repo' && out && Array.isArray(out.results)){
+          outForModel = { ok: out.ok, results: (out.results||[]).map(r=>({ relpath: r.relpath, lineno: r.lineno, snippet: '[redacted in reply; opened in viewer if requested]' })) };
+        }
+      }catch(_){ outForModel = out; }
+      sendEvent({ type:'conversation.item.create', item: { type:'function_call_output', call_id: callId, output: JSON.stringify(outForModel) } });
       sendEvent({ type:'response.create', response:{ modalities:['audio','text'] } });
     });
   }
@@ -235,6 +300,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
   const actStopBtn = document.getElementById('actStopBtn');
   const projectInput = document.getElementById('projectInput');
   const activity = document.getElementById('activity');
+  codeViewEl = document.getElementById('codeView');
   // Ensure chat container is cached even before connecting
   if (!chatEl) chatEl = document.getElementById('chat');
   const nowInv = document.getElementById('nowInvestigating');
@@ -342,14 +408,26 @@ window.addEventListener('DOMContentLoaded', ()=>{
     activity.appendChild(d);
     activity.scrollTop = activity.scrollHeight;
   }
-  let lastIter = 0;
+let lastIter = 0;
+const _seenEvt = new Set();
+function _dedupeKey(j){ return `${j.type||''}|${j.action||''}|${j.iteration||''}|${(j.message||'').slice(0,80)}|${(j.reasoning||'').slice(0,80)}`; }
   function handleActivityData(data){
     // Try JSON first (telemetry SSE)
     try{
       const j = JSON.parse(data);
       const ts = j.ts ? new Date(j.ts*1000) : new Date();
       const tstr = ts.toTimeString().split(' ')[0];
-      if (j.type === 'heartbeat' || j.status === 'idle') return; // ignore heartbeats
+      // Only show substantive agent events; drop heartbeats/status/steer noise
+      const showTypes = new Set(['decision','result','executing','analyzing','complete','generating_report','strategist']);
+      if (!showTypes.has(j.type)) return;
+      // Dedupe initial replays
+      const key = _dedupeKey(j);
+      if (_seenEvt.has(key)) return;
+      _seenEvt.add(key);
+      if (_seenEvt.size > 200) { // keep small
+        const it = _seenEvt.values().next();
+        _seenEvt.delete(it.value);
+      }
       const action = j.action || '';
       const tag = (j.type === 'decision' && action) ? friendlyTag(action) : friendlyTag(j.type||'');
       let text = '';
@@ -363,6 +441,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
       }
       lastIter = j.iteration || lastIter;
       appendEvt({ time: `[${tstr}] #${lastIter||'-'}`, label: tag.label, cls: tag.cls, text });
+      // Do not mirror activity stream into chat; keep chat for user ↔ assistant messages only
       return;
     }catch(_){ /* not JSON */ }
     // Fallback: parse CLI log lines
@@ -387,9 +466,19 @@ window.addEventListener('DOMContentLoaded', ()=>{
       try{
         const r = await fetch('/api/tool/get_recent_activity', { method:'POST', headers:{'Content-Type':'application/json'}, body: '{}' });
         const j = await r.json();
-        if (j && j.ok && j.summary){ if (nowInv) nowInv.textContent = `Now investigating: ${j.summary}`; }
+        if (j && j.ok){
+          const s = j.current_goal || j.summary || '';
+          if (nowInv) nowInv.textContent = s ? `Now investigating: ${s}` : 'Now investigating: —';
+        }
       }catch(_){ /* ignore */ }
     }, 2000);
+    // Prefill stream with recent events so the UI isn't empty on connect
+    fetch(`/api/instance/recent?id=${encodeURIComponent(instId)}&limit=60`).then(r=>r.json()).then(j=>{
+      if (!j || !Array.isArray(j.events)) return;
+      for (const ev of j.events){
+        try { handleActivityData(JSON.stringify(ev)); } catch(_){}
+      }
+    }).catch(()=>{});
   }
   function stopActivity(){ if (activityES){ activityES.close(); activityES=null; } }
   // Clear pinned updater when leaving page

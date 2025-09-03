@@ -577,6 +577,7 @@ class AgentRunner:
         self.session_id: Optional[str] = session
         self.new_session: bool = new_session
         self._agent_log: List[str] = []
+        self._last_applied_steer: Optional[str] = None
         
     def initialize(self):
         """Initialize the agent."""
@@ -1499,6 +1500,56 @@ class AgentRunner:
             executed_frames = set()
             # Execute investigations with proper logging
             for idx, inv in enumerate(items):
+                # Check for mid-batch steering override (preempt current goal once)
+                try:
+                    def _read_latest_steer(limit: int = 20) -> Optional[str]:
+                        try:
+                            pdir = self.project_dir or get_project_dir(self.project_id)
+                            sfile = Path(pdir) / '.hound' / 'steering.jsonl'
+                            if not sfile.exists():
+                                return None
+                            texts: List[str] = []
+                            with sfile.open('r', encoding='utf-8', errors='ignore') as f:
+                                for ln in f:
+                                    ln = ln.strip()
+                                    if not ln:
+                                        continue
+                                    try:
+                                        obj = json.loads(ln)
+                                        txt = obj.get('text') or obj.get('message') or obj.get('note')
+                                        if txt:
+                                            texts.append(str(txt).strip())
+                                    except Exception:
+                                        texts.append(ln)
+                            cand = list(reversed(texts[-limit:]))  # newest first
+                            for s in cand:
+                                lw = s.lower()
+                                if any(k in lw for k in ("investigate", "check", "look at", "focus on", "right now", "next")):
+                                    return s
+                            return None
+                        except Exception:
+                            return None
+                    urgent = _read_latest_steer()
+                    if urgent and urgent != self._last_applied_steer and getattr(inv, 'goal', '') != urgent:
+                        console.print(f"[bold yellow]Steering override:[/bold yellow] {urgent}")
+                        try:
+                            pub = getattr(self, '_telemetry_publish', None)
+                            if callable(pub):
+                                pub({'type': 'status', 'message': f'override: {urgent}'})
+                        except Exception:
+                            pass
+                        from types import SimpleNamespace
+                        inv = SimpleNamespace(
+                            goal=urgent,
+                            focus_areas=[],
+                            priority=10,
+                            reasoning='User steering override',
+                            category='suspicion',
+                            expected_impact='high'
+                        )
+                        self._last_applied_steer = urgent
+                except Exception:
+                    pass
                 # Check time limit before starting each investigation
                 if self.time_limit_minutes:
                     elapsed_minutes = (time.time() - start_overall) / 60.0
@@ -1551,6 +1602,23 @@ class AgentRunner:
                         status = info.get('status', '')
                         msg = info.get('message', '')
                         it = info.get('iteration', 0)
+                        # Publish telemetry for UI (decision/result/etc.)
+                        try:
+                            pub = getattr(self, '_telemetry_publish', None)
+                            if callable(pub):
+                                payload = {
+                                    'type': status or 'progress',
+                                    'iteration': it,
+                                    'message': msg,
+                                    'action': info.get('action'),
+                                    'parameters': info.get('parameters', {}),
+                                    'reasoning': info.get('reasoning', ''),
+                                }
+                                if status == 'result':
+                                    payload['result'] = info.get('result', {})
+                                pub(payload)
+                        except Exception:
+                            pass
                         if status == 'decision':
                             act = info.get('action', '-')
                             reasoning = info.get('reasoning', '')

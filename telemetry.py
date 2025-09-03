@@ -55,6 +55,16 @@ class _EventBus:
 class _Handler(BaseHTTPRequestHandler):
     server_version = "HoundTelemetry/1.0"
 
+    # Swallow common disconnect errors to avoid noisy tracebacks in the agent CLI
+    def handle(self):  # noqa: N802
+        try:
+            super().handle()
+        except (ConnectionResetError, BrokenPipeError):
+            return
+        except Exception:
+            # Be conservative: do not crash the server thread on client hiccups
+            return
+
     def do_GET(self):  # noqa: N802
         if self.path.startswith("/events"):
             tok = self.server.token  # type: ignore[attr-defined]

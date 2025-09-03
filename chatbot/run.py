@@ -316,6 +316,90 @@ def create_app():
             pass
         _cards_cache[key] = (id_to_rel, rel_to_id, rel_to_snips)
         return _cards_cache[key]
+    
+    def _find_repo_root(proj: Path) -> Path | None:
+        try:
+            m = proj / 'manifest' / 'manifest.json'
+            if m.exists():
+                j = json.loads(m.read_text())
+                rp = j.get('repo_path')
+                if rp:
+                    p = Path(rp)
+                    return p if p.exists() else None
+        except Exception:
+            return None
+        return None
+
+    def _read_file_by_rel(proj: Path, rel: str, max_bytes: int = 200000) -> tuple[str, bool, int]:
+        """Return (content, truncated, size_bytes) for a relpath using repo_path or project dir."""
+        rel = rel.lstrip('/')
+        content = ''
+        truncated = False
+        size_b = 0
+        # Try repo root
+        roots = []
+        rr = _find_repo_root(proj)
+        if rr:
+            roots.append(rr)
+        roots.append(proj)
+        for base in roots:
+            p = base / rel
+            if p.exists() and p.is_file():
+                try:
+                    data = p.read_bytes()
+                    size_b = len(data)
+                    if size_b > max_bytes:
+                        content = data[:max_bytes].decode('utf-8', errors='ignore')
+                        truncated = True
+                    else:
+                        content = data.decode('utf-8', errors='ignore')
+                    return content, truncated, size_b
+                except Exception:
+                    continue
+        return content, truncated, size_b
+
+    _node_sources_cache = {}
+    def _node_sources_index(proj: Path):
+        """Build an index: node_id -> { label, files: [relpaths], card_ids: [ids] } across all graphs.
+        Uses graph nodes' source_refs and the cards index to map to relpaths.
+        """
+        cache_key = str(proj)
+        if cache_key in _node_sources_cache:
+            return _node_sources_cache[cache_key]
+        node_map = {}
+        id_to_rel, rel_to_id, _snips = _cards_index(proj)
+        gmap = _resolve_graphs(proj)
+        for name, p in gmap.items():
+            try:
+                g = json.loads(Path(p).read_text())
+                data = g.get('data') or g
+                for n in (data.get('nodes') or []):
+                    nid = str(n.get('id'))
+                    label = n.get('label') or nid
+                    srcs = n.get('source_refs') or []
+                    files = []
+                    card_ids = []
+                    for ref in srcs:
+                        cid = str(ref) if isinstance(ref, (str, int)) else ref.get('id') or ref.get('card_id')
+                        if cid:
+                            cid = str(cid)
+                            card_ids.append(cid)
+                            rel = id_to_rel.get(cid)
+                            if rel:
+                                files.append(rel)
+                    # dedupe
+                    files = list(dict.fromkeys(files))
+                    card_ids = list(dict.fromkeys(card_ids))
+                    if nid not in node_map:
+                        node_map[nid] = { 'label': label, 'files': files, 'card_ids': card_ids }
+                    else:
+                        # merge
+                        node_map[nid]['files'] = list(dict.fromkeys(node_map[nid]['files'] + files))
+                        node_map[nid]['card_ids'] = list(dict.fromkeys(node_map[nid]['card_ids'] + card_ids))
+            except Exception:
+                continue
+        _node_sources_cache[cache_key] = node_map
+        return node_map
         try:
             return json.loads(session_file.read_text())
         except Exception:
@@ -469,18 +553,11 @@ def create_app():
                 return jsonify({"ok": False, "error": "invalid value"}), 400
             return jsonify({"ok": True})
         if name == "human_status":
-            # Return a human-friendly status summary without raw node/card/token numbers
+            # Return a human-friendly status summary (no raw coverage percentages)
             if not proj:
                 return jsonify({"ok": False, "error": "no active project"}), 400
             try:
                 sess = _read_latest_session(proj)
-                # Coverage percent by cards
-                cov = (sess.get('coverage') or {}).get('cards', {})
-                cov_pct = cov.get('percent')
-                try:
-                    cov_pct = int(round(float(cov_pct))) if cov_pct is not None else None
-                except Exception:
-                    cov_pct = None
                 # Current goal
                 planning = sess.get('planning_history') or []
                 inv = sess.get('investigations') or []
@@ -519,12 +596,11 @@ def create_app():
                             }
                     except Exception:
                         top = None
-                # Compose human summary (avoid raw counts)
+                # Compose human summary (avoid raw counts & percentages)
                 parts = []
-                if cov_pct is not None:
-                    parts.append(f"We have examined about {cov_pct}% of the codebase so far.")
-                else:
-                    parts.append("We’re early in the review and still mapping key areas.")
+                # Keep flexible: summarize status without numeric coverage
+                status = sess.get('status') or 'active'
+                parts.append(f"Status: {status}.")
                 if current_goal:
                     parts.append(f"Right now we’re digging into: {current_goal}.")
                 if top:
@@ -532,7 +608,7 @@ def create_app():
                 summary = " ".join(parts)
                 return jsonify({
                     "ok": True,
-                    "code_coverage_percent": cov_pct,
+                    "code_coverage_percent": None,
                     "current_goal": current_goal,
                     "top_hypothesis": top,
                     "summary": summary
@@ -601,14 +677,24 @@ def create_app():
                         hyps = [h for h in hyps if (h.get('status') == status)]
                     # Sort by confidence desc
                     hyps.sort(key=lambda h: float(h.get('confidence', 0.0)), reverse=True)
+                    ns = _node_sources_index(proj)
                     for h in hyps[:limit]:
+                        node_refs = h.get('node_refs') or []
+                        files = []
+                        for nid in node_refs:
+                            info = ns.get(str(nid)) or {}
+                            for rel in (info.get('files') or []):
+                                if rel not in files:
+                                    files.append(rel)
                         out.append({
                             'id': h.get('id'),
-                            'node_id': h.get('node_id'),
+                            'title': h.get('title'),
                             'vulnerability_type': h.get('vulnerability_type'),
                             'description': h.get('description'),
                             'confidence': h.get('confidence'),
-                            'status': h.get('status')
+                            'status': h.get('status'),
+                            'node_refs': node_refs,
+                            'files': files
                         })
                 except Exception:
                     pass
@@ -722,6 +808,134 @@ def create_app():
                 return jsonify({ 'ok': True, 'node': details, 'edges': inc })
             except Exception as e:
                 return jsonify({"ok": False, "error": str(e)}), 500
+        if name == "get_hypothesis_details":
+            # Return full hypothesis info with node_refs and related files
+            if not proj:
+                return jsonify({"ok": False, "error": "no active project"}), 400
+            hyp_id = (payload.get('id') or '').strip()
+            if not hyp_id:
+                return jsonify({"ok": False, "error": "missing id"}), 400
+            hyp_file = proj / 'hypotheses.json'
+            if not hyp_file.exists():
+                return jsonify({"ok": False, "error": "hypotheses.json not found"}), 404
+            try:
+                data = json.loads(hyp_file.read_text())
+                hyps = data.get('hypotheses', {})
+                # Allow prefix match
+                target = None
+                for k, v in hyps.items():
+                    if k == hyp_id or k.startswith(hyp_id):
+                        target = v; hyp_id = k; break
+                if not target:
+                    return jsonify({"ok": False, "error": "hypothesis not found"}), 404
+                ns = _node_sources_index(proj)
+                node_refs = target.get('node_refs') or []
+                nodes = []
+                files = []
+                for nid in node_refs:
+                    info = ns.get(str(nid)) or {}
+                    nodes.append({ 'id': str(nid), 'label': info.get('label') or str(nid) })
+                    for rel in (info.get('files') or []):
+                        if rel not in files:
+                            files.append(rel)
+                out = {
+                    'id': hyp_id,
+                    'title': target.get('title'),
+                    'vulnerability_type': target.get('vulnerability_type'),
+                    'severity': target.get('severity'),
+                    'confidence': target.get('confidence'),
+                    'status': target.get('status'),
+                    'description': target.get('description'),
+                    'reasoning': target.get('reasoning'),
+                    'node_refs': node_refs,
+                    'nodes': nodes,
+                    'files': files,
+                    'evidence': target.get('evidence', [])[:5]
+                }
+                return jsonify({ 'ok': True, 'hypothesis': out })
+            except Exception as e:
+                return jsonify({"ok": False, "error": str(e)}), 500
+        if name == "list_nodes":
+            # List nodes from the SystemOverview graph (id, label, type)
+            if not proj:
+                return jsonify({"ok": False, "error": "no active project"}), 400
+            try:
+                limit = int(payload.get('limit') or 100)
+            except Exception:
+                limit = 100
+            gpath = _resolve_system_graph(proj)
+            if not gpath:
+                return jsonify({"ok": False, "error": "system overview graph not found"}), 404
+            try:
+                g = json.loads(Path(gpath).read_text())
+                data = g.get('data') or g
+                nodes = data.get('nodes') or []
+                out = []
+                for n in nodes[:limit]:
+                    out.append({ 'id': str(n.get('id')), 'label': n.get('label') or str(n.get('id')), 'type': n.get('type') })
+                return jsonify({ 'ok': True, 'nodes': out })
+            except Exception as e:
+                return jsonify({"ok": False, "error": str(e)}), 500
+        if name == "list_files":
+            # List known file relpaths (optionally filter by substring)
+            if not proj:
+                return jsonify({"ok": False, "error": "no active project"}), 400
+            try:
+                limit = int(payload.get('limit') or 50)
+            except Exception:
+                limit = 50
+            contains = (payload.get('contains') or '').strip().lower()
+            id_to_rel, rel_to_id, _snips = _cards_index(proj)
+            rels = list(rel_to_id.keys())
+            if contains:
+                rels = [r for r in rels if contains in r.lower()]
+            rels = sorted(rels)[:limit]
+            out = [{ 'relpath': r, 'card_id': rel_to_id.get(r) } for r in rels]
+            return jsonify({ 'ok': True, 'files': out })
+        if name == "get_top_hypothesis":
+            # Return the top (highest-confidence, non-rejected) hypothesis with enriched details
+            if not proj:
+                return jsonify({"ok": False, "error": "no active project"}), 400
+            hyp_file = proj / 'hypotheses.json'
+            if not hyp_file.exists():
+                return jsonify({"ok": False, "error": "hypotheses.json not found"}), 404
+            try:
+                data = json.loads(hyp_file.read_text())
+                hyps = list((data.get('hypotheses') or {}).items())
+                # Filter out rejected
+                hyps = [(k,v) for (k,v) in hyps if (v.get('status') != 'rejected')]
+                if not hyps:
+                    return jsonify({"ok": True, "empty": True})
+                # Sort by confidence desc, fallback to 0
+                hyps.sort(key=lambda kv: float(kv[1].get('confidence', 0.0)), reverse=True)
+                hyp_id, target = hyps[0]
+                ns = _node_sources_index(proj)
+                node_refs = target.get('node_refs') or []
+                nodes = []
+                files = []
+                for nid in node_refs:
+                    info = ns.get(str(nid)) or {}
+                    nodes.append({ 'id': str(nid), 'label': info.get('label') or str(nid) })
+                    for rel in (info.get('files') or []):
+                        if rel not in files:
+                            files.append(rel)
+                out = {
+                    'id': hyp_id,
+                    'title': target.get('title'),
+                    'vulnerability_type': target.get('vulnerability_type'),
+                    'severity': target.get('severity'),
+                    'confidence': target.get('confidence'),
+                    'status': target.get('status'),
+                    'description': target.get('description'),
+                    'reasoning': target.get('reasoning'),
+                    'node_refs': node_refs,
+                    'nodes': nodes,
+                    'files': files,
+                    'evidence': target.get('evidence', [])[:5]
+                }
+                return jsonify({ 'ok': True, 'hypothesis': out })
+            except Exception as e:
+                return jsonify({"ok": False, "error": str(e)}), 500
         if name == "get_file_snippet":
             # Fetch a small code snippet by relpath or card_id from the cards index
             if not proj:
@@ -766,6 +980,113 @@ def create_app():
                 tail = text[- int(max_bytes*0.3):]
                 text = head + "\n...\n" + tail
             return jsonify({"ok": True, "relpath": rel, "card_id": rel_to_id.get(rel), "snippet": text})
+        if name == "get_artifact":
+            # Load code/content by relpath, card_id, or node_id; optionally all files for node
+            if not proj:
+                return jsonify({"ok": False, "error": "no active project"}), 400
+            rel = (payload.get('relpath') or '').strip()
+            cid = (payload.get('card_id') or '').strip()
+            nid = (payload.get('node_id') or '').strip()
+            try:
+                max_bytes = int(payload.get('max_bytes') or 200000)
+            except Exception:
+                max_bytes = 200000
+            id_to_rel, rel_to_id, _snips = _cards_index(proj)
+            ns = _node_sources_index(proj)
+            artifacts = []
+            rels = []
+            if nid:
+                info = ns.get(nid) or {}
+                rels = info.get('files') or []
+            elif cid:
+                rel = id_to_rel.get(cid, '')
+                if rel:
+                    rels = [rel]
+            elif rel:
+                rels = [rel]
+            else:
+                return jsonify({"ok": False, "error": "missing relpath/card_id/node_id"}), 400
+            for r in rels:
+                content, truncated, size_b = _read_file_by_rel(proj, r, max_bytes=max_bytes)
+                artifacts.append({
+                    'relpath': r,
+                    'card_id': rel_to_id.get(r),
+                    'size_bytes': size_b,
+                    'truncated': truncated,
+                    'content': content
+                })
+            return jsonify({ 'ok': True, 'artifacts': artifacts })
+        if name == "search_repo":
+            # Search repo (or project dir) for a query; return top file hits with line snippets
+            if not proj:
+                return jsonify({"ok": False, "error": "no active project"}), 400
+            query = (payload.get('query') or '').strip()
+            if not query:
+                return jsonify({"ok": False, "error": "missing query"}), 400
+            try:
+                max_files = int(payload.get('max_files') or 8)
+            except Exception:
+                max_files = 8
+            try:
+                context = int(payload.get('context') or 3)
+            except Exception:
+                context = 3
+            exts = payload.get('exts') or ['.sol', '.rs', '.ts', '.tsx', '.js', '.jsx', '.py', '.go']
+            case_insensitive = bool(payload.get('case_insensitive', True))
+            root = _find_repo_root(proj) or proj
+            results = []
+            seen = 0
+            try:
+                for base, _dirs, files in os.walk(root):
+                    # Skip hidden and huge vendor folders
+                    bn = os.path.basename(base).lower()
+                    if bn in {'.git', 'node_modules', 'dist', 'build', '.venv', 'venv', 'target'}:
+                        continue
+                    for fn in files:
+                        if exts and not any(fn.endswith(e) for e in exts):
+                            continue
+                        p = Path(base) / fn
+                        # size guard
+                        try:
+                            if p.stat().st_size > 2_000_000:
+                                continue
+                        except Exception:
+                            continue
+                        try:
+                            txt = p.read_text(encoding='utf-8', errors='ignore')
+                        except Exception:
+                            continue
+                        hay = txt if not case_insensitive else txt.lower()
+                        needle = query if not case_insensitive else query.lower()
+                        if needle not in hay:
+                            continue
+                        # Build first snippet
+                        lines = txt.splitlines()
+                        idx_line = None
+                        for i, line in enumerate(lines):
+                            hline = line if not case_insensitive else line.lower()
+                            if needle in hline:
+                                idx_line = i
+                                break
+                        if idx_line is None:
+                            continue
+                        start = max(0, idx_line - context)
+                        end = min(len(lines), idx_line + context + 1)
+                        snippet = "\n".join(lines[start:end])
+                        rel = str(p.relative_to(root)) if str(p).startswith(str(root)) else str(p)
+                        results.append({
+                            'relpath': rel,
+                            'lineno': idx_line + 1,
+                            'snippet': snippet
+                        })
+                        seen += 1
+                        if seen >= max_files:
+                            raise StopIteration
+            except StopIteration:
+                pass
+            except Exception as e:
+                return jsonify({"ok": False, "error": str(e)}), 500
+            return jsonify({ 'ok': True, 'results': results })
         if name == "get_recent_activity":
             # Summarize the most recent decision/action from telemetry
             if not proj:
@@ -869,12 +1190,12 @@ def create_app():
                     reasoning = reasoning[:277] + '...'
                 bits.append(f"Thought: {reasoning}")
             summary = "\n".join(bits)
-            # If plan goal exists, prepend
+            # Also compute current plan goal for UI pinning
+            current_goal = None
             try:
                 sess = _read_latest_session(proj)
                 planning = sess.get('planning_history') or []
                 inv = sess.get('investigations') or []
-                current_goal = None
                 if planning:
                     last = planning[-1]
                     cand = last.get('items') or []
@@ -885,10 +1206,10 @@ def create_app():
                             if g and g not in done:
                                 current_goal = g
                                 break
-                if current_goal:
-                    summary = f"Investigating: {current_goal}\n" + summary
+                if not current_goal and inv:
+                    current_goal = (inv[-1].get('goal') or '').strip() or None
             except Exception:
-                pass
+                current_goal = None
             return jsonify({
                 "ok": True,
                 "iteration": pick.get('iteration'),
@@ -897,6 +1218,8 @@ def create_app():
                 "file_path": file_path or None,
                 "node_ids": node_ids[:3] if isinstance(node_ids, list) else [],
                 "summary": summary,
+                "reasoning": reasoning,
+                "current_goal": current_goal,
                 "strategist": strat_summary
             })
         return jsonify({"ok": False, "error": f"Unknown tool: {name}"}), 400

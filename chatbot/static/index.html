@@ -10,7 +10,7 @@
 <body>
   <div class="wrap">
     <header class="top">
-      <div></div>
+      <div class="brand">Hound Audit Assistant</div>
       <div class="status"><span id="connDot" class="dot offline"></span><span id="connText">Disconnected</span></div>
     </header>
     <main class="grid">
@@ -26,12 +26,16 @@
           <span id="pttStatus" class="hint" hidden>Sent</span>
         </div>
       </section>
-      <section class="right">
+      <section class="center">
         <div id="chat" class="chat"></div>
         <form id="textForm" class="textrow">
           <input id="textInput" placeholder="Type a message" />
           <button type="submit">Send</button>
         </form>
+      </section>
+      <section class="codecol">
+        <div class="codehead">Artifact Viewer</div>
+        <pre id="codeView" class="code-view"></pre>
       </section>
     </main>
     <section class="audit">
