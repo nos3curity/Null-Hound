@@ -8,6 +8,29 @@ from pathlib import Path
 from typing import Optional
 from rich.console import Console
 
+# Hack for solving conflicts with the global "llm" package
+# TODO: Refactor package imports so we can remove this
+
+_BASE_DIR = Path(__file__).resolve().parent
+_LLM_DIR = _BASE_DIR / "llm"
+_BASE_DIR_STR = str(_BASE_DIR)
+if sys.path[0] != _BASE_DIR_STR:
+    try:
+        sys.path.remove(_BASE_DIR_STR)
+    except ValueError:
+        pass
+    sys.path.insert(0, _BASE_DIR_STR)
+
+try:
+    import types
+    # llm
+    if 'llm' not in sys.modules:
+        m = types.ModuleType('llm')
+        m.__path__ = [str(_LLM_DIR)]  # mark as package namespace
+        sys.modules['llm'] = m
+except Exception:
+    pass
+
 from commands.graph import build, ingest
 from commands.project import ProjectManager
 
