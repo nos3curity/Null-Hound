@@ -834,7 +834,7 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
         target_tokens = int(available_tokens * 0.7)  # More conservative: 70% instead of 80%
         
         # Get the strategist model for token counting
-        model = strategist_model_config.get("model", "gpt-4")
+        model = strategist_model_config.get("model", "gpt-5")
         
         # Count tokens for all cards
         total_tokens = 0
