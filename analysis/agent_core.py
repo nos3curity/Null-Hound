@@ -141,6 +141,11 @@ class AutonomousAgent:
         # Store in the project directory for persistence
         from .concurrent_knowledge import HypothesisStore
         project_dir = graphs_metadata_path.parent.parent  # Go up to project root from graphs/
+        # Keep a reference for features like steering inbox, etc.
+        try:
+            self.project_dir: Path = Path(project_dir)
+        except Exception:
+            self.project_dir = Path.cwd()
         hypothesis_path = project_dir / "hypotheses.json"
         self.hypothesis_store = HypothesisStore(hypothesis_path, agent_id=agent_id)
         
@@ -181,6 +186,33 @@ class AutonomousAgent:
         
         # Current investigation goal
         self.investigation_goal = ""
+
+        # Steering cache (last seen lines to avoid duplication in memory notes)
+        self._steering_seen: set[str] = set()
+
+    def _read_steering_notes(self, limit: int = 12) -> List[str]:
+        """Read recent steering notes from project .hound/steering.jsonl (if any)."""
+        try:
+            sfile = self.project_dir / '.hound' / 'steering.jsonl'
+            if not sfile.exists():
+                return []
+            lines = []
+            with sfile.open('r', encoding='utf-8', errors='ignore') as f:
+                for ln in f:
+                    ln = ln.strip()
+                    if not ln:
+                        continue
+                    try:
+                        obj = json.loads(ln)
+                        txt = obj.get('text') or obj.get('message') or obj.get('note')
+                        if txt:
+                            lines.append(str(txt).strip())
+                    except Exception:
+                        # fallback to raw line when not JSON
+                        lines.append(ln)
+            return lines[-limit:]
+        except Exception:
+            return []
     
     def _load_graphs_metadata(self, metadata_path: Path) -> Dict:
         """Load metadata about available graphs."""
@@ -607,6 +639,27 @@ class AutonomousAgent:
         context_parts.append(f"=== INVESTIGATION GOAL ===")
         context_parts.append(self.investigation_goal)
         context_parts.append("")
+
+        # User steering notes (if any)
+        steering = self._read_steering_notes(limit=12)
+        if steering:
+            context_parts.append("=== USER STEERING (HONOR THESE) ===")
+            for s in steering:
+                # Add to memory notes lightly if marked as remember/note
+                low = s.lower()
+                if any(k in low for k in ("remember", "note:", "keep in mind")):
+                    try:
+                        if s not in self._steering_seen:
+                            # Keep latest up to 5 steering memos
+                            self.memory_notes.append(f"[STEER] {s[:160]}")
+                            self._steering_seen.add(s)
+                            # Bound memory notes size
+                            if len(self.memory_notes) > 20:
+                                self.memory_notes = self.memory_notes[-20:]
+                    except Exception:
+                        pass
+                context_parts.append(f"• {s}")
+            context_parts.append("")
         
         # Available graphs (show all)
         context_parts.append("=== AVAILABLE GRAPHS ===")
@@ -932,6 +985,12 @@ CRITICAL RULES FOR NODE AND GRAPH NAMES:
 - NEVER add prefixes like "func_" or "node_" unless they're already there
 - If a node doesn't exist in the graph, DON'T try variations - it doesn't exist!
 - Check the graph FIRST to see what nodes actually exist before requesting them
+
+USER STEERING (PRIORITY):
+- If a "USER STEERING" section appears in Current Context, you MUST honor it immediately.
+- If instructed to "investigate/check X next", prioritize loading relevant graphs/nodes for X as your next action.
+- If asked to "remember/keep in mind" a constraint, treat it as a memory constraint in your reasoning.
+- Do NOT ignore steering unless it is impossible under constraints.
 
 IMPORTANT DISTINCTION:
 - Graph observations/assumptions: Facts about HOW the system works (invariants, behaviors, constraints)

@@ -10,7 +10,7 @@
 <body>
   <div class="wrap">
     <header class="top">
-      <div class="brand">Hound Chatbot</div>
+      <div></div>
       <div class="status"><span id="connDot" class="dot offline"></span><span id="connText">Disconnected</span></div>
     </header>
     <main class="grid">
@@ -24,19 +24,6 @@
           <button id="micBtn" disabled>Enable Mic</button>
           <button id="pttBtn" disabled>Push‑to‑Talk</button>
           <span id="pttStatus" class="hint" hidden>Sent</span>
-          <label class="voicepick">
-            <span>Voice</span>
-            <select id="voiceSel">
-              <option value="verse">verse (youthful)</option>
-              <option value="shimmer" selected>shimmer (bright)</option>
-              <option value="ash">ash</option>
-              <option value="alloy">alloy</option>
-              <option value="ballad">ballad</option>
-              <option value="coral">coral</option>
-              <option value="echo">echo</option>
-              <option value="sage">sage</option>
-            </select>
-          </label>
         </div>
       </section>
       <section class="right">
@@ -56,9 +43,13 @@
           <button id="actStopBtn" disabled>Stop</button>
         </div>
       </div>
-      <div id="activityStatus" class="connline">Source: —</div>
       <div id="nowInvestigating" class="nowinvest">Now investigating: —</div>
       <div id="activity" class="activity"></div>
+      <form id="steerForm" class="steerrow">
+        <input id="steerInput" placeholder="Steer the audit (e.g., ‘Investigate reentrancy in withdraw’)" />
+        <button type="submit">Send</button>
+        <span id="steerStatus" class="hint" hidden>Queued</span>
+      </form>
     </section>
   </div>
 </body>

@@ -184,7 +184,8 @@ class UnifiedLLMClient:
                     response=response.dict() if response and hasattr(response, 'dict') else response,
                     schema=schema,
                     duration=duration,
-                    error=error
+                    error=error,
+                    profile=self.profile
                 )
     
     def raw(self, *, system: str, user: str, reasoning_effort: Optional[str] = None) -> str:
@@ -230,7 +231,8 @@ class UnifiedLLMClient:
                     response=response,
                     schema=None,
                     duration=duration,
-                    error=error
+                    error=error,
+                    profile=self.profile
                 )
     
     def generate(self, *, system: str, user: str) -> str:

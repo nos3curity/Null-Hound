@@ -437,6 +437,28 @@ def create_app():
                 rec = {"ts": time.time(), "source": "chatbot", "text": text}
                 with steer_file.open("a", encoding="utf-8") as f:
                     f.write(json.dumps(rec) + "\n")
+                # Best-effort: notify telemetry server so UI sees it immediately
+                try:
+                    latest = None
+                    if REGISTRY_DIR.exists():
+                        for f in sorted(REGISTRY_DIR.glob("*.json")):
+                            inst = _read_instance(f)
+                            if not inst:
+                                continue
+                            if inst.get('project_id') == str(proj):
+                                if (latest is None) or (float(inst.get('started_at') or 0) > float(latest.get('started_at') or 0)):
+                                    latest = inst
+                    if latest:
+                        tel = latest.get('telemetry', {}) or {}
+                        ctrl = tel.get('control_url'); tok = tel.get('token')
+                        if ctrl:
+                            headers = { 'Authorization': f'Bearer {tok}' } if tok else {}
+                            try:
+                                requests.post(f"{ctrl}/steer", json=rec, headers=headers, timeout=2)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
                 return jsonify({"ok": True, "accepted": True})
             except Exception as e:
                 return jsonify({"ok": False, "error": str(e)}), 500
@@ -755,7 +777,9 @@ def create_app():
                     inst = _read_instance(f)
                     if not inst:
                         continue
-                    if inst.get('project_id') == str(proj):
+                    pid_val = str(inst.get('project_id') or '')
+                    # Match exact, or by tail/dirname to be robust
+                    if pid_val == str(proj) or pid_val.endswith('/' + proj.name) or pid_val == proj.name:
                         if (latest is None) or (float(inst.get('started_at') or 0) > float(latest.get('started_at') or 0)):
                             latest = inst
             if not latest:
@@ -768,7 +792,7 @@ def create_app():
                 ev = r.json().get('events', []) if r.ok else []
             except Exception:
                 ev = []
-            # Pick the last decision event, else last executing/analyzing/result
+            # Pick the last decision event; else last executing/analyzing/result; ignore generic status unless starting
             pick = None
             for e in reversed(ev):
                 if e.get('type') == 'decision':
@@ -776,10 +800,35 @@ def create_app():
                     break
             if not pick:
                 for e in reversed(ev):
-                    if e.get('type') in ('executing','analyzing','result','code_loaded'):
+                    t = e.get('type')
+                    if t in ('executing','analyzing','result','code_loaded'):
                         pick = e
                         break
+                    if t == 'status':
+                        msg = (e.get('message') or '').lower()
+                        if 'starting' in msg:
+                            pick = e
+                            break
             if not pick:
+                # Fall back to current plan goal if available
+                sess = _read_latest_session(proj)
+                planning = sess.get('planning_history') or []
+                inv = sess.get('investigations') or []
+                current_goal = None
+                if planning:
+                    last = planning[-1]
+                    cand = last.get('items') or []
+                    done = { (r.get('goal') or '') for r in inv }
+                    for it in cand:
+                        if isinstance(it, dict):
+                            g = (it.get('goal') or it.get('description') or it.get('tool_name') or '').strip()
+                            if g and g not in done:
+                                current_goal = g
+                                break
+                if not current_goal and inv:
+                    current_goal = (inv[-1].get('goal') or '').strip() or None
+                if current_goal:
+                    return jsonify({"ok": True, "summary": f"Investigating: {current_goal}", "current_goal": current_goal})
                 return jsonify({"ok": True, "empty": True, "summary": "No recent activity yet."})
             action = pick.get('action') or pick.get('type')
             reasoning = pick.get('reasoning') or ''
@@ -787,6 +836,15 @@ def create_app():
             # Extract hints
             file_path = params.get('file_path') or ''
             node_ids = params.get('node_ids') or []
+            # Strategist summary if available in recent events
+            strat_summary = None
+            if pick.get('type') != 'strategist':
+                for e in reversed(ev):
+                    if e.get('type') == 'strategist':
+                        bullets = e.get('bullets') or []
+                        if bullets:
+                            strat_summary = bullets[:3]
+                        break
             # Friendly label
             def _label(a: str) -> str:
                 a = (a or '').lower()
@@ -811,6 +869,26 @@ def create_app():
                     reasoning = reasoning[:277] + '...'
                 bits.append(f"Thought: {reasoning}")
             summary = "\n".join(bits)
+            # If plan goal exists, prepend
+            try:
+                sess = _read_latest_session(proj)
+                planning = sess.get('planning_history') or []
+                inv = sess.get('investigations') or []
+                current_goal = None
+                if planning:
+                    last = planning[-1]
+                    cand = last.get('items') or []
+                    done = { (r.get('goal') or '') for r in inv }
+                    for it in cand:
+                        if isinstance(it, dict):
+                            g = (it.get('goal') or it.get('description') or it.get('tool_name') or '').strip()
+                            if g and g not in done:
+                                current_goal = g
+                                break
+                if current_goal:
+                    summary = f"Investigating: {current_goal}\n" + summary
+            except Exception:
+                pass
             return jsonify({
                 "ok": True,
                 "iteration": pick.get('iteration'),
@@ -818,7 +896,8 @@ def create_app():
                 "label": label,
                 "file_path": file_path or None,
                 "node_ids": node_ids[:3] if isinstance(node_ids, list) else [],
-                "summary": summary
+                "summary": summary,
+                "strategist": strat_summary
             })
         return jsonify({"ok": False, "error": f"Unknown tool: {name}"}), 400
 

@@ -672,9 +672,22 @@ class AgentRunner:
             debug=self.debug,
             session_id=self.session_id
         )
-        
-        # Set debug flag
+
+        # Set debug flag and route per-interaction files to project .debug
         self.agent.debug = self.debug
+        if self.debug:
+            try:
+                from analysis.debug_logger import DebugLogger as _Dbg
+                dbg_dir = self.project_dir / '.debug'
+                dbg = _Dbg(self.session_id or self.agent.agent_id, output_dir=dbg_dir)
+                # Attach to agent and its LLM clients so all prompts/responses are captured
+                self.agent.debug_logger = dbg
+                if hasattr(self.agent, 'llm') and self.agent.llm:
+                    self.agent.llm.debug_logger = dbg
+                if hasattr(self.agent, 'guidance_client') and self.agent.guidance_client:
+                    self.agent.guidance_client.debug_logger = dbg
+            except Exception:
+                pass
         
         if self.max_iterations:
             self.agent.max_iterations = self.max_iterations
@@ -903,8 +916,57 @@ class AgentRunner:
     def _plan_investigations(self, n: int) -> List[object]:
         """Plan next investigations using Strategist by default."""
         from types import SimpleNamespace
-        # 1) Start with any existing PLANNED items in this session (resume-friendly)
+        # 0) Optional: honor recent steering as an urgent goal
         prepared: List[object] = []
+        try:
+            def _read_steering(limit: int = 20) -> List[str]:
+                try:
+                    pdir = self.project_dir or get_project_dir(self.project_id)
+                    sfile = Path(pdir) / '.hound' / 'steering.jsonl'
+                    if not sfile.exists():
+                        return []
+                    out: List[str] = []
+                    with sfile.open('r', encoding='utf-8', errors='ignore') as f:
+                        for ln in f:
+                            ln = ln.strip()
+                            if not ln:
+                                continue
+                            try:
+                                obj = json.loads(ln)
+                                txt = obj.get('text') or obj.get('message') or obj.get('note')
+                                if txt:
+                                    out.append(str(txt).strip())
+                            except Exception:
+                                out.append(ln)
+                    return out[-limit:]
+                except Exception:
+                    return []
+            steer = list(reversed(_read_steering(30)))  # newest first
+            urgent = None
+            for s in steer:
+                low = s.lower()
+                if any(k in low for k in ("investigate", "check", "look at", "focus on", "right now", "next")):
+                    urgent = s
+                    break
+            if urgent:
+                prepared.append(SimpleNamespace(
+                    goal=urgent,
+                    focus_areas=[],
+                    priority=10,
+                    reasoning='User steering: prioritize immediately',
+                    category='suspicion',
+                    expected_impact='high',
+                    frame_id=None
+                ))
+                try:
+                    pub = getattr(self, '_telemetry_publish', None)
+                    if callable(pub):
+                        pub({'type': 'status', 'message': f'steering goal queued: {urgent}'})
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # 1) Start with any existing PLANNED items in this session (resume-friendly)
         existing_frame_ids = set()
         ps = self.plan_store
         try:
@@ -1606,6 +1668,22 @@ class AgentRunner:
                                 # Regular action results
                                 summ = result.get('summary') or result.get('status') or msg
                                 console.print(f"[dim]Result: {summ}[/dim]")
+                                # Publish strategist summary to telemetry for UI when available
+                                try:
+                                    pub = getattr(self, '_telemetry_publish', None)
+                                    if callable(pub) and action == 'deep_think':
+                                        bullets = result.get('guidance_bullets') or []
+                                        hyp_info = result.get('hypotheses_info') or []
+                                        payload = {
+                                            'type': 'strategist',
+                                            'iteration': it,
+                                            'message': 'Strategist analysis complete',
+                                            'bullets': bullets[:5],
+                                            'hypotheses': hyp_info[:5],
+                                        }
+                                        pub(payload)
+                                except Exception:
+                                    pass
                                 # Track cards loaded via load_nodes result if provided
                                 try:
                                     if self.session_tracker and action == 'load_nodes':
@@ -1807,8 +1885,15 @@ def agent(project_id: str, iterations: Optional[int], plan_n: int, time_limit: O
             try:
                 from telemetry import TelemetryServer
                 # Project dir used after initialize
-                pd = get_project_dir(project_id)
-                tele = TelemetryServer(project_id, pd)
+                pd = None
+                try:
+                    pd = runner.project_dir if getattr(runner, 'project_dir', None) else None
+                except Exception:
+                    pd = None
+                if pd is None:
+                    # Fall back to resolving when not available
+                    pd = Path(project_id) if Path(project_id).exists() else get_project_dir(project_id)
+                tele = TelemetryServer(str(project_id), Path(pd))
                 tele.start()
                 # Emit a friendly boot event so telemetry streams show activity immediately
                 try:
@@ -1840,7 +1925,7 @@ def agent(project_id: str, iterations: Optional[int], plan_n: int, time_limit: O
                 runner._telemetry_publish = tele.publish  # type: ignore[attr-defined]
             except Exception:
                 pass
-        # Wrap run to emit start/stop events around each investigation
+        # Wrap run to emit a start event around each investigation (no per-task completed noise)
         if tele is not None:
             # Monkey-patch a simple notifier into runner for per-investigation markers
             try:
@@ -1851,12 +1936,7 @@ def agent(project_id: str, iterations: Optional[int], plan_n: int, time_limit: O
                             tele.publish({'type': 'status', 'message': f'starting: {prompt}', 'iteration': (kw.get('iteration') or 0)})
                         except Exception:
                             pass
-                        res = _orig_investigate(prompt, *a, **kw)
-                        try:
-                            tele.publish({'type': 'status', 'message': f'completed: {prompt}', 'iteration': res.get('iterations_completed', 0) if isinstance(res, dict) else 0})
-                        except Exception:
-                            pass
-                        return res
+                        return _orig_investigate(prompt, *a, **kw)
                     runner.agent.investigate = _wrapped_investigate  # type: ignore[attr-defined]
             except Exception:
                 pass

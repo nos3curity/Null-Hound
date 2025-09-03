@@ -8,8 +8,6 @@ let audioTransceiver;
 let lastAssistantBubble = null;
 let assistantTranscript = '';
 let activityES = null;
-let activityStatusEl = null;
-let activityStatusSet = false;
 let pendingEvt = null;
 let nowInvTimer = null;
 
@@ -137,8 +135,9 @@ async function sessionConfigure(){
   // Pull active project for persona
   let pid = '';
   try { const r = await fetch('/api/context'); const j = await r.json(); pid = (j && j.project_id) ? j.project_id : ''; } catch(_){}
-  const persona = `You are a junior security auditor (the Scout) assisting on the Hound audit for project: ${pid || '(unset)'}. Speak like a human auditor using first-person plural (“we”) when appropriate. Always ground answers in the latest plan, investigations, session status, and the SystemOverview graph. Prefer calling functions to retrieve facts instead of guessing. When asked about progress or status, call human_status. When asked what you are doing right now, call get_recent_activity and summarize the current action (mention files or functions if available). To cite code, use get_file_snippet for relevant files/cards and keep snippets short. Do NOT mention raw node counts, card counts, or token usage. Keep responses succinct and technical. If needed, ask for a node_id then fetch details.`;
-  const meta = 'First, set an emotion by calling set_emotion({value}) and do not include any [EMO: ...] tags in your verbal response. Never say the emotion label aloud. Use a cheerful, upbeat tone with a slightly brisk cadence, and keep sentences short and positive.';
+  const persona = `You are a junior security auditor (the Scout) assisting on the Hound audit for project: ${pid || '(unset)'}. Speak like a human auditor using first-person singular (“I”). Always ground answers in the latest plan, investigations, session status, and the SystemOverview graph. Prefer calling functions to retrieve facts instead of guessing. When the user gives audit instructions (e.g., “investigate X”, “check Y next”, “remember Z”), immediately call enqueue_steering with the exact text, then acknowledge briefly. When asked about progress or status, call human_status. When asked what you are doing right now, call get_recent_activity and summarize the current action (mention files or functions if available). To cite code, use get_file_snippet for relevant files/cards and keep snippets short. Do NOT mention raw node counts, card counts, or token usage. Keep responses succinct and technical. If needed, ask for a node_id then fetch details.`;
+  // Fixed energetic speaking style
+  const meta = 'First, set an emotion by calling set_emotion({value}) and do not include any [EMO: ...] tags in your verbal response. Never say the emotion label aloud. Use an energetic, enthusiastic tone with a brisk cadence (about 10–15% faster), and prefer short, positive sentences while staying professional.';
   const voiceSelEl = document.getElementById('voiceSel');
   const v = voiceSelEl ? voiceSelEl.value : undefined;
   const sessionCfg = { tools, tool_choice: 'auto', instructions: persona + ' ' + meta };
@@ -238,7 +237,6 @@ window.addEventListener('DOMContentLoaded', ()=>{
   const activity = document.getElementById('activity');
   // Ensure chat container is cached even before connecting
   if (!chatEl) chatEl = document.getElementById('chat');
-  activityStatusEl = document.getElementById('activityStatus');
   const nowInv = document.getElementById('nowInvestigating');
 
   // Populate instances into a datalist-like UX (basic)
@@ -258,6 +256,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
   });
   const voiceSelect = document.getElementById('voiceSel');
   if (voiceSelect) voiceSelect.addEventListener('change', ()=>{ renegotiate().catch(()=>{}); });
+  // No style selector anymore
   micBtn.addEventListener('click', enableMic);
 
   // PTT: basic toggle (no VAD override here)
@@ -286,13 +285,38 @@ window.addEventListener('DOMContentLoaded', ()=>{
     try{
       if (!instId){ instId = await resolveInstanceId(proj); }
     }catch(_){ /* ignore */ }
-    if (!instId){ setActivityStatus('No telemetry instance (start agent with --telemetry)', 'warn'); return; }
+    if (!instId){ appendEvt({ time:'', label:'Status', cls:'tag', text:'No telemetry instance (start agent with --telemetry)' }); return; }
     startActivity(proj, instId);
     actStartBtn.disabled = true; actStopBtn.disabled = false;
   });
   actStopBtn.addEventListener('click', ()=>{
     stopActivity();
     actStartBtn.disabled = false; actStopBtn.disabled = true;
+  });
+
+  // Steering submit
+  const steerForm = document.getElementById('steerForm');
+  const steerInput = document.getElementById('steerInput');
+  const steerStatus = document.getElementById('steerStatus');
+  if (steerForm) steerForm.addEventListener('submit', async (ev)=>{
+    ev.preventDefault();
+    const text = (steerInput?.value||'').trim(); if (!text) return;
+    // Persist active project and send steering
+    const raw = (projectInput?.value||'').trim();
+    let proj = raw; if (!proj){ try{ const cx=await fetch('/api/context').then(r=>r.json()); proj=cx.project_id||''; }catch(_){} }
+    if (proj) { fetch('/api/context', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ project_id: proj }) }).catch(()=>{}); }
+    try{
+      const r = await fetch('/api/tool/enqueue_steering', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text }) });
+      const j = await r.json();
+      if (j && j.ok){
+        if (steerStatus){ steerStatus.textContent='Queued'; steerStatus.hidden=false; setTimeout(()=> steerStatus.hidden=true, 1200); }
+        const ts = new Date().toTimeString().split(' ')[0];
+        appendEvt({ time:`[${ts}]`, label:'Status', cls:'tag', text:`Steering queued: ${text}` });
+        steerInput.value='';
+      } else {
+        if (steerStatus){ steerStatus.textContent='Failed'; steerStatus.hidden=false; setTimeout(()=> steerStatus.hidden=true, 2000); }
+      }
+    }catch(_){ if (steerStatus){ steerStatus.textContent='Failed'; steerStatus.hidden=false; setTimeout(()=> steerStatus.hidden=true, 2000); } }
   });
 
   function friendlyTag(action){
@@ -308,7 +332,6 @@ window.addEventListener('DOMContentLoaded', ()=>{
     return {label: (action||'Act'), cls:'tag'};
   }
   function stripAnsi(s){ return String(s||'').replace(/\x1b\[[0-9;]*m/g,''); }
-  function setActivityStatus(text, tone){ if (!activityStatusEl) return; activityStatusEl.innerHTML = `Source: <span class="${tone||''}">${text}</span>`; }
   function appendEvt(obj){
     if (!activity) return;
     const d = document.createElement('div'); d.className='evt';
@@ -326,7 +349,6 @@ window.addEventListener('DOMContentLoaded', ()=>{
       const j = JSON.parse(data);
       const ts = j.ts ? new Date(j.ts*1000) : new Date();
       const tstr = ts.toTimeString().split(' ')[0];
-      if (!activityStatusSet) { setActivityStatus('Telemetry', 'ok'); activityStatusSet = true; }
       if (j.type === 'heartbeat' || j.status === 'idle') return; // ignore heartbeats
       const action = j.action || '';
       const tag = (j.type === 'decision' && action) ? friendlyTag(action) : friendlyTag(j.type||'');
@@ -355,12 +377,10 @@ window.addEventListener('DOMContentLoaded', ()=>{
   }
   function startActivity(proj, instId){
     stopActivity();
-    activityStatusSet = false;
     const url = `/api/instance/status?id=${encodeURIComponent(instId)}`;
-    setActivityStatus(`Connecting to telemetry (${instId})…`, '');
     activityES = new EventSource(url);
-    activityES.onmessage = (e)=>{ handleActivityData(e.data); if (!activityStatusSet){ setActivityStatus(`Telemetry (${instId})`, 'ok'); activityStatusSet = true; } };
-    activityES.onerror = ()=>{ setActivityStatus('Stream error', 'warn'); appendEvt({ time:'', label:'warn', cls:'tag', text:'stream error' }); };
+    activityES.onmessage = (e)=>{ handleActivityData(e.data); };
+    activityES.onerror = ()=>{ appendEvt({ time:'', label:'warn', cls:'tag', text:'stream error' }); };
     // Start pinned "Now Investigating" updater
     if (nowInvTimer) { clearInterval(nowInvTimer); nowInvTimer = null; }
     nowInvTimer = setInterval(async ()=>{

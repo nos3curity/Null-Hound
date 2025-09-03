@@ -49,6 +49,12 @@ class DebugLogger:
         # Create log file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.log_file = self.output_dir / f"debug_{session_id}_{timestamp}.log"
+        # Per-interaction directory (one prompt/response per file)
+        try:
+            self.interactions_dir = self.output_dir / "interactions"
+            self.interactions_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            self.interactions_dir = self.output_dir
         
         # Initialize log file
         try:
@@ -82,7 +88,8 @@ Started: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
         schema: Optional[Any] = None,
         duration: Optional[float] = None,
         error: Optional[str] = None,
-        tool_calls: Optional[list] = None
+        tool_calls: Optional[list] = None,
+        profile: Optional[str] = None
     ):
         """
         Log a single LLM interaction.
@@ -140,6 +147,28 @@ RESPONSE:
         # Append to file
         with open(self.log_file, 'a') as f:
             f.write(log_entry)
+
+        # Also write a per-interaction JSON file for easy inspection
+        try:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            idx = f"{self.interaction_count:04d}"
+            fname = self.interactions_dir / f"{idx}_{ts}.json"
+            record = {
+                'time': datetime.now().isoformat(),
+                'session_id': self.session_id,
+                'profile': profile,
+                'system': system_prompt,
+                'user': user_prompt,
+                'response': response if isinstance(response, (str, int, float, list, dict, type(None))) else str(response),
+                'schema': str(schema) if schema is not None else None,
+                'duration_seconds': duration,
+                'error': error,
+                'tool_calls': tool_calls or []
+            }
+            with open(fname, 'w') as jf:
+                json.dump(record, jf, indent=2, default=str)
+        except Exception:
+            pass
     
     def log_event(self, event_type: str, message: str, details: Optional[Dict] = None):
         """
