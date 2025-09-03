@@ -1300,6 +1300,20 @@ class AgentRunner:
             status = info.get('status', '')
             msg = info.get('message', '')
             it = info.get('iteration', 0)
+            # Telemetry publish (best-effort)
+            try:
+                pub = getattr(self, '_telemetry_publish', None)
+                if callable(pub):
+                    pub({
+                        'type': status or 'progress',
+                        'iteration': it,
+                        'message': msg,
+                        'action': info.get('action'),
+                        'parameters': info.get('parameters', {}),
+                        'reasoning': info.get('reasoning', ''),
+                    })
+            except Exception:
+                pass
             
             if status == 'decision':
                 act = info.get('action', '-')
@@ -1772,10 +1786,11 @@ class AgentRunner:
 @click.option('--session', default=None, help='Attach to a specific session ID')
 @click.option('--new-session', is_flag=True, help='Create a new session')
 @click.option('--session-private-hypotheses', is_flag=True, help='Keep new hypotheses private to this session')
+@click.option('--telemetry', is_flag=True, help='Expose local (localhost) telemetry SSE/control and register instance')
 def agent(project_id: str, iterations: Optional[int], plan_n: int, time_limit: Optional[int], 
           config: Optional[str], debug: bool, platform: Optional[str], model: Optional[str],
           strategist_platform: Optional[str], strategist_model: Optional[str],
-          session: Optional[str], new_session: bool, session_private_hypotheses: bool):
+          session: Optional[str], new_session: bool, session_private_hypotheses: bool, telemetry: bool):
     """Run autonomous security analysis agent."""
     
     config_path = Path(config) if config else None
@@ -1785,7 +1800,23 @@ def agent(project_id: str, iterations: Optional[int], plan_n: int, time_limit: O
     if not runner.initialize():
         return
     
+    # Optional telemetry: local-only HTTP SSE/control + instance registry
+    tele = None
     try:
+        if telemetry:
+            try:
+                from telemetry import TelemetryServer
+                # Project dir used after initialize
+                pd = get_project_dir(project_id)
+                tele = TelemetryServer(project_id, pd)
+                tele.start()
+                # Emit a friendly boot event so telemetry streams show activity immediately
+                try:
+                    tele.publish({'type': 'status', 'message': 'audit session started', 'iteration': 0})
+                except Exception:
+                    pass
+            except Exception:
+                tele = None
         # Apply strategist overrides (update config before run if provided)
         if runner.config is None:
             runner.config = {}
@@ -1801,6 +1832,32 @@ def agent(project_id: str, iterations: Optional[int], plan_n: int, time_limit: O
         if session_private_hypotheses and getattr(runner, 'agent', None):
             try:
                 runner.agent.default_hypothesis_visibility = 'session'
+            except Exception:
+                pass
+        # Inject telemetry into runner by monkey-patching a publisher
+        if tele is not None:
+            try:
+                runner._telemetry_publish = tele.publish  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        # Wrap run to emit start/stop events around each investigation
+        if tele is not None:
+            # Monkey-patch a simple notifier into runner for per-investigation markers
+            try:
+                _orig_investigate = getattr(runner.agent, 'investigate') if getattr(runner, 'agent', None) else None
+                if callable(_orig_investigate):
+                    def _wrapped_investigate(prompt, *a, **kw):
+                        try:
+                            tele.publish({'type': 'status', 'message': f'starting: {prompt}', 'iteration': (kw.get('iteration') or 0)})
+                        except Exception:
+                            pass
+                        res = _orig_investigate(prompt, *a, **kw)
+                        try:
+                            tele.publish({'type': 'status', 'message': f'completed: {prompt}', 'iteration': res.get('iterations_completed', 0) if isinstance(res, dict) else 0})
+                        except Exception:
+                            pass
+                        return res
+                    runner.agent.investigate = _wrapped_investigate  # type: ignore[attr-defined]
             except Exception:
                 pass
         runner.run(plan_n=plan_n)
@@ -1819,3 +1876,10 @@ def agent(project_id: str, iterations: Optional[int], plan_n: int, time_limit: O
         except:
             pass
         raise
+    finally:
+        # Ensure telemetry shutdown and registry cleanup
+        try:
+            if tele is not None:
+                tele.stop()
+        except Exception:
+            pass
