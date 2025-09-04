@@ -37,14 +37,48 @@ class ProjectManager:
                 json.dump({"projects": {}}, f, indent=2)
     
     def _load_registry(self) -> dict:
-        """Load project registry."""
-        with open(str(self.registry_file)) as f:
-            return json.load(f)
+        """Load project registry robustly, tolerating trailing garbage or partial writes."""
+        try:
+            text = Path(self.registry_file).read_text(encoding='utf-8', errors='ignore')
+        except FileNotFoundError:
+            return {"projects": {}}
+        except Exception:
+            return {"projects": {}}
+
+        # First try normal parse
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        # Try to parse the first JSON object in the file (handles 'Extra data')
+        try:
+            decoder = json.JSONDecoder()
+            obj, _ = decoder.raw_decode(text.lstrip())
+            if isinstance(obj, dict) and 'projects' in obj:
+                return obj
+        except Exception:
+            pass
+
+        # Fallback: empty registry
+        return {"projects": {}}
     
     def _save_registry(self, registry: dict):
-        """Save project registry."""
-        with open(str(self.registry_file), 'w') as f:
-            json.dump(registry, f, indent=2)
+        """Save project registry atomically to avoid corruption on concurrent writes."""
+        try:
+            tmp = self.registry_file.with_suffix('.json.tmp')
+            tmp.parent.mkdir(parents=True, exist_ok=True)
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(registry, f, indent=2)
+            # Atomic replace
+            os.replace(tmp, self.registry_file)
+        except Exception:
+            # Best-effort fallback
+            try:
+                with open(str(self.registry_file), 'w', encoding='utf-8') as f:
+                    json.dump(registry, f, indent=2)
+            except Exception:
+                pass
     
     def create_project(self, name: str, source_path: str, 
                       description: str | None = None,
@@ -311,7 +345,8 @@ def create(name: str, source_path: str, description: str | None, auto_name: bool
         console.print(f"  {cli_cmd} agent audit --project {config['name']}")
         
     except ValueError as e:
-        console.print(f"[red]Error:[/red] {str(e)}")
+        # Print errors to stderr so callers can capture them reliably
+        click.echo(f"Error: {str(e)}", err=True)
         raise click.Exit(1)
 
 
