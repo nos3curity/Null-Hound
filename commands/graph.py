@@ -161,15 +161,15 @@ def build(
 
             builder = GraphBuilder(config, debug=debug, debug_logger=debug_logger)
 
-            # Narrative model names
-            models = (config or {}).get('models', {})
-            graph_model = (models.get('graph') or {}).get('model') or 'Graph-Model'
-            # Discovery uses guidance/strategist profile; prefer strategist, then guidance
-            discovery_model = (
-                (models.get('strategist') or {}).get('model')
-                or (models.get('guidance') or {}).get('model')
-                or 'Guidance-Model'
-            )
+            # Narrative model names: reflect effective models used by builder
+            try:
+                graph_model = getattr(builder.llm, 'model', None) or 'Graph-Model'
+            except Exception:
+                graph_model = 'Graph-Model'
+            try:
+                discovery_model = getattr(builder.llm_agent, 'model', None) or 'Guidance-Model'
+            except Exception:
+                discovery_model = 'Guidance-Model'
 
             # Animated progress bar during graph construction
             iteration_total = max_iterations

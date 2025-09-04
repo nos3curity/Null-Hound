@@ -31,6 +31,11 @@ except Exception:
     except Exception:
         _genai_legacy = None
 
+# Runtime flags to control legacy fallback (easier debugging when disabled)
+import os as _os
+_REQUIRE_NEW = (_os.environ.get("HOUND_GEMINI_REQUIRE_NEW", "").lower() in {"1", "true", "yes", "on"})
+_NO_LEGACY = _REQUIRE_NEW or (_os.environ.get("HOUND_GEMINI_NO_LEGACY", "").lower() in {"1", "true", "yes", "on"})
+
 # Provide minimal enums/types shims for legacy path when available
 _HarmCategory = None
 _HarmBlockThreshold = None
@@ -84,6 +89,7 @@ class GeminiProvider(BaseLLMProvider):
         self._last_token_usage = None
         self._use_new = _USE_NEW_GENAI and (_genai_new is not None)
         self._client = None  # Only for new SDK
+        self._client_flavor = "genai-new" if self._use_new else ("genai-legacy" if _genai_legacy is not None else "none")
 
         # Get API key from environment
         api_key_env = config.get("gemini", {}).get("api_key_env", "GOOGLE_API_KEY")
@@ -112,6 +118,8 @@ class GeminiProvider(BaseLLMProvider):
             self.model = model_name  # Keep a simple name for new API
         else:
             # Legacy SDK configuration and model instance (or patched test double)
+            if _NO_LEGACY:
+                raise RuntimeError("HOUND_GEMINI_REQUIRE_NEW/HOUND_GEMINI_NO_LEGACY is set but google-genai is not available. Install 'google-genai' to proceed.")
             legacy_lib = _genai_legacy or genai
             if legacy_lib is None:
                 raise RuntimeError(

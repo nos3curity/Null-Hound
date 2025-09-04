@@ -246,21 +246,41 @@ class GraphBuilder:
     """
     
     def __init__(self, config: dict, debug: bool = False, debug_logger=None):
-        self.config = config
+        # Use a local copy of config and hardcode provider/model per project request:
+        # - Discovery (strategist): Gemini 2.5 Pro WITH thinking
+        # - Building (graph): Gemini 2.5 Pro WITHOUT thinking
+        import copy as _copy
+        cfg = _copy.deepcopy(config) if isinstance(config, dict) else {}
+        models_cfg = cfg.setdefault("models", {})
+        # Force graph profile
+        graph_cfg = models_cfg.setdefault("graph", {})
+        graph_cfg["provider"] = "gemini"
+        graph_cfg["model"] = "gemini-2.5-pro"
+        graph_cfg["thinking_enabled"] = False
+        # Preserve existing thinking_budget if present; otherwise keep default
+        graph_cfg.setdefault("thinking_budget", -1)
+        # Force strategist profile (discovery)
+        strat_cfg = models_cfg.setdefault("strategist", {})
+        strat_cfg["provider"] = "gemini"
+        strat_cfg["model"] = "gemini-2.5-pro"
+        strat_cfg["thinking_enabled"] = True
+        strat_cfg.setdefault("thinking_budget", -1)
+        # Save effective config
+        self.config = cfg
         self.debug = debug
         self.debug_logger = debug_logger
         
         # Initialize LLM clients - guidance for discovery, graph for building
         # Graph model for building graphs
-        self.llm = LLMClient(config, profile="graph", debug_logger=debug_logger)
+        self.llm = LLMClient(self.config, profile="graph", debug_logger=debug_logger)
         if debug:
-            graph_model = config.get("models", {}).get("graph", {}).get("model", "unknown")
+            graph_model = self.config.get("models", {}).get("graph", {}).get("model", "unknown")
             print(f"[*] Graph model: {graph_model}")
         
         # Strategist model for initial discovery (heavier reasoning)
-        self.llm_agent = LLMClient(config, profile="strategist", debug_logger=debug_logger)
+        self.llm_agent = LLMClient(self.config, profile="strategist", debug_logger=debug_logger)
         if debug:
-            agent_model = config.get("models", {}).get("strategist", {}).get("model", "unknown")
+            agent_model = self.config.get("models", {}).get("strategist", {}).get("model", "unknown")
             print(f"[*] Agent model: {agent_model} (for discovery)")
         
         # Knowledge graphs storage
