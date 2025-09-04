@@ -221,7 +221,8 @@ def agent_audit(
     strategist_model: str = typer.Option(None, "--strategist-model", help="Override strategist model (e.g., gpt-4o-mini)"),
     session: str = typer.Option(None, "--session", help="Attach to a specific session ID"),
     new_session: bool = typer.Option(False, "--new-session", help="Create a new session"),
-    session_private_hypotheses: bool = typer.Option(False, "--session-private-hypotheses", help="Keep new hypotheses private to this session")
+    session_private_hypotheses: bool = typer.Option(False, "--session-private-hypotheses", help="Keep new hypotheses private to this session"),
+    strategist_two_pass: bool = typer.Option(False, "--strategist-two-pass", help="Enable strategist two-pass self-critique to reduce false positives")
 ):
     """Run autonomous security audit (plans investigations automatically)."""
     from commands.agent import agent as agent_command
@@ -306,7 +307,8 @@ def agent_audit(
         'strategist_model': strategist_model,
         'session': session,
         'new_session': new_session,
-        'session_private_hypotheses': session_private_hypotheses
+        'session_private_hypotheses': session_private_hypotheses,
+        'strategist_two_pass': strategist_two_pass
     })
 
 
