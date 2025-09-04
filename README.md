@@ -1,9 +1,9 @@
 <p align="center">
   <img src="static/hound.png" alt="Hound Banner" width="75%">
 </p>
-# Hound
+<h1 align="center">Hound</h1>
 
-**Autonomous agents for code security auditing**
+<p align="center"><strong>Autonomous agents for code security auditing</strong></p>
 
 <p align="center">
   <a href="https://github.com/muellerberndt/hound/actions"><img src="https://github.com/muellerberndt/hound/workflows/Tests/badge.svg" alt="Tests"></a>
@@ -15,12 +15,14 @@
 </p>
 
 <p align="center">
-  <a href="#overview">Overview</a>
-  · <a href="#quick-start">Quick Start</a>
-  · <a href="#configuration">Configuration</a>
-  · <a href="#complete-audit-workflow">Workflow</a>
-  · <a href="#chatbot-telemetry-ui">Chatbot</a>
-  · <a href="#contributing">Contributing</a>
+  <sub>
+    <a href="#overview"><b>Overview</b></a>
+    • <a href="#quick-start"><b>Quick Start</b></a>
+    • <a href="#configuration"><b>Configuration</b></a>
+    • <a href="#complete-audit-workflow"><b>Workflow</b></a>
+    • <a href="#chatbot-telemetry-ui"><b>Chatbot</b></a>
+    • <a href="#contributing"><b>Contributing</b></a>
+  </sub>
 </p>
 
 ---
