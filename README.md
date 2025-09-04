@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="static/hound.png" alt="Hound" width="450" />
+  <img src="static/hound.png" alt="Hound" width="315" />
   
   # Hound
   
@@ -22,17 +22,26 @@ Hound is a security audit automation pipeline for AI-assisted code review that m
 
 ### How It Works
 
-Hound's cognitive architecture mirrors how expert auditors think:
+Hound’s analysis loop is organized around graphs, beliefs, and focused investigations:
 
-1. **Relational Knowledge Graphs** - Builds interconnected graphs that capture system aspects (architecture, access control, value flows) with annotations marking observations and assumptions. This allows Hound to improve its understanding of the codebase over time and detect contradictions between high-level assumptions and implementation details.
+1. **Relational Knowledge Graphs (adaptive, language‑agnostic)**
+   - A model‑driven graph builder constructs and refines interconnected graphs of the system (architecture, access control, value flows, state). It adapts to the target scope and programming language without relying on brittle parsers or CFG generators.
+   - The graph evolves as the audit progresses: nodes accrue observations and assumptions; relationships are added or revised as new code is inspected.
+   - The agent reasons at a high level, then “zooms in” on a subgraph to pull only the precise code slices needed at that moment. Rather than pure embedding search, the graph provides structured context for targeted retrieval and reasoning.
 
-2. **Precise Code Grounding** - Every graph node and annotation links to exact code locations. Instead of vague semantic matching with embeddings, Hound maintains attention on the exact specific functions, variables, and call sites that are relevant to its current investigation.
+2. **Belief System and Hypotheses**
+   - Instead of one‑shot judgments, Hound maintains beliefs (hypotheses) that evolve as evidence accumulates. Confidence adjusts up or down when new observations support or contradict an assumption.
+   - This lets the agent keep weak but plausible leads “alive” without overcommitting, then promote or prune them as the audit uncovers more code and context.
+   - The result is steadier calibration over longer runs: fewer premature rejections, better recall of subtle issues, and a transparent trail from initial hunch to conclusion.
 
-3. **Adaptive Planning** - Investigation priorities dynamically reorganize based on discoveries. Finding one vulnerability triggers focused searches for related issues. Coverage tracking ensures systematic exploration while allowing strategic pivots.
+3. **Precise Code Grounding**
+   - Every graph element and annotation links to exact files, functions, and call sites. Investigations retrieve only the relevant code spans, maintaining attention on concrete implementation details rather than broad semantic similarity.
 
-The system employs a **senior/junior agent pattern**: a Strategist (senior) reviews graphs to identify contradictions and plan investigations, while a Scout (junior) executes targeted code analysis. This mirrors real audit teams where seniors direct while juniors investigate.
+4. **Adaptive Planning**
+   - Planning reacts to discoveries: finding one issue seeds targeted searches for related classes of bugs (e.g., privilege checks, reentrancy surfaces, value transfer patterns).
+   - Coverage tracking ensures systematic exploration while allowing strategic pivots toward the most promising areas.
 
-Each audit creates a **session** that tracks coverage, findings, and token usage. Knowledge accumulates across sessions, building deeper understanding over time.
+The system employs a **senior/junior auditor pattern**: the Scout (junior) actively navigates the codebase and annotates the knowledge graphs as it explores, while the Strategist (senior) handles high‑level planning and vulnerability analysis, directing and refocusing the Scout as needed. This mirrors real audit teams where seniors guide and juniors investigate.
 
 **Codebase size considerations:** While Hound is language-agnostic and can analyze any codebase, it's optimized for small-to-medium sized projects like typical smart contract applications. Large enterprise codebases may exceed context limits and require selective analysis of specific subsystems.
 

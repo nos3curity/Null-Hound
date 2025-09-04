@@ -1933,10 +1933,12 @@ class AgentRunner:
 @click.option('--new-session', is_flag=True, help='Create a new session')
 @click.option('--session-private-hypotheses', is_flag=True, help='Keep new hypotheses private to this session')
 @click.option('--telemetry', is_flag=True, help='Expose local (localhost) telemetry SSE/control and register instance')
+@click.option('--strategist-two-pass', is_flag=True, help='Enable strategist two-pass self-critique to reduce false positives')
 def agent(project_id: str, iterations: Optional[int], plan_n: int, time_limit: Optional[int], 
           config: Optional[str], debug: bool, platform: Optional[str], model: Optional[str],
           strategist_platform: Optional[str], strategist_model: Optional[str],
-          session: Optional[str], new_session: bool, session_private_hypotheses: bool, telemetry: bool):
+          session: Optional[str], new_session: bool, session_private_hypotheses: bool,
+          telemetry: bool, strategist_two_pass: bool):
     """Run autonomous security analysis agent."""
     
     config_path = Path(config) if config else None
@@ -1981,6 +1983,12 @@ def agent(project_id: str, iterations: Optional[int], plan_n: int, time_limit: O
                 runner.config['models']['strategist']['provider'] = strategist_platform
             if strategist_model:
                 runner.config['models']['strategist']['model'] = strategist_model
+        # Apply strategist two-pass toggle if requested
+        try:
+            if strategist_two_pass:
+                runner.config['strategist_two_pass_review'] = True
+        except Exception:
+            pass
         # Set strategist overrides then run
         if session_private_hypotheses and getattr(runner, 'agent', None):
             try:
