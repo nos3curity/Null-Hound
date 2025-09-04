@@ -220,6 +220,16 @@ class GraphUpdate(BaseModel):
         description="Updates to existing nodes with new invariants/observations"
     )
 
+    # Optional completion hints from the model (ignored by builder heuristics for now)
+    is_complete: bool | None = Field(
+        default=None,
+        description="Whether the model believes this graph is complete"
+    )
+    completeness_reason: str | None = Field(
+        default=None,
+        description="Reason provided by the model about completeness state"
+    )
+
 
 
 
@@ -512,6 +522,7 @@ The FIRST must be the system/component/flow overview."""
         """
         
         any_updates = False
+        had_failures = False
         
         # Always try to use ALL cards for maximum context
         # The model needs to see the entire codebase to make good decisions
@@ -543,7 +554,12 @@ The FIRST must be the system/component/flow overview."""
                     # If no new nodes or edges were added, the graph might be complete
                     if self.iteration > 0:  # Only after first iteration
                         self._emit("complete", f"Graph '{graph_name}' appears complete (no new nodes/edges found)")
+            else:
+                had_failures = True
         
+        # Don't allow early-exit logic in caller to treat an error-only pass as completion
+        if had_failures and self.debug:
+            print("  One or more update calls failed this iteration; skipping early completion heuristics.")
         return any_updates
     
     def _get_orphaned_nodes(self, graph: KnowledgeGraph) -> set:
@@ -733,6 +749,38 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
                 return update
             except Exception as e2:
                 self._emit("warn", f"Retry failed: {e2}")
+                # Final fallback: chunk the cards into smaller batches and merge updates
+                try:
+                    chunks: list[list[dict]] = []
+                    n = max(1, len(cards_with_ids)//2)
+                    if n < len(cards_with_ids):
+                        chunks = [cards_with_ids[:n], cards_with_ids[n:]]
+                    else:
+                        # If very small, try 2 random subsets for diversity
+                        import random as _rand
+                        a = cards_with_ids.copy(); _rand.shuffle(a)
+                        chunks = [a[: max(1, len(a)//2)], a[max(1, len(a)//2):]]
+                    agg = GraphUpdate(new_nodes=[], new_edges=[], node_updates=[])
+                    combined = False
+                    for part in chunks:
+                        up = {**user_prompt, "code_samples": part}
+                        try:
+                            u = self.llm.parse(
+                                system=system_prompt,
+                                user=json.dumps(up, indent=2),
+                                schema=GraphUpdate
+                            )
+                            agg.new_nodes.extend(u.new_nodes)
+                            agg.new_edges.extend(u.new_edges)
+                            agg.node_updates.extend(u.node_updates)
+                            combined = True
+                        except Exception:
+                            continue
+                    if combined:
+                        agg.target_graph = graph.name
+                        return agg
+                except Exception:
+                    pass
                 return None
     
     

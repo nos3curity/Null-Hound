@@ -89,10 +89,14 @@ def build(
         "[white]Normal mapping guides; YOUR mapping makes pathways beg to be used.[/white]",
     ]))
     
-    # Create debug logger if needed
+    # Create debug logger if needed (write logs under the project's graphs dir)
     debug_logger = None
     if debug:
-        debug_logger = DebugLogger(session_id=f"graph_{repo_name}_{int(time.time())}")
+        try:
+            debug_out = (Path(output_dir) / "graphs" / ".hound_debug").resolve()
+        except Exception:
+            debug_out = None
+        debug_logger = DebugLogger(session_id=f"graph_{repo_name}_{int(time.time())}", output_dir=debug_out)
     
     try:
         files_to_include = [f.strip() for f in file_filter.split(",")] if file_filter else None

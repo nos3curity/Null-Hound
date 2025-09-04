@@ -15,17 +15,18 @@ xai:
 
 # Model configuration with context limits
 models:
-  # Graph building model - can have very large context
-  # Used for graph building iterations (NOT for initial graph discovery/design)
+  # Graph building model - needs large context
   graph:
-    # Large context window recommended
     # GPT-4.1 WORKS WELL HERE BUT IS VERY EXPENSIVE!
     # provider: openai
     # model: gpt-4.1 
     # max_context: 1000000
-    provider: openai
-    model: gpt-5-nano
-    max_context: 256000
+
+    provider: gemini
+    model: gemini-2.5-pro
+    max_context: 1000000
+    thinking_enabled: true
+    thinking_budget: -1
     
   # Scout/agent model for exploration
   scout:
@@ -35,6 +36,7 @@ models:
     # reasoning_effort: low
   
   # Strategic thinking model
+  # For planning and reasoning about security issues
   strategist:
     provider: openai
     model: gpt-5
@@ -42,7 +44,7 @@ models:
     plan_reasoning_effort: medium
     hypothesize_reasoning_effort: high
   
-  # Finalization model
+  # QA model
   finalize:
     provider: openai
     model: gpt-5
@@ -58,15 +60,15 @@ models:
 
 # Global context settings (used when model doesn't specify max_context)
 context:
-  max_tokens: 256000          # Default for models without specific max_context
+  max_tokens: 256000           # Default for models without specific max_context
   compression_threshold: 0.75  # Compress history when 75% full
 
 # Timeouts and retries
 timeouts:
-  request_seconds: 30
+  request_seconds: 300
 
 retries:
-  max_attempts: 1
+  max_attempts: 3
   backoff_min_seconds: 1
   backoff_max_seconds: 2
 
