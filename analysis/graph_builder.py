@@ -13,7 +13,7 @@ from typing import Any
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, AliasChoices
 
 from llm.client import LLMClient
 from llm.tokenization import count_tokens
@@ -163,16 +163,30 @@ class NodeSpec(BaseModel):
     id: str = Field(description="Unique node identifier (e.g., 'func_calculate', 'module_utils')")
     type: str = Field(description="Node type (e.g., function, class, module)")
     label: str = Field(description="Human-readable label for the node")
-    refs: list[str] = Field(default_factory=list, description="List of card IDs where this node appears")
+    refs: list[str] = Field(
+        default_factory=list,
+        description="List of card IDs where this node appears",
+        validation_alias=AliasChoices("refs", "Refs", "evidence", "cards"),
+    )
 
 
 class EdgeSpec(BaseModel):
     """Edge to add - connects two nodes"""
     model_config = {"extra": "forbid"}
     type: str = Field(description="Edge type (e.g., calls, uses, depends_on)")
-    src: str = Field(description="Source node ID (must be an existing node ID, NOT a card ID)")
-    dst: str = Field(description="Target node ID (must be an existing node ID, NOT a card ID)")
-    refs: list[str] = Field(default_factory=list, description="Card IDs that evidence this edge")
+    src: str = Field(
+        description="Source node ID (must be an existing node ID, NOT a card ID)",
+        validation_alias=AliasChoices("src", "source", "from", "source_id"),
+    )
+    dst: str = Field(
+        description="Target node ID (must be an existing node ID, NOT a card ID)",
+        validation_alias=AliasChoices("dst", "target", "to", "target_id"),
+    )
+    refs: list[str] = Field(
+        default_factory=list,
+        description="Card IDs that evidence this edge",
+        validation_alias=AliasChoices("refs", "Refs", "evidence", "cards"),
+    )
 
 
 class NodeUpdate(BaseModel):
@@ -394,19 +408,36 @@ REQUIRED: The FIRST graph MUST be a high-level system/component/flow graph that 
 
 Name it "SystemArchitecture".
 
-{'For additional graphs, choose what would be most useful for understanding the system architecture and relationships in this codebase.' if max_graphs > 1 else ''}
+DIVERSITY REQUIREMENTS (for remaining graphs):
+- Each additional graph MUST present a distinct analytical lens (do NOT create multiple call graphs).
+- Prefer domain-relevant structures with meaningful, typed relationships (edges with types like grants, authorizes, mints, reads, writes, depends_on, initializes, upgrades, pauses, emits, computes, bounded_by, etc.).
+- Choose graphs that maximize utility for security analysis and understanding, not just topology.
 
-{'Examples of other useful graphs:' if max_graphs > 1 else ''}
-{'''- Call graph: function calls
-- Authorization / action map
-- Data flow graph
-- State mutation graph
-- User flows and evens
-- Asset/monetary flows (for smart contract projects)''' if max_graphs > 1 else ''}
+Creativity guidance:
+- Be maximally creative and tailor graph types to THIS codebase (examples are inspiration, not constraints).
+- Propose novel, domain-specific graph types when they would reveal important structure or risk.
+- Avoid redundancy across graphs; minimize overlap and pick the most informative lenses.
+
+Ideas for strong, analysis-friendly graphs (pick those that fit this codebase):
+- AuthorizationMap: who grants/assumes/authorizes which roles/actions (edges: creates, grants, assumes, authorizes, guarded_by).
+- PermissionChecks: coverage of access modifiers and require checks per function (edges: guarded_by, unchecked, requires_role).
+- AssetFlow: mint/burn/transfer/deposit/withdraw across contracts and accounts (edges: mints, burns, transfers, deposits, withdraws).
+- StateMutation: storage variables and the functions that read/write them (edges: written_by, read_by, derived_from).
+- UpgradeLifecycle: deployment/initialization/upgrade relationships (edges: deploys, initializes, upgrades, migrates_from).
+- ExternalDeps: external/oracle/library dependencies and trust boundaries (edges: reads_from, depends_on, trusts, verifies).
+- Reentrancy/ExternalCalls: external call graph with entrypoints and reentrant paths (edges: calls_external, reentrant_path, invokes_untrusted).
+- InvariantsMap: key invariants/assumptions and where they’re enforced (edges: enforced_by, broken_by, relies_on).
+- MathAlgorithm: break down core formulas/AMM math into steps/variables (edges: computes, uses_param, normalizes, clamps).
+- EventMap: which events are emitted by which functions and with what state (edges: emitted_by, indexes, correlates_with).
+- TimeWindows/RateLimits: time-based gates and limits (edges: gates, bounded_by, cooldown).
 
 For each graph, you MUST provide:
 - name: A short name for the graph
 - focus: What this graph focuses on (be specific)
+
+Additionally, provide top-level guidance to help refinement:
+- suggested_node_types: list of node types you plan to use across graphs (e.g., function, storage, role, token, invariant, event)
+- suggested_edge_types: list of edge types you plan to use (e.g., calls, guarded_by, writes, reads, mints, authorizes)
 
 IMPORTANT: Return EXACTLY {max_graphs} graph{'s' if max_graphs > 1 else ''}, no more, no less.
 The FIRST must be the system/component/flow overview."""
@@ -491,7 +522,10 @@ The FIRST must be the system/component/flow overview."""
             # Try to use ALL cards if possible within token limits
             relevant_cards = self._sample_cards(cards)
             if len(relevant_cards) != len(cards):
-                self._emit("sample", f"WARNING: Sampled {len(relevant_cards)} cards from {len(cards)} total due to context limits - graph may be incomplete")
+                self._emit(
+                    "sample",
+                    f"Sampled {len(relevant_cards)} of {len(cards)} cards to fit context; for large codebases consider increasing iterations or using a graph model with a larger context size."
+                )
             
             # Update the graph
             update = self._update_graph(graph, relevant_cards)
@@ -681,8 +715,25 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
             update.target_graph = graph.name
             return update
         except Exception as e:
+            # One-shot retry with stricter output instructions to correct common format issues
             self._emit("warn", f"Failed to get update: {e}")
-            return None
+            strict_suffix = (
+                "\n\nSTRICT OUTPUT RULES:\n"
+                "- Return ONLY a JSON object with keys: new_nodes, new_edges, node_updates.\n"
+                "- Use lowercase keys exactly: refs, src, dst.\n"
+                "- Do NOT include any schema, $defs, comments, or trailing text.\n"
+            )
+            try:
+                update = self.llm.parse(
+                    system=system_prompt + strict_suffix,
+                    user=json.dumps(user_prompt, indent=2),
+                    schema=GraphUpdate,
+                )
+                update.target_graph = graph.name
+                return update
+            except Exception as e2:
+                self._emit("warn", f"Retry failed: {e2}")
+                return None
     
     
     def _apply_update(self, graph: KnowledgeGraph, update: GraphUpdate) -> tuple[int, int]:
