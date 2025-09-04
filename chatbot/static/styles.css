@@ -51,8 +51,33 @@ button:disabled { opacity:.5; cursor:default; }
 .audit-head .title { font-weight:600; letter-spacing:.2px; opacity:.95; }
 .audit-head .controls { display:flex; gap:8px; align-items:center; }
 .audit-head input { min-width: 380px; background:#0a141b; color:var(--fg); border:1px solid #15222c; border-radius:9px; padding:8px; }
+.tabs { display:flex; gap:6px; margin: 6px 2px 8px; }
+.tab { font-size:12px; padding:6px 10px; border:1px solid var(--line); background:#0b1a23; color:#a7e4ff; border-radius:999px; cursor:pointer; }
+.tab.active { background:#0d2633; color:#e6f1f7; border-color:#173a4b; }
 .nowinvest { margin:0 2px 10px; font-size:12px; color:#a9bfd3; opacity:.95; background:#0b1720; border:1px solid #0e2330; border-radius:8px; padding:6px 10px; }
 .activity { height: 36vh; overflow:auto; padding:10px; margin:0; background:#08131a; border:1px solid var(--line); border-radius:9px; font-size:13px; line-height:1.5; color:#cfe7f3; }
+.plan { height: 36vh; overflow:auto; padding:10px; margin:0; background:#08131a; border:1px solid var(--line); border-radius:9px; font-size:13px; line-height:1.5; color:#cfe7f3; }
+.hidden { display:none; }
+.plan-item { display:flex; gap:10px; align-items:flex-start; padding:6px 8px; border-bottom:1px solid #0f2430; }
+.plan-item:last-child { border-bottom:none; }
+.plan-mark { font-size:14px; width:18px; text-align:center; flex:0 0 auto; }
+.plan-body { flex:1; }
+.plan-goal { font-weight:600; }
+.plan-meta { font-size:12px; color:#a7c6d6; margin-top:2px; }
+
+/* Hypotheses */
+.hypo { height: 36vh; overflow:auto; padding:10px; margin:0; background:#08131a; border:1px solid var(--line); border-radius:9px; font-size:13px; line-height:1.5; color:#cfe7f3; }
+.hypo-item { display:flex; gap:10px; align-items:flex-start; padding:6px 8px; border-bottom:1px solid #0f2430; }
+.hypo-item:last-child { border-bottom:none; }
+.hypo-mark { font-size:12px; width:56px; text-align:center; flex:0 0 auto; color:#a7c6d6; }
+.hypo-body { flex:1; }
+.hypo-title { font-weight:600; }
+.hypo-meta { font-size:12px; color:#a7c6d6; margin-top:2px; }
+.hypo-actions { display:flex; gap:6px; }
+.hypo-actions button { font-size:11px; padding:4px 8px; border-radius:8px; }
+.hypo-actions .confirm { border-color:#1f3b2b; background:#0c1a12; color:#22c55e; }
+.hypo-actions .reject { border-color:#3b1f1f; background:#1a0c0c; color:#f87171; }
+.hypo-item.rejected .hypo-title { text-decoration: line-through; opacity: .75; }
 
 /* Simple syntax highlighting */
 .code-view code .kw { color:#ffd479; }

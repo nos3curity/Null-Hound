@@ -791,7 +791,10 @@ class AgentRunner:
             return []
 
     def _find_latest_urgent_steer(self) -> Optional[dict]:
-        """Return the newest steering entry with keywords, newer than last consumed ts."""
+        """Return the newest steering entry interpreted as actionable (urgent),
+        newer than the last consumed timestamp. Treats both explicit verbs and
+        broad/global directives as urgent.
+        """
         last_ts = self._get_last_consumed_steer_ts()
         entries = self._read_steering_entries(limit=80)
         # newest first
@@ -801,7 +804,19 @@ class AgentRunner:
             if ts <= last_ts:
                 continue
             low = txt.lower()
-            if any(k in low for k in ("investigate", "check", "look at", "focus on", "right now", "next")):
+            # Broaden detection to common phrasing and typos
+            verbs = (
+                'investigate', 'investtgate', 'investigate', 'check', 'look at', 'look into',
+                'focus on', 'analyze', 'audit', 'review', 'examine', 'scan', 'probe', 'dig into',
+                'right now', 'next', 'please investigate', 'please check'
+            )
+            globals = (
+                'whole app', 'entire app', 'entire codebase', 'whole codebase', 'all contracts',
+                'every contract', 'system-wide', 'system wide', 'project-wide', 'project wide',
+                'across the codebase', 'across the repo', 'across modules', 'end-to-end', 'e2e',
+                'globally', 'everywhere', 'full audit', 'full review', 'scan the entire', 'scan all'
+            )
+            if any(k in low for k in verbs) or any(k in low for k in globals):
                 return {'ts': ts, 'text': txt}
         return None
 
@@ -1666,7 +1681,17 @@ class AgentRunner:
                                     'reasoning': info.get('reasoning', ''),
                                 }
                                 if status == 'result':
-                                    payload['result'] = info.get('result', {})
+                                    # Slim down large result fields to keep UI responsive
+                                    res = info.get('result', {}) or {}
+                                    if isinstance(res, dict):
+                                        slim = dict(res)
+                                        # Drop verbose text and heavy fields
+                                        for k in ('graph_display', 'nodes_display', 'full_response', 'graph_data', 'data', 'nodes', 'edges', 'code', 'cards'):
+                                            if k in slim:
+                                                slim.pop(k, None)
+                                        payload['result'] = slim
+                                    else:
+                                        payload['result'] = res
                                 pub(payload)
                         except Exception:
                             pass

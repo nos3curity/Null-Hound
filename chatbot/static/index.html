@@ -40,15 +40,22 @@
     </main>
     <section class="audit">
       <div class="audit-head">
-        <div class="title">Activity Stream</div>
+        <div class="title">Audit Controls</div>
         <div class="controls">
           <input id="projectInput" placeholder="Project ID (e.g., code4rena_kinetiq_2025_07)" />
           <button id="actStartBtn">Start</button>
           <button id="actStopBtn" disabled>Stop</button>
         </div>
       </div>
+      <div class="tabs">
+        <button id="tabActivity" class="tab active">Activity</button>
+        <button id="tabPlan" class="tab">Plan</button>
+        <button id="tabHypo" class="tab">Findings</button>
+      </div>
       <div id="nowInvestigating" class="nowinvest">Now investigating: —</div>
-      <div id="activity" class="activity"></div>
+      <div id="activity" class="activity tabpane"></div>
+      <div id="planView" class="plan tabpane hidden"></div>
+      <div id="hypoView" class="hypo tabpane hidden"></div>
       <form id="steerForm" class="steerrow">
         <input id="steerInput" placeholder="Steer the audit (e.g., ‘Investigate reentrancy in withdraw’)" />
         <button type="submit">Send</button>

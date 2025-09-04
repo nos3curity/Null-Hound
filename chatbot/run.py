@@ -640,24 +640,53 @@ def create_app():
                 return jsonify({"ok": False, "error": "no active project"}), 400
             sess = _read_latest_session(proj)
             planning = sess.get('planning_history') or []
+            inv = sess.get('investigations') or []
+            # Determine current active goal using same logic as get_current_activity
+            current_goal = None
+            try:
+                if planning:
+                    last = planning[-1]
+                    cand = last.get('items') or []
+                    done_goals = { (r.get('goal') or '') for r in inv }
+                    for it in cand:
+                        if isinstance(it, dict):
+                            g = (it.get('goal') or it.get('description') or it.get('tool_name') or '').strip()
+                            if g and g not in done_goals:
+                                current_goal = g
+                                break
+                if not current_goal and inv:
+                    current_goal = (inv[-1].get('goal') or '').strip() or None
+            except Exception:
+                current_goal = None
+
+            # Flatten plan items across recent planning rounds (newest first), dedupe by goal
             items = []
-            if planning:
-                last = planning[-1]
-                cand = last.get('items') or []
-                # Completed investigations by goal
-                inv = sess.get('investigations') or []
-                completed = { (r.get('goal') or '') for r in inv }
+            seen = set()
+            completed = { (r.get('goal') or '') for r in inv }
+            for plan in reversed(planning):  # newest to oldest by iterating reversed list
+                cand = plan.get('items') or []
                 for it in cand:
                     if not isinstance(it, dict):
                         continue
-                    goal = it.get('goal') or it.get('description') or it.get('tool_name') or 'Unknown'
+                    goal = (it.get('goal') or it.get('description') or it.get('tool_name') or 'Unknown').strip()
+                    if not goal or goal in seen:
+                        continue
+                    seen.add(goal)
+                    status = 'PENDING'
+                    if goal in completed:
+                        status = 'DONE'
+                    elif current_goal and goal == current_goal:
+                        status = 'ACTIVE'
                     items.append({
                         'goal': goal,
                         'priority': it.get('priority'),
+                        'impact': it.get('expected_impact') or it.get('impact'),
+                        'category': it.get('category'),
                         'focus_areas': it.get('focus_areas', []),
-                        'done': goal in completed
+                        'status': status,
+                        'done': status == 'DONE'
                     })
-            return jsonify({"ok": True, "plan": items})
+            return jsonify({"ok": True, "plan": items, "current_goal": current_goal})
         if name == "get_current_activity":
             if not proj:
                 return jsonify({"ok": False, "error": "no active project"}), 400
@@ -719,6 +748,37 @@ def create_app():
                 except Exception:
                     pass
             return jsonify({"ok": True, "hypotheses": out})
+        if name == "set_hypothesis_status":
+            if not proj:
+                return jsonify({"ok": False, "error": "no active project"}), 400
+            hyp_id = (payload.get('id') or '').strip()
+            new_status = (payload.get('status') or '').strip().lower()
+            if not hyp_id or new_status not in ('confirmed','rejected'):
+                return jsonify({"ok": False, "error": "missing id or invalid status (use confirmed|rejected)"}), 400
+            hyp_path = proj / 'hypotheses.json'
+            if not hyp_path.exists():
+                return jsonify({"ok": False, "error": "hypotheses.json not found"}), 404
+            try:
+                data = json.loads(hyp_path.read_text())
+                hyps = data.get('hypotheses', {})
+                target_key = None
+                # Accept exact id or prefix
+                for k in hyps.keys():
+                    if k == hyp_id or k.startswith(hyp_id):
+                        target_key = k
+                        break
+                if not target_key:
+                    return jsonify({"ok": False, "error": "hypothesis not found"}), 404
+                h = hyps.get(target_key) or {}
+                h['status'] = new_status
+                # Snap confidence to endpoints for clarity
+                h['confidence'] = 1.0 if new_status == 'confirmed' else 0.0
+                hyps[target_key] = h
+                data['hypotheses'] = hyps
+                hyp_path.write_text(json.dumps(data, indent=2))
+                return jsonify({"ok": True, "id": target_key, "status": new_status, "confidence": h['confidence']})
+            except Exception as e:
+                return jsonify({"ok": False, "error": str(e)}), 500
         if name == "get_system_overview":
             if not proj:
                 return jsonify({"ok": False, "error": "no active project"}), 400

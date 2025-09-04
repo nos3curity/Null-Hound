@@ -113,13 +113,27 @@ async function connect() {
 
   pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
   pc.ontrack = (e)=>{ remoteAudio.srcObject = e.streams[0]; try{remoteAudio.play()}catch(_){} };
-  pc.onconnectionstatechange = ()=>{ setConn(pc.connectionState==='connected'); };
+  pc.onconnectionstatechange = ()=>{
+    const connected = (pc.connectionState==='connected');
+    setConn(connected);
+    try{
+      const btn = document.getElementById('connectBtn');
+      if (btn){
+        // Disable while connected or connecting; allow click otherwise
+        btn.disabled = connected || (pc.connectionState==='connecting');
+      }
+    }catch(_){ /* ignore */ }
+  };
   // Pre-create audio transceiver
   try { audioTransceiver = pc.addTransceiver('audio', { direction: 'sendrecv' }); } catch (_) {}
 
   // Create data channel before initial negotiation so SDP includes it
   dc = pc.createDataChannel('oai-events');
-  dc.onopen = ()=>{ setConn(true); sessionConfigure(); };
+  dc.onopen = ()=>{
+    setConn(true);
+    try{ const btn = document.getElementById('connectBtn'); if (btn) btn.disabled = true; }catch(_){ }
+    sessionConfigure();
+  };
   dc.onmessage = (ev)=>{ try{ handleEvent(JSON.parse(ev.data)); }catch(_){} };
   // Single negotiation with both audio + data
   await renegotiate();
@@ -321,10 +335,20 @@ window.addEventListener('DOMContentLoaded', ()=>{
   const actStopBtn = document.getElementById('actStopBtn');
   const projectInput = document.getElementById('projectInput');
   const activity = document.getElementById('activity');
+  const planView = document.getElementById('planView');
+  const tabActivity = document.getElementById('tabActivity');
+  const tabPlan = document.getElementById('tabPlan');
+  const tabHypo = document.getElementById('tabHypo');
+  const hypoView = document.getElementById('hypoView');
   codeViewEl = document.getElementById('codeView');
   // Ensure chat container is cached even before connecting
   if (!chatEl) chatEl = document.getElementById('chat');
   const nowInv = document.getElementById('nowInvestigating');
+
+  // Track whether we attached to an instance via Start
+  let isAttached = false;
+  let attachedProjectId = '';
+  let attachedInstanceId = '';
 
   // Populate instances into a datalist-like UX (basic)
   fetch('/api/instances').then(r=>r.json()).then(j=>{
@@ -381,6 +405,17 @@ window.addEventListener('DOMContentLoaded', ()=>{
   actStartBtn.addEventListener('click', async ()=>{
     const raw = (projectInput.value||'').trim();
     if (!raw) { return; }
+    // Ensure realtime connection is established for chat/tools UX
+    try{
+      const already = (dc && dc.readyState==='open') || (pc && pc.connectionState==='connected');
+      if (!already){
+        setPill('Connecting');
+        await connect();
+        // Enable mic/PTT controls on successful connection
+        try{ micBtn.disabled=false; pttBtn.disabled=false; }catch(_){ }
+        setPill('Idle');
+      }
+    }catch(_){ /* non-fatal: activity stream works without realtime */ }
     // Allow either "project_id | instance_id" or plain project id fallback
     let proj = raw; let instId = '';
     const m = raw.split('|');
@@ -393,10 +428,13 @@ window.addEventListener('DOMContentLoaded', ()=>{
     }catch(_){ /* ignore */ }
     if (!instId){ appendEvt({ time:'', label:'Status', cls:'tag', text:'No telemetry instance (start agent with --telemetry)' }); return; }
     startActivity(proj, instId);
+    // Mark UI as attached
+    isAttached = true; attachedProjectId = proj; attachedInstanceId = instId;
     actStartBtn.disabled = true; actStopBtn.disabled = false;
   });
   actStopBtn.addEventListener('click', ()=>{
     stopActivity();
+    isAttached = false; attachedProjectId = ''; attachedInstanceId = '';
     actStartBtn.disabled = false; actStopBtn.disabled = true;
   });
 
@@ -425,14 +463,125 @@ window.addEventListener('DOMContentLoaded', ()=>{
     }catch(_){ if (steerStatus){ steerStatus.textContent='Failed'; steerStatus.hidden=false; setTimeout(()=> steerStatus.hidden=true, 2000); } }
   });
 
+  // ----- Plan tab handling -----
+  let planTimer = null;
+  let hypoTimer = null;
+  function showTab(which){
+    if (which === 'plan'){
+      tabPlan.classList.add('active'); tabActivity.classList.remove('active');
+      tabHypo.classList.remove('active');
+      planView.classList.remove('hidden'); activity.classList.add('hidden'); hypoView.classList.add('hidden');
+      // Fetch immediately and then periodically (only when attached)
+      if (!isAttached){ planView.innerHTML = '<div class="plan-item"><div class="plan-body">No active instance. Click Start to attach.</div></div>'; return; }
+      refreshPlan();
+      if (planTimer) { clearInterval(planTimer); planTimer = null; }
+      planTimer = setInterval(()=>{ refreshPlan(); }, 4000);
+      if (hypoTimer){ clearInterval(hypoTimer); hypoTimer=null; }
+    } else if (which === 'hypo'){
+      tabHypo.classList.add('active'); tabActivity.classList.remove('active'); tabPlan.classList.remove('active');
+      hypoView.classList.remove('hidden'); activity.classList.add('hidden'); planView.classList.add('hidden');
+      if (!isAttached){ hypoView.innerHTML = '<div class="hypo-item"><div class="hypo-body">No active instance. Click Start to attach.</div></div>'; return; }
+      refreshHypotheses();
+      if (hypoTimer) { clearInterval(hypoTimer); hypoTimer = null; }
+      hypoTimer = setInterval(()=>{ refreshHypotheses(); }, 5000);
+      if (planTimer){ clearInterval(planTimer); planTimer=null; }
+    } else {
+      tabActivity.classList.add('active'); tabPlan.classList.remove('active');
+      tabHypo.classList.remove('active');
+      activity.classList.remove('hidden'); planView.classList.add('hidden'); hypoView.classList.add('hidden');
+      if (planTimer) { clearInterval(planTimer); planTimer = null; }
+      if (hypoTimer) { clearInterval(hypoTimer); hypoTimer = null; }
+    }
+  }
+  async function refreshPlan(){
+    try{
+      if (!isAttached || !attachedProjectId){ planView.innerHTML = '<div class="plan-item"><div class="plan-body">No active instance. Click Start to attach.</div></div>'; return; }
+      const j = await invokeTool('list_plan', { project_id: attachedProjectId });
+      if (!j || !j.ok){ planView.innerHTML = '<div class="plan-item"><div class="plan-body">No plan available yet.</div></div>'; return; }
+      renderPlan(j.plan||[]);
+    }catch(_){ planView.innerHTML = '<div class="plan-item"><div class="plan-body">Failed to load plan.</div></div>'; }
+  }
+  function renderPlan(items){
+    if (!planView) return;
+    if (!Array.isArray(items) || items.length===0){ planView.innerHTML = '<div class="plan-item"><div class="plan-body">No plan items yet</div></div>'; return; }
+    let html = '';
+    for (const it of items){
+      const status = String(it.status||'PENDING').toUpperCase();
+      let mark = '•'; let cls = 'style="color:#7fd5ff"';
+      if (status==='DONE'){ mark='✓'; cls='style="color:#7ee198"'; }
+      if (status==='ACTIVE'){ mark='▶'; cls='style="color:#ffd479"'; }
+      const pr = (it.priority!=null) ? `Priority: ${it.priority}` : '';
+      const imp = it.impact ? `Impact: ${it.impact}` : '';
+      const cat = it.category ? `Category: ${it.category}` : '';
+      const fa = (Array.isArray(it.focus_areas) && it.focus_areas.length) ? `Focus: ${it.focus_areas.slice(0,3).join(', ')}` : '';
+      const meta = [pr, imp, cat, fa].filter(Boolean).join(' | ');
+      html += `<div class="plan-item"><div class="plan-mark" ${cls}>${mark}</div><div class="plan-body"><div class="plan-goal">${esc(it.goal||'Unknown')}</div>${meta?`<div class="plan-meta">${esc(meta)}</div>`:''}</div></div>`;
+    }
+    planView.innerHTML = html;
+  }
+  async function refreshHypotheses(){
+    try{
+      if (!isAttached || !attachedProjectId){ hypoView.innerHTML = '<div class="hypo-item"><div class="hypo-body">No active instance. Click Start to attach.</div></div>'; return; }
+      const j = await invokeTool('list_hypotheses', { project_id: attachedProjectId, limit: 50 });
+      if (!j || !j.ok){ hypoView.innerHTML = '<div class="hypo-item"><div class="hypo-body">No findings yet.</div></div>'; return; }
+      renderHypotheses(j.hypotheses||[]);
+    }catch(_){ hypoView.innerHTML = '<div class="hypo-item"><div class="hypo-body">Failed to load findings.</div></div>'; }
+  }
+  function renderHypotheses(items){
+    if (!hypoView) return;
+    if (!Array.isArray(items) || items.length===0){ hypoView.innerHTML = '<div class="hypo-item"><div class="hypo-body">No findings yet.</div></div>'; return; }
+    let html = '';
+    for (const h of items){
+      const conf = (typeof h.confidence==='number') ? Math.round(h.confidence*100) : (h.confidence||0);
+      const status = (h.status||'proposed');
+      const title = esc(h.title||'(untitled)');
+      const descAttr = `title="${esc(h.description||'')}"`;
+      const rejectedCls = (String(status).toLowerCase()==='rejected') ? ' rejected' : '';
+      html += `<div class="hypo-item${rejectedCls}">
+        <div class="hypo-mark">${conf}%</div>
+        <div class="hypo-body">
+          <div class="hypo-title" ${descAttr}>${title}</div>
+          <div class="hypo-meta">${esc(status)}</div>
+        </div>
+        <div class="hypo-actions">
+          <button class="confirm" data-hid="${esc(h.id||'')}" title="Mark confirmed (100%)">Confirm</button>
+          <button class="reject" data-hid="${esc(h.id||'')}" title="Mark rejected (0%)">Reject</button>
+        </div>
+      </div>`;
+    }
+    hypoView.innerHTML = html;
+    // Wire action buttons
+    for (const btn of hypoView.querySelectorAll('button.confirm')){
+      btn.addEventListener('click', async (ev)=>{
+        const hid = ev.currentTarget.getAttribute('data-hid')||'';
+        if (!hid) return;
+        try{ await invokeTool('set_hypothesis_status', { id: hid, status: 'confirmed', project_id: attachedProjectId }); }catch(_){ }
+        refreshHypotheses();
+      });
+    }
+    for (const btn of hypoView.querySelectorAll('button.reject')){
+      btn.addEventListener('click', async (ev)=>{
+        const hid = ev.currentTarget.getAttribute('data-hid')||'';
+        if (!hid) return;
+        try{ await invokeTool('set_hypothesis_status', { id: hid, status: 'rejected', project_id: attachedProjectId }); }catch(_){ }
+        refreshHypotheses();
+      });
+    }
+  }
+  if (tabActivity && tabPlan){
+    tabActivity.addEventListener('click', ()=> showTab('activity'));
+    tabPlan.addEventListener('click', ()=> showTab('plan'));
+    if (tabHypo){ tabHypo.addEventListener('click', ()=> showTab('hypo')); }
+  }
+
   function friendlyTag(action){
     const a = (action||'').toLowerCase();
     if (a==='load_nodes' || a==='load_node' || a==='fetch_code') return {label:'Fetch code', cls:'fetch'};
     if (a==='update_node') return {label:'Memorize fact', cls:'memo'};
     if (a==='add_edge') return {label:'Relate facts', cls:'graph'};
     if (a==='query_graph' || a==='focus' || a==='summarize') return {label:'Explore graph', cls:'graph'};
-    if (a==='propose_hypothesis') return {label:'Hypothesis', cls:'hyp'};
-    if (a==='update_hypothesis') return {label:'Hypothesis update', cls:'hyp'};
+    if (a==='propose_hypothesis') return {label:'Finding', cls:'hyp'};
+    if (a==='update_hypothesis') return {label:'Finding update', cls:'hyp'};
     if (a==='deep_think') return {label:'Strategist', cls:'think'};
     if (a==='status') return {label:'Status', cls:'tag'};
     return {label: (action||'Act'), cls:'tag'};
