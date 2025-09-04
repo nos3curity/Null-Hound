@@ -185,14 +185,37 @@ class ProjectManager:
     def get_project(self, name: str) -> dict | None:
         """Get project by name."""
         registry = self._load_registry()
-        
-        if name not in registry["projects"]:
-            return None
-        
-        project_dir = Path(registry["projects"][name]["path"])
-        if not project_dir.exists():
-            return None
-        
+
+        # Fast path from registry
+        project_dir: Path | None = None
+        if name in registry.get("projects", {}):
+            proj_info = registry["projects"][name]
+            project_dir = Path(proj_info.get("path", str(self.projects_dir / name)))
+            if not project_dir.exists():
+                project_dir = None
+
+        # Fallback: infer from filesystem if registry entry missing or invalid
+        if project_dir is None:
+            pdir = self.projects_dir / name
+            config_file = pdir / "project.json"
+            if config_file.exists():
+                project_dir = pdir
+                # Opportunistically repair registry
+                try:
+                    with open(config_file) as f:
+                        cfg = json.load(f)
+                    registry.setdefault("projects", {})[name] = {
+                        "path": str(pdir),
+                        "source_path": cfg.get("source_path", ""),
+                        "created_at": cfg.get("created_at", datetime.now().isoformat()),
+                        "description": cfg.get("description", f"Analysis of {name}")
+                    }
+                    self._save_registry(registry)
+                except Exception:
+                    pass
+            else:
+                return None
+
         config_file = project_dir / "project.json"
         if not config_file.exists():
             return None
