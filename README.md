@@ -48,7 +48,6 @@ The system employs a **senior/junior auditor pattern**: the Scout (junior) activ
 ### Links
 
 - [Original blog post](https://muellerberndt.medium.com/unleashing-the-hound-how-ai-agents-find-deep-logic-bugs-in-any-codebase-64c2110e3a6f)
-- [Hound benchmarking pipeline](https://github.com/muellerberndt/hound-empirical-development)
 - [Smart contract audit benchmarks datasets and tooling](https://github.com/muellerberndt/scabench)
 
 ## Installation
@@ -631,8 +630,6 @@ Monitor audit progress and completeness:
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
-
-If you have a good idea for improving the analysis, please fork this repository and run comparative benchmarks in the [test environment](https://github.com/muellerberndt/hound-empirical-development).
 
 ## License
 
