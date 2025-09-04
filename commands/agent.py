@@ -578,6 +578,8 @@ class AgentRunner:
         self.new_session: bool = new_session
         self._agent_log: List[str] = []
         self._last_applied_steer: Optional[str] = None
+        # Track which steering text triggered a forced replan (to avoid repeats)
+        self._last_replan_steer: Optional[str] = None
         
     def initialize(self):
         """Initialize the agent."""
@@ -735,6 +737,77 @@ class AgentRunner:
             self.plan_store = None
 
         return True
+
+    # ---------------------- Steering Helpers (persistent) ----------------------
+    def _steer_cursor_path(self) -> Path:
+        pdir = self.project_dir or (get_project_dir(self.project_id))
+        return Path(pdir) / '.hound' / 'steering.cursor'
+
+    def _get_last_consumed_steer_ts(self) -> float:
+        try:
+            p = self._steer_cursor_path()
+            if p.exists():
+                v = p.read_text(encoding='utf-8').strip()
+                return float(v or '0')
+        except Exception:
+            return 0.0
+        return 0.0
+
+    def _set_last_consumed_steer_ts(self, ts: float):
+        try:
+            p = self._steer_cursor_path()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(str(float(ts)), encoding='utf-8')
+        except Exception:
+            pass
+
+    def _read_steering_entries(self, limit: int = 50) -> list:
+        """Read recent steering JSONL entries as list of dicts with {ts, text}.
+        Ignores malformed lines; returns newest-last (chronological) slice.
+        """
+        try:
+            pdir = self.project_dir or get_project_dir(self.project_id)
+            sfile = Path(pdir) / '.hound' / 'steering.jsonl'
+            if not sfile.exists():
+                return []
+            out = []
+            with sfile.open('r', encoding='utf-8', errors='ignore') as f:
+                for ln in f:
+                    ln = ln.strip()
+                    if not ln:
+                        continue
+                    try:
+                        obj = json.loads(ln)
+                        ts = float(obj.get('ts') or 0.0)
+                        txt = (obj.get('text') or obj.get('message') or obj.get('note') or '').strip()
+                        if txt:
+                            out.append({'ts': ts, 'text': txt})
+                    except Exception:
+                        # fallback for raw lines
+                        out.append({'ts': 0.0, 'text': ln})
+            # Keep only the last N
+            return out[-limit:]
+        except Exception:
+            return []
+
+    def _find_latest_urgent_steer(self) -> Optional[dict]:
+        """Return the newest steering entry with keywords, newer than last consumed ts."""
+        last_ts = self._get_last_consumed_steer_ts()
+        entries = self._read_steering_entries(limit=80)
+        # newest first
+        for ent in reversed(entries):
+            ts = float(ent.get('ts') or 0.0)
+            txt = (ent.get('text') or '').strip()
+            if ts <= last_ts:
+                continue
+            low = txt.lower()
+            if any(k in low for k in ("investigate", "check", "look at", "focus on", "right now", "next")):
+                return {'ts': ts, 'text': txt}
+        return None
+
+    def _consume_steer(self, ts: float):
+        if ts and ts > self._get_last_consumed_steer_ts():
+            self._set_last_consumed_steer_ts(ts)
 
     # ---------------------- Dashboard Helpers ----------------------
     def _get_hypotheses_summary(self) -> str:
@@ -920,36 +993,9 @@ class AgentRunner:
         # 0) Optional: honor recent steering as an urgent goal
         prepared: List[object] = []
         try:
-            def _read_steering(limit: int = 20) -> List[str]:
-                try:
-                    pdir = self.project_dir or get_project_dir(self.project_id)
-                    sfile = Path(pdir) / '.hound' / 'steering.jsonl'
-                    if not sfile.exists():
-                        return []
-                    out: List[str] = []
-                    with sfile.open('r', encoding='utf-8', errors='ignore') as f:
-                        for ln in f:
-                            ln = ln.strip()
-                            if not ln:
-                                continue
-                            try:
-                                obj = json.loads(ln)
-                                txt = obj.get('text') or obj.get('message') or obj.get('note')
-                                if txt:
-                                    out.append(str(txt).strip())
-                            except Exception:
-                                out.append(ln)
-                    return out[-limit:]
-                except Exception:
-                    return []
-            steer = list(reversed(_read_steering(30)))  # newest first
-            urgent = None
-            for s in steer:
-                low = s.lower()
-                if any(k in low for k in ("investigate", "check", "look at", "focus on", "right now", "next")):
-                    urgent = s
-                    break
-            if urgent:
+            urgent_ent = self._find_latest_urgent_steer()
+            if urgent_ent:
+                urgent = urgent_ent['text']
                 prepared.append(SimpleNamespace(
                     goal=urgent,
                     focus_areas=[],
@@ -963,6 +1009,11 @@ class AgentRunner:
                     pub = getattr(self, '_telemetry_publish', None)
                     if callable(pub):
                         pub({'type': 'status', 'message': f'steering goal queued: {urgent}'})
+                except Exception:
+                    pass
+                # Mark that we have consumed this steering message
+                try:
+                    self._consume_steer(float(urgent_ent.get('ts') or 0.0))
                 except Exception:
                     pass
         except Exception:
@@ -1452,6 +1503,27 @@ class AgentRunner:
         # Local exception used to abort long-running investigations when time is up
         class _TimeLimitReached(Exception):
             pass
+
+        # Simple steering helpers
+        def _is_global_steer(text: str) -> bool:
+            """Heuristic: detect broad, project-wide directives.
+            Examples: "whole app", "entire codebase", "all contracts", "system-wide", etc.
+            """
+            t = (text or '').lower()
+            if not t:
+                return False
+            global_markers = (
+                'whole app', 'entire app', 'entire codebase', 'whole codebase', 'all contracts',
+                'every contract', 'system-wide', 'system wide', 'project-wide', 'project wide',
+                'across the codebase', 'across the repo', 'across modules', 'end-to-end', 'e2e',
+                'globally', 'everywhere', 'full audit', 'full review', 'scan the entire', 'scan all'
+            )
+            if any(m in t for m in global_markers):
+                return True
+            # Also treat "check X across" as global
+            if ' across ' in t or t.startswith('across '):
+                return True
+            return False
         while True:
             # Time limit check
             if self.time_limit_minutes:
@@ -1502,34 +1574,8 @@ class AgentRunner:
             for idx, inv in enumerate(items):
                 # Check for mid-batch steering override (preempt current goal once)
                 try:
-                    def _read_latest_steer(limit: int = 20) -> Optional[str]:
-                        try:
-                            pdir = self.project_dir or get_project_dir(self.project_id)
-                            sfile = Path(pdir) / '.hound' / 'steering.jsonl'
-                            if not sfile.exists():
-                                return None
-                            texts: List[str] = []
-                            with sfile.open('r', encoding='utf-8', errors='ignore') as f:
-                                for ln in f:
-                                    ln = ln.strip()
-                                    if not ln:
-                                        continue
-                                    try:
-                                        obj = json.loads(ln)
-                                        txt = obj.get('text') or obj.get('message') or obj.get('note')
-                                        if txt:
-                                            texts.append(str(txt).strip())
-                                    except Exception:
-                                        texts.append(ln)
-                            cand = list(reversed(texts[-limit:]))  # newest first
-                            for s in cand:
-                                lw = s.lower()
-                                if any(k in lw for k in ("investigate", "check", "look at", "focus on", "right now", "next")):
-                                    return s
-                            return None
-                        except Exception:
-                            return None
-                    urgent = _read_latest_steer()
+                    urgent_ent = self._find_latest_urgent_steer()
+                    urgent = urgent_ent['text'] if urgent_ent else None
                     if urgent and urgent != self._last_applied_steer and getattr(inv, 'goal', '') != urgent:
                         console.print(f"[bold yellow]Steering override:[/bold yellow] {urgent}")
                         try:
@@ -1548,6 +1594,11 @@ class AgentRunner:
                             expected_impact='high'
                         )
                         self._last_applied_steer = urgent
+                        # Mark consumed so it doesn't reapply after restarts
+                        try:
+                            self._consume_steer(float(urgent_ent.get('ts') or 0.0))
+                        except Exception:
+                            pass
                 except Exception:
                     pass
                 # Check time limit before starting each investigation
@@ -1617,6 +1668,37 @@ class AgentRunner:
                                 if status == 'result':
                                     payload['result'] = info.get('result', {})
                                 pub(payload)
+                        except Exception:
+                            pass
+
+                        # Mid-investigation steering: if a global directive arrives, request abort
+                        try:
+                            # Only check on meaningful milestones to reduce I/O
+                            if status in {'analyzing', 'decision', 'executing'}:
+                                ent = self._find_latest_urgent_steer()
+                                latest = ent['text'] if ent else None
+                                if latest and latest != self._last_replan_steer:
+                                    if _is_global_steer(latest):
+                                        # Mark and request abort on the agent; outer loop will replan
+                                        self._last_replan_steer = latest
+                                        try:
+                                            if hasattr(self, 'agent') and self.agent:
+                                                self.agent.request_abort(reason=f"steering_replan: {latest[:120]}")  # type: ignore[attr-defined]
+                                        except Exception:
+                                            pass
+                                        # Tell the console and telemetry
+                                        console.print(f"[bold yellow]Steering replan:[/bold yellow] {latest}")
+                                        try:
+                                            pub = getattr(self, '_telemetry_publish', None)
+                                            if callable(pub):
+                                                pub({'type': 'status', 'message': f'steering replan: {latest}'})
+                                        except Exception:
+                                            pass
+                                        # Mark consumed
+                                        try:
+                                            self._consume_steer(float(ent.get('ts') or 0.0))
+                                        except Exception:
+                                            pass
                         except Exception:
                             pass
                         if status == 'decision':
@@ -1768,6 +1850,7 @@ class AgentRunner:
                             self._agent_log.append(f"Iter {it} {status}: {msg[:100]}")
 
                     # Show an animated status while the agent thinks/acts for this investigation
+                    replan_requested = False
                     try:
                         from rich.status import Status
                         with console.status("[cyan]Agent thinking deeply...[/cyan]", spinner="line", spinner_style="cyan"):
@@ -1784,6 +1867,28 @@ class AgentRunner:
                             console.print(f"\n[yellow]Time limit reached ({self.time_limit_minutes} minutes) — stopping audit[/yellow]")
                             time_up = True
                             break
+                    # If an abort was requested (global steering), skip marking as completed and replan
+                    try:
+                        if hasattr(self, 'agent') and getattr(self.agent, '_abort_requested', False):
+                            # Reset abort flag for next investigation round
+                            try:
+                                self.agent._abort_requested = False  # type: ignore[attr-defined]
+                                self.agent._abort_reason = None      # type: ignore[attr-defined]
+                            except Exception:
+                                pass
+                            console.print("[yellow]Investigation aborted due to steering; reprioritizing...[/yellow]")
+                            # Publish a telemetry status
+                            try:
+                                pub = getattr(self, '_telemetry_publish', None)
+                                if callable(pub):
+                                    pub({'type': 'status', 'message': 'investigation aborted (steering replan)'})
+                            except Exception:
+                                pass
+                            # Do not record as completed; break to re-enter planning
+                            break
+                    except Exception:
+                        pass
+
                     results.append((inv, report))
                     # Track completed investigation
                     self.completed_investigations.append(inv.goal)

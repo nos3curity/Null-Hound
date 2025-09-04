@@ -180,7 +180,13 @@ class TelemetryServer:
     def __init__(self, project_id: str, project_dir: Path, registry_dir: Optional[Path] = None):
         self.project_id = project_id
         self.project_dir = Path(project_dir)
-        self.registry_dir = registry_dir or Path(os.path.expanduser("~/.local/state/hound/instances"))
+        # Respect HOUND_REGISTRY_DIR env var for consistency with the chatbot
+        try:
+            env_dir = os.environ.get("HOUND_REGISTRY_DIR")
+        except Exception:
+            env_dir = None
+        default_dir = Path(os.path.expanduser("~/.local/state/hound/instances"))
+        self.registry_dir = Path(registry_dir) if registry_dir else (Path(env_dir) if env_dir else default_dir)
         self.bus = _EventBus()
         self.httpd: Optional[ThreadingHTTPServer] = None
         self.thread: Optional[threading.Thread] = None

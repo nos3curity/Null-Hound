@@ -6,7 +6,9 @@ let connDot, connText;
 let micStream;
 let audioTransceiver;
 let lastAssistantBubble = null;
+let lastUserBubble = null;
 let assistantTranscript = '';
+let userTranscript = '';
 let activityES = null;
 let pendingEvt = null;
 let nowInvTimer = null;
@@ -206,6 +208,25 @@ function waitForIceGatheringComplete(pc){ if (pc.iceGatheringState==='complete')
 let emoCaptured = false;
 function handleEvent(evt){
   const t = evt.type;
+  // Show transcription of the user's voice input in chat as 'user'
+  if (t==='input_audio_transcription.delta' || t==='input_audio_transcript.delta'){
+    const delta = evt.delta || '';
+    if (delta){
+      if (!lastUserBubble) lastUserBubble = chatAdd('user','');
+      // Append delta to the latest user bubble
+      lastUserBubble.textContent += delta;
+      userTranscript += delta;
+      const container = chatEl || document.getElementById('chat');
+      if (container) container.scrollTop = container.scrollHeight;
+    }
+    return; // handled
+  }
+  if (t==='input_audio_transcription.completed' || t==='input_audio_transcript.completed'){
+    // Finalize the current user bubble
+    lastUserBubble = null;
+    userTranscript = '';
+    return;
+  }
   if (t==='response.text.delta'){
     let delta = evt.delta || '';
     if (!emoCaptured && delta){
@@ -307,13 +328,32 @@ window.addEventListener('DOMContentLoaded', ()=>{
 
   // Populate instances into a datalist-like UX (basic)
   fetch('/api/instances').then(r=>r.json()).then(j=>{
-    if (!j || !j.instances) return;
+    if (!j || !Array.isArray(j.instances)) return;
+    const items = j.instances || [];
     // Build a simple list of project_id (pid)
-    const list = j.instances.map(x=>`${x.project_id || 'unknown'} | ${x.id}`);
+    const list = items.map(x=>`${x.project_id || 'unknown'} | ${x.id}`);
     projectInput.setAttribute('list','instancesList');
     let dl = document.getElementById('instancesList');
     if (!dl) { dl = document.createElement('datalist'); dl.id='instancesList'; document.body.appendChild(dl); }
-    dl.innerHTML = list.map(v=>`<option value="${v}"></option>`).join('');
+    dl.innerHTML = list.map(v=>`<option value=\"${v}\"></option>`).join('');
+    // If current input value does not correspond to any returned project, default to most recent alive (or most recent overall)
+    try{
+      const current = (projectInput.value||'').trim();
+      const match = items.find(x=> String(x.project_id||'').trim() === current);
+      const hasExact = !!match;
+      const isMatchAlive = !!(match && match.alive);
+      if (!current || !hasExact || !isMatchAlive){
+        // Prefer alive instances first
+        let prefer = items.filter(x=> x.alive);
+        if (prefer.length === 0) prefer = items.slice();
+        if (prefer.length > 0){
+          const chosen = prefer[0]; // server sorts by started_at desc
+          projectInput.value = String(chosen.project_id||'');
+          // Persist active project on server for tool calls
+          fetch('/api/context', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ project_id: projectInput.value }) }).catch(()=>{});
+        }
+      }
+    }catch(_){ /* ignore */ }
   }).catch(()=>{});
 
   connectBtn.addEventListener('click', async ()=>{

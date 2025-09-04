@@ -190,6 +190,17 @@ class AutonomousAgent:
         # Steering cache (last seen lines to avoid duplication in memory notes)
         self._steering_seen: set[str] = set()
 
+        # Abort flag (set by runner on steering replan)
+        self._abort_requested: bool = False
+        self._abort_reason: Optional[str] = None
+
+    def request_abort(self, reason: Optional[str] = None):
+        """Signal the agent loop to abort the current investigation ASAP.
+        The runner uses this when a global steering request should preempt.
+        """
+        self._abort_requested = True
+        self._abort_reason = (reason or "steering_replan").strip() or "steering_replan"
+
     def _read_steering_notes(self, limit: int = 12) -> List[str]:
         """Read recent steering notes from project .hound/steering.jsonl (if any)."""
         try:
@@ -360,6 +371,19 @@ class AutonomousAgent:
         while iterations < max_iterations:
             iterations += 1
             
+            # Honor external abort signals early in the iteration
+            if getattr(self, '_abort_requested', False):
+                if progress_callback:
+                    try:
+                        progress_callback({
+                            'status': 'complete',
+                            'iteration': iterations,
+                            'message': f"Aborted due to: {getattr(self, '_abort_reason', 'steering_replan')}"
+                        })
+                    except Exception:
+                        pass
+                break
+
             if progress_callback:
                 progress_callback({
                     'status': 'analyzing',
@@ -459,6 +483,19 @@ class AutonomousAgent:
                             'iteration': iterations,
                             'message': 'Investigation complete'
                         })
+                    break
+
+                # Honor external abort signals after executing an action too
+                if getattr(self, '_abort_requested', False):
+                    if progress_callback:
+                        try:
+                            progress_callback({
+                                'status': 'complete',
+                                'iteration': iterations,
+                                'message': f"Aborted due to: {getattr(self, '_abort_reason', 'steering_replan')}"
+                            })
+                        except Exception:
+                            pass
                     break
                 
                 # Update progress based on action
@@ -1033,6 +1070,12 @@ AVAILABLE ACTIONS - USE EXACT PARAMETERS AS SHOWN:
    
    The node IDs are shown in square brackets. Size indicators show code volume.
 
+AFTER LOADING CODE (WHEN CLEAR SIGNALS EXIST):
+- Add 1-3 ultra-short annotations via update_node for the most relevant loaded node(s).
+- Observations: concrete behaviors found in code (e.g., "external call", "emits Event", "nonReentrant", "unchecked", "token transfer").
+- Assumptions: invariants/constraints (e.g., "onlyOwner", "onlyRole(Role)", "pausable", "initializer", "immutable var").
+- Keep each bullet 2-4 words. Do not write prose. Skip if truly nothing notable.
+
 3. update_node — Add observations/assumptions about ONE node
    PARAMETERS: {"node_id": "node", "observations": [...], "assumptions": [...]}
    EXAMPLE: {"node_id": "ProxyAdmin", "observations": ["single admin", "no timelock"]}
@@ -1254,6 +1297,8 @@ DO NOT include any text before or after the JSON object."""
             return {'status': 'complete', 'summary': 'Investigation complete'}
         else:
             return {'status': 'error', 'error': f'Unknown action: {action}'}
+
+    
     
     def _load_graph(self, graph_name: str) -> Dict:
         """Load an additional knowledge graph.

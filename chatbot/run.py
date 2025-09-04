@@ -107,6 +107,18 @@ def create_app():
         except Exception:
             return None
 
+    def _pid_alive(pid: int) -> bool:
+        try:
+            os.kill(int(pid), 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            # Process exists but not permitted; treat as alive
+            return True
+        except Exception:
+            return False
+
     @app.get("/api/instances")
     def api_instances():
         out = []
@@ -114,14 +126,22 @@ def create_app():
             for f in sorted(REGISTRY_DIR.glob("*.json")):
                 inst = _read_instance(f)
                 if inst:
+                    pid = inst.get("pid")
+                    alive = _pid_alive(pid) if pid is not None else False
                     out.append({
                         "id": inst.get("_id", f.stem),
                         "pid": inst.get("pid"),
                         "project_id": inst.get("project_id"),
                         "started_at": inst.get("started_at"),
                         "telemetry": inst.get("telemetry", {}),
+                        "alive": alive,
                     })
-        return jsonify({"instances": out})
+        # Sort most recent first
+        try:
+            out.sort(key=lambda x: float(x.get('started_at') or 0.0), reverse=True)
+        except Exception:
+            pass
+        return jsonify({"instances": out, "registry_dir": str(REGISTRY_DIR)})
 
     @app.get("/api/instance/recent")
     def api_instance_recent():
@@ -1316,6 +1336,7 @@ if __name__ == "__main__":
     try:
         print(f"[Hound Chatbot] Starting on http://{host}:{port} (debug={debug})")
         print(f"[Hound Chatbot] OPENAI_API_KEY available: {'yes' if _get_openai_api_key() else 'no'}")
+        print(f"[Hound Chatbot] Using registry dir: {REGISTRY_DIR}")
     except Exception:
         pass
     app.run(host=host, port=port, debug=debug, use_reloader=False)
