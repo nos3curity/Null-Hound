@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import random
 import time
-from typing import Any, Dict, Optional, Type, TypeVar
+from typing import Any, TypeVar
 
 from openai import OpenAI
 from pydantic import BaseModel
@@ -19,7 +19,7 @@ class XAIProvider(BaseLLMProvider):
     
     def __init__(
         self, 
-        config: Dict[str, Any], 
+        config: dict[str, Any], 
         model_name: str,
         timeout: int = 120,
         retries: int = 3,
@@ -53,7 +53,7 @@ class XAIProvider(BaseLLMProvider):
             base_url="https://api.x.ai/v1"
         )
     
-    def parse(self, *, system: str, user: str, schema: Type[T]) -> T:
+    def parse(self, *, system: str, user: str, schema: type[T]) -> T:
         """Make a structured call using XAI's API."""
         messages = [
             {"role": "system", "content": system},
@@ -63,7 +63,7 @@ class XAIProvider(BaseLLMProvider):
         # Log request details
         request_chars = len(system) + len(user)
         if self.verbose:
-            print(f"\n[XAI Request]")
+            print("\n[XAI Request]")
             print(f"  Model: {self.model_name}")
             print(f"  Schema: {schema.__name__}")
             print(f"  Total prompt: {request_chars:,} chars (~{request_chars//4:,} tokens)")
@@ -167,6 +167,6 @@ class XAIProvider(BaseLLMProvider):
         """XAI Grok models don't have explicit thinking mode like Gemini."""
         return False
     
-    def get_last_token_usage(self) -> Optional[Dict[str, int]]:
+    def get_last_token_usage(self) -> dict[str, int] | None:
         """Return token usage from the last call if available."""
         return self._last_token_usage

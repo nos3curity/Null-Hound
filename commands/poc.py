@@ -3,16 +3,17 @@ Proof-of-Concept management for confirmed vulnerabilities
 """
 
 import json
-import sys
 import shutil
-from pathlib import Path
-from typing import Dict, Any, Optional, List
-from rich.console import Console
-from rich.prompt import Prompt
-from rich.panel import Panel
-from rich.table import Table
+import sys
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.prompt import Prompt
+from rich.table import Table
 
 console = Console()
 
@@ -20,12 +21,12 @@ console = Console()
 class PoCContext:
     """Context for PoC generation"""
     project_name: str
-    hypothesis: Dict[str, Any]
-    affected_files: Dict[str, str]  # filepath -> content
-    manifest_data: Dict[str, Any]
+    hypothesis: dict[str, Any]
+    affected_files: dict[str, str]  # filepath -> content
+    manifest_data: dict[str, Any]
 
 
-def load_affected_files(hypothesis: Dict[str, Any], manifest_data: Dict[str, Any]) -> Dict[str, str]:
+def load_affected_files(hypothesis: dict[str, Any], manifest_data: dict[str, Any]) -> dict[str, str]:
     """Load content of files affected by the vulnerability"""
     affected_files = {}
     
@@ -54,7 +55,7 @@ def load_affected_files(hypothesis: Dict[str, Any], manifest_data: Dict[str, Any
     return affected_files
 
 
-def generate_poc_with_strategist(context: PoCContext, config: Dict[str, Any]) -> str:
+def generate_poc_with_strategist(context: PoCContext, config: dict[str, Any]) -> str:
     """Use strategist model to generate PoC prompt"""
     
     from llm.unified_client import UnifiedLLMClient
@@ -154,7 +155,7 @@ Start with the clarification about existing vs new files before any other instru
     return response
 
 
-def make_prompt(project_name: str, hypothesis_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None):
+def make_prompt(project_name: str, hypothesis_id: str | None = None, config: dict[str, Any] | None = None):
     """Generate PoC prompts for vulnerabilities"""
     
     # Load project data
@@ -274,7 +275,7 @@ def make_prompt(project_name: str, hypothesis_id: Optional[str] = None, config: 
         console.print("[dim]Copy these prompts to Claude Code or another coding agent to generate the PoCs.[/dim]")
 
 
-def import_poc(project_name: str, hypothesis_id: str, files: List[str], description: Optional[str] = None):
+def import_poc(project_name: str, hypothesis_id: str, files: list[str], description: str | None = None):
     """Import PoC files for a specific hypothesis"""
     
     # Load project data
@@ -428,7 +429,7 @@ def list_pocs(project_name: str):
             try:
                 dt = datetime.fromisoformat(updated)
                 updated = dt.strftime("%Y-%m-%d %H:%M")
-            except:
+            except Exception:
                 pass
             
             table.add_row(hypothesis_id, title, str(num_files), updated)
@@ -436,7 +437,7 @@ def list_pocs(project_name: str):
     console.print(table)
 
 
-def run(project_name: str, hypothesis_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, subcommand: str = "make-prompt", files: Optional[List[str]] = None, description: Optional[str] = None):
+def run(project_name: str, hypothesis_id: str | None = None, config: dict[str, Any] | None = None, subcommand: str = "make-prompt", files: list[str] | None = None, description: str | None = None):
     """Main entry point for PoC commands"""
     
     if subcommand == "make-prompt":

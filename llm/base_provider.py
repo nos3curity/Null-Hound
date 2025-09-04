@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Type, TypeVar, Tuple
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -13,12 +13,12 @@ class BaseLLMProvider(ABC):
     """Abstract base class for LLM providers."""
     
     @abstractmethod
-    def __init__(self, config: Dict[str, Any], model_name: str, **kwargs):
+    def __init__(self, config: dict[str, Any], model_name: str, **kwargs):
         """Initialize the provider with configuration."""
         pass
     
     @abstractmethod
-    def parse(self, *, system: str, user: str, schema: Type[T]) -> T:
+    def parse(self, *, system: str, user: str, schema: type[T]) -> T:
         """
         Make a structured call returning an instance of the schema.
         
@@ -58,7 +58,7 @@ class BaseLLMProvider(ABC):
         """Return whether this provider/model supports thinking mode."""
         pass
     
-    def get_last_token_usage(self) -> Optional[Dict[str, int]]:
+    def get_last_token_usage(self) -> dict[str, int] | None:
         """Return token usage from the last call if available.
         
         Returns:

@@ -2,9 +2,8 @@
 
 import hashlib
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
 
 
 @dataclass
@@ -18,9 +17,9 @@ class Card:
     peek_head: str  # First 100 chars
     peek_tail: str  # Last 100 chars
     shingle_hash: str  # MinHash signature
-    top_tokens: List[str]  # Most common tokens
+    top_tokens: list[str]  # Most common tokens
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert to dictionary."""
         return asdict(self)
 
@@ -30,10 +29,10 @@ class FileInfo:
     """Information about a source file."""
     relpath: str
     size: int
-    card_ids: List[str]
-    language: Optional[str] = None
+    card_ids: list[str]
+    language: str | None = None
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert to dictionary."""
         return asdict(self)
 
@@ -41,7 +40,7 @@ class FileInfo:
 class RepositoryManifest:
     """Manages repository ingestion and card creation."""
     
-    def __init__(self, repo_path: str, config: Dict, file_filter: Optional[List[str]] = None):
+    def __init__(self, repo_path: str, config: dict, file_filter: list[str] | None = None):
         """Initialize manifest with repository path and config.
         
         Args:
@@ -52,8 +51,8 @@ class RepositoryManifest:
         self.repo_path = Path(repo_path).resolve()
         self.config = config
         self.file_filter = file_filter  # List of specific files to include
-        self.cards: List[Card] = []
-        self.files: List[FileInfo] = []
+        self.cards: list[Card] = []
+        self.files: list[FileInfo] = []
         self.file_extensions = self._get_file_extensions()
         
         # Bundling parameters
@@ -62,7 +61,7 @@ class RepositoryManifest:
         self.max_chunk = bundle_config.get("max_chunk_chars", 2000)
         self.target_bundle = bundle_config.get("target_chars", 25000)
     
-    def _get_file_extensions(self) -> Set[str]:
+    def _get_file_extensions(self) -> set[str]:
         """Get file extensions to process based on config."""
         # Default extensions for common languages
         defaults = {
@@ -75,7 +74,7 @@ class RepositoryManifest:
         custom = set(self.config.get("file_extensions", []))
         return defaults | custom
     
-    def walk_repository(self) -> Tuple[List[Card], List[FileInfo]]:
+    def walk_repository(self) -> tuple[list[Card], list[FileInfo]]:
         """Walk repository and create cards from files."""
         self.cards = []
         self.files = []
@@ -94,7 +93,7 @@ class RepositoryManifest:
         
         return self.cards, self.files
     
-    def _find_source_files(self) -> List[Path]:
+    def _find_source_files(self) -> list[Path]:
         """Find all source files in repository."""
         files = []
         
@@ -131,7 +130,7 @@ class RepositoryManifest:
         
         return sorted(files)
     
-    def _process_file(self, file_path: Path) -> List[Card]:
+    def _process_file(self, file_path: Path) -> list[Card]:
         """Process a single file into cards."""
         try:
             content = file_path.read_text(encoding="utf-8", errors="ignore")
@@ -178,7 +177,7 @@ class RepositoryManifest:
         
         return cards
     
-    def _split_into_chunks(self, content: str) -> List[str]:
+    def _split_into_chunks(self, content: str) -> list[str]:
         """Split content into chunks at natural boundaries."""
         chunks = []
         current_chunk = []
@@ -245,14 +244,14 @@ class RepositoryManifest:
         
         return "0" * 16
     
-    def _extract_top_tokens(self, content: str, max_tokens: int = 10) -> List[str]:
+    def _extract_top_tokens(self, content: str, max_tokens: int = 10) -> list[str]:
         """Extract most common tokens from content."""
         # Simple tokenization
         clean = ''.join(c if c.isalnum() or c.isspace() else ' ' for c in content)
         tokens = clean.lower().split()
         
         # Count frequencies
-        freq: Dict[str, int] = {}
+        freq: dict[str, int] = {}
         for token in tokens:
             if len(token) > 2:  # Skip very short tokens
                 freq[token] = freq.get(token, 0) + 1
@@ -261,7 +260,7 @@ class RepositoryManifest:
         sorted_tokens = sorted(freq.items(), key=lambda x: x[1], reverse=True)
         return [token for token, _ in sorted_tokens[:max_tokens]]
     
-    def _detect_language(self, file_path: Path) -> Optional[str]:
+    def _detect_language(self, file_path: Path) -> str | None:
         """Detect programming language from file extension."""
         ext_map = {
             ".py": "python",

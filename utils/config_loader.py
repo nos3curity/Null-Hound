@@ -3,13 +3,13 @@ Centralized configuration loading utility.
 """
 
 import os
-import sys
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any
+
 import yaml
 
 
-def load_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
+def load_config(config_path: Path | None = None) -> dict[str, Any]:
     """
     Load configuration from YAML file.
     

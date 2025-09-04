@@ -4,7 +4,8 @@ Phase 2 introduces a minimal Strategist that can compose planning prompts and
 return structured plan items. The CLI will wire this in a later step.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from llm.unified_client import UnifiedLLMClient
@@ -12,7 +13,7 @@ from llm.unified_client import UnifiedLLMClient
 
 class PlanItemSchema(BaseModel):
     goal: str = Field(description="Investigation goal or question")
-    focus_areas: List[str] = Field(default_factory=list)
+    focus_areas: list[str] = Field(default_factory=list)
     priority: int = Field(ge=1, le=10, description="1-10, 10 = highest")
     reasoning: str = Field(default="", description="Why this is promising")
     category: str = Field(default="aspect", description="aspect | suspicion")
@@ -20,10 +21,10 @@ class PlanItemSchema(BaseModel):
 
 
 class PlanBatch(BaseModel):
-    investigations: List[PlanItemSchema] = Field(default_factory=list)
+    investigations: list[PlanItemSchema] = Field(default_factory=list)
 
 
-def _choose_profile(cfg: Dict[str, Any]) -> str:
+def _choose_profile(cfg: dict[str, Any]) -> str:
     # Prefer explicit strategist, then guidance, then agent as last resort
     try:
         models = cfg.get("models", {})
@@ -39,7 +40,7 @@ def _choose_profile(cfg: Dict[str, Any]) -> str:
 class Strategist:
     """Senior planning agent."""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None, debug: bool = False, session_id: Optional[str] = None, debug_logger=None):
+    def __init__(self, config: dict[str, Any] | None = None, debug: bool = False, session_id: str | None = None, debug_logger=None):
         self.config = config or {}
         profile = _choose_profile(self.config)
         
@@ -57,9 +58,9 @@ class Strategist:
         except Exception:
             self.two_pass_review = False
 
-    def plan_next(self, *, graphs_summary: str, completed: List[str], n: int = 5, 
-                  hypotheses_summary: Optional[str] = None, coverage_summary: Optional[str] = None, 
-                  ledger_summary: Optional[str] = None) -> List[Dict[str, Any]]:
+    def plan_next(self, *, graphs_summary: str, completed: list[str], n: int = 5, 
+                  hypotheses_summary: str | None = None, coverage_summary: str | None = None, 
+                  ledger_summary: str | None = None) -> list[dict[str, Any]]:
         """Plan the next n investigations from comprehensive audit context.
 
         Returns a list of dicts compatible with downstream display and PlanStore.
@@ -110,7 +111,6 @@ class Strategist:
         completed_str = "\n".join(f"- {c}" for c in completed) if completed else "(none)"
         hypotheses_str = hypotheses_summary or "(no hypotheses formed yet)"
         coverage_str = coverage_summary or "(no coverage data)"
-        ledger_str = ledger_summary or "(none)"
         
         # Calculate planning iteration count (this is passed as part of completed list)
         planning_iteration = len(completed) // n + 1 if n > 0 else 1
@@ -154,10 +154,10 @@ class Strategist:
             })
         return items
 
-    def revise_after(self, last_result: Dict[str, Any]) -> None:
+    def revise_after(self, last_result: dict[str, Any]) -> None:
         return None
 
-    def deep_think(self, *, context: str) -> List[Dict[str, Any]]:
+    def deep_think(self, *, context: str) -> list[dict[str, Any]]:
         """Perform senior deep analysis on the prepared context and emit hypothesis items.
 
         Returns a list of dicts with keys:
@@ -209,8 +209,8 @@ class Strategist:
         # Save deep_think prompts to debug files if debug logger is available
         if self.debug_logger:
             try:
-                from pathlib import Path
                 from datetime import datetime
+                from pathlib import Path
                 # Prefer debug logger's output_dir for consistency; fallback to CWD/.hound_debug
                 base_dir = getattr(self.debug_logger, 'output_dir', None)
                 if not base_dir:
@@ -267,7 +267,7 @@ class Strategist:
             return []
 
         lines = [ln.strip() for ln in str(resp).splitlines() if ln.strip() and '|' in ln]
-        items: List[Dict[str, Any]] = []
+        items: list[dict[str, Any]] = []
         for ln in lines:
             parts = [p.strip() for p in ln.split('|')]
             title = parts[0] if len(parts) > 0 else "Hypothesis"
@@ -336,13 +336,13 @@ class Strategist:
             vulnerability_type: str
             severity: str
             confidence: float
-            node_ids: List[str]
+            node_ids: list[str]
             reasoning: str
             accept: bool = Field(description="Accept only if evidence in context clearly supports root cause and no strong mitigation exists.")
             reason: str = Field(description="Why accepted/rejected; cite mitigating checks if rejecting.")
 
         class _ReviewBatch(BaseModel):
-            items: List[_ReviewItem]
+            items: list[_ReviewItem]
 
         review_instr = (
             "You previously proposed candidate hypotheses. Now act as a skeptical reviewer.\n"

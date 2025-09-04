@@ -2,14 +2,14 @@
 Test that GraphBuilder properly loads full content from cards.
 """
 
-import unittest
 import json
-import tempfile
-import shutil
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-import sys
 import os
+import shutil
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -142,7 +142,7 @@ class TestGraphBuilderContentLoading(unittest.TestCase):
         builder = GraphBuilder(config, debug=True)
         
         # Run build
-        results = builder.build(
+        builder.build(
             manifest_dir=self.manifest_dir,
             output_dir=self.output_dir,
             max_iterations=1,
@@ -220,7 +220,7 @@ class TestGraphBuilderContentLoading(unittest.TestCase):
                         for sample in samples:
                             if isinstance(sample, dict) and 'content' in sample:
                                 seen_in_custom.append(sample['content'])
-                except:
+                except Exception:
                     pass
             
             # Return mock response
@@ -268,7 +268,7 @@ class TestGraphBuilderContentLoading(unittest.TestCase):
                 graphs_dir.mkdir(exist_ok=True)
                 
                 # Run custom graph build
-                result_path = build_custom_graph(
+                build_custom_graph(
                     project_path=Path(self.temp_dir),
                     description="Test custom graph",
                     name="CustomTest",

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-import os
-from pathlib import Path
-from flask import Flask, request, send_from_directory, Response, jsonify
-import requests
 import json
+import os
 import subprocess
 import time
+from pathlib import Path
+
+import requests
+from flask import Flask, Response, jsonify, request, send_from_directory
 
 ROOT = Path(__file__).resolve().parent
 STATIC_DIR = ROOT / "static"
@@ -400,7 +401,7 @@ def create_app():
                     files = []
                     card_ids = []
                     for ref in srcs:
-                        cid = str(ref) if isinstance(ref, (str, int)) else ref.get('id') or ref.get('card_id')
+                        cid = str(ref) if isinstance(ref, str | int) else ref.get('id') or ref.get('card_id')
                         if cid:
                             cid = str(cid)
                             card_ids.append(cid)
@@ -420,10 +421,6 @@ def create_app():
                 continue
         _node_sources_cache[cache_key] = node_map
         return node_map
-        try:
-            return json.loads(session_file.read_text())
-        except Exception:
-            return {}
 
     @app.get("/api/stream/audit")
     def stream_audit():
@@ -554,7 +551,8 @@ def create_app():
                                     latest = inst
                     if latest:
                         tel = latest.get('telemetry', {}) or {}
-                        ctrl = tel.get('control_url'); tok = tel.get('token')
+                        ctrl = tel.get('control_url')
+                        tok = tel.get('token')
                         if ctrl:
                             headers = { 'Authorization': f'Bearer {tok}' } if tok else {}
                             try:
@@ -905,7 +903,9 @@ def create_app():
                 target = None
                 for k, v in hyps.items():
                     if k == hyp_id or k.startswith(hyp_id):
-                        target = v; hyp_id = k; break
+                        target = v
+                        hyp_id = k
+                        break
                 if not target:
                     return jsonify({"ok": False, "error": "hypothesis not found"}), 404
                 ns = _node_sources_index(proj)
@@ -1249,13 +1249,20 @@ def create_app():
             # Friendly label
             def _label(a: str) -> str:
                 a = (a or '').lower()
-                if a in ('load_nodes','load_node','fetch_code'): return 'Fetch code'
-                if a=='update_node': return 'Memorize fact'
-                if a in ('add_edge',): return 'Relate facts'
-                if a in ('query_graph','focus','summarize'): return 'Explore graph'
-                if a=='propose_hypothesis': return 'Hypothesis'
-                if a=='update_hypothesis': return 'Hypothesis update'
-                if a=='deep_think': return 'Strategist'
+                if a in ('load_nodes', 'load_node', 'fetch_code'):
+                    return 'Fetch code'
+                if a == 'update_node':
+                    return 'Memorize fact'
+                if a in ('add_edge',):
+                    return 'Relate facts'
+                if a in ('query_graph', 'focus', 'summarize'):
+                    return 'Explore graph'
+                if a == 'propose_hypothesis':
+                    return 'Finding'
+                if a == 'update_hypothesis':
+                    return 'Finding update'
+                if a == 'deep_think':
+                    return 'Strategist'
                 return a or 'Act'
             label = _label(action)
             # Compose text (short)

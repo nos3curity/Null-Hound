@@ -3,17 +3,16 @@ Finalize command for reviewing and confirming/rejecting hypotheses.
 """
 
 import json
+import random
 import sys
-from pathlib import Path
-from typing import Dict, List, Tuple
 from dataclasses import dataclass
+from pathlib import Path
 
 import click
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
-import random
+from rich.table import Table
 
 from analysis.concurrent_knowledge import HypothesisStore
 from commands.project import ProjectManager
@@ -69,7 +68,7 @@ def finalize(project_name: str, threshold: float, debug: bool, platform: str | N
     config = {}
     if config_path.exists():
         import yaml
-        with open(config_path, 'r') as f:
+        with open(config_path) as f:
             config = yaml.safe_load(f) or {}
     # Apply QA overrides if provided
     if config is None:
@@ -163,7 +162,7 @@ def finalize(project_name: str, threshold: float, debug: bool, platform: str | N
     manifest_file = manifest_dir / "manifest.json"
     manifest_data = {}
     if manifest_file.exists():
-        with open(manifest_file, 'r') as f:
+        with open(manifest_file) as f:
             manifest_data = json.load(f)
     
     # Get repository root
@@ -213,7 +212,7 @@ def finalize(project_name: str, threshold: float, debug: bool, platform: str | N
             try:
                 # Get source files from hypothesis
                 source_files = hypothesis.get('properties', {}).get('source_files', [])
-                node_refs = hypothesis.get('node_refs', [])
+                hypothesis.get('node_refs', [])
                 
                 # Load source code
                 source_code = {}
@@ -222,7 +221,7 @@ def finalize(project_name: str, threshold: float, debug: bool, platform: str | N
                         try:
                             full_path = repo_root / file_path
                             if full_path.exists():
-                                with open(full_path, 'r') as f:
+                                with open(full_path) as f:
                                     content = f.read()
                                     # Include full file contents to ensure complete context
                                     source_code[file_path] = content
@@ -355,7 +354,7 @@ Be conservative - only confirm if the code clearly shows the vulnerability.
     
     # Final summary
     console.print("\n" + "="*60)
-    console.print(f"\n[bold]Finalization Complete:[/bold]")
+    console.print("\n[bold]Finalization Complete:[/bold]")
     console.print(f"  [green]✓ Confirmed:[/green] {confirmed}")
     console.print(f"  [red]✗ Rejected:[/red] {rejected}")
     console.print(f"  [yellow]? Uncertain:[/yellow] {uncertain}")

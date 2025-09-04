@@ -4,28 +4,26 @@
 import json
 import sys
 import time
-from pathlib import Path
-from typing import Optional
 from datetime import datetime
+from pathlib import Path
 
 import typer
-import yaml
-from rich.console import Console
-import sys
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
-from rich.panel import Panel
-from rich.table import Table
 from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
+from rich.table import Table
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from analysis.graph_builder import GraphBuilder
-from analysis.debug_logger import DebugLogger
-from llm.token_tracker import get_token_tracker
 import random
-from ingest.manifest import RepositoryManifest
+
+from analysis.debug_logger import DebugLogger
+from analysis.graph_builder import GraphBuilder
 from ingest.bundles import AdaptiveBundler
+from ingest.manifest import RepositoryManifest
+from llm.token_tracker import get_token_tracker
 from visualization.dynamic_graph_viz import generate_dynamic_visualization
 
 console = Console()
@@ -34,7 +32,7 @@ console = Console()
 progress_console = Console(file=sys.stderr)
 
 
-def load_config(config_path: Optional[Path] = None) -> dict:
+def load_config(config_path: Path | None = None) -> dict:
     """Load configuration from YAML file."""
     from utils.config_loader import load_config as _load_config
     config = _load_config(config_path)
@@ -49,19 +47,19 @@ def load_config(config_path: Optional[Path] = None) -> dict:
 
 def build(
     repo_path: str = typer.Argument(..., help="Path to repository to analyze"),
-    repo_id: Optional[str] = typer.Option(None, help="Repository ID"),
-    output_dir: Optional[str] = typer.Option(None, "--output", "-o", help="Output directory"),
-    config_path: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config.yaml"),
+    repo_id: str | None = typer.Option(None, help="Repository ID"),
+    output_dir: str | None = typer.Option(None, "--output", "-o", help="Output directory"),
+    config_path: Path | None = typer.Option(None, "--config", "-c", help="Path to config.yaml"),
     max_iterations: int = typer.Option(3, "--iterations", "-i", help="Maximum iterations"),
     max_graphs: int = typer.Option(2, "--graphs", "-g", help="Number of graphs"),
-    focus_areas: Optional[str] = typer.Option(None, "--focus", "-f", help="Focus areas"),
-    file_filter: Optional[str] = typer.Option(None, "--files", help="File filter"),
+    focus_areas: str | None = typer.Option(None, "--focus", "-f", help="Focus areas"),
+    file_filter: str | None = typer.Option(None, "--files", help="File filter"),
     visualize: bool = typer.Option(True, "--visualize/--no-visualize", help="Generate HTML"),
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug output"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Reduce output and disable animations"),
 ):
     """Build agent-driven knowledge graphs."""
-    start_time = time.time()
+    time.time()
     config = load_config(config_path)
     
     repo_path = Path(repo_path).resolve()
@@ -355,14 +353,14 @@ def build(
 
 def ingest(
     repo_path: str = typer.Argument(..., help="Path to repository to analyze"),
-    output_dir: Optional[str] = typer.Option(None, "--output", "-o", help="Output directory"),
-    config_path: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config.yaml"),
-    file_filter: Optional[str] = typer.Option(None, "--files", "-f", help="Comma-separated file paths"),
+    output_dir: str | None = typer.Option(None, "--output", "-o", help="Output directory"),
+    config_path: Path | None = typer.Option(None, "--config", "-c", help="Path to config.yaml"),
+    file_filter: str | None = typer.Option(None, "--files", "-f", help="Comma-separated file paths"),
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug output"),
 ):
     """Ingest repository and create bundles."""
-    from ingest.manifest import RepositoryManifest
     from ingest.bundles import AdaptiveBundler
+    from ingest.manifest import RepositoryManifest
     
     config = load_config(config_path)
     

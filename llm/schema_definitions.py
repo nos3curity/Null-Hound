@@ -3,11 +3,11 @@ Centralized schema definitions for LLM providers.
 This ensures consistency across all providers and reduces code duplication.
 """
 
-from typing import Dict, Type, Any
+
 from pydantic import BaseModel
 
 
-def get_schema_definition(schema: Type[BaseModel]) -> str:
+def get_schema_definition(schema: type[BaseModel]) -> str:
     """
     Get a consistent schema definition for any Pydantic model.
     Returns a string description suitable for LLM prompts.

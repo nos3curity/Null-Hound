@@ -8,15 +8,14 @@ can analyze the same items intentionally.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, asdict, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any
 
 from .concurrent_knowledge import ConcurrentFileStore
 
 
-def _norm_key(question: str, artifact_refs: List[str]) -> str:
+def _norm_key(question: str, artifact_refs: list[str]) -> str:
     q = (question or '').strip()
     arts = ','.join(sorted([a.strip() for a in (artifact_refs or [])]))
     h = hashlib.md5(f"{q}|{arts}".encode()).hexdigest()[:12]
@@ -27,19 +26,19 @@ def _norm_key(question: str, artifact_refs: List[str]) -> str:
 class LedgerEntry:
     key: str
     question: str
-    artifact_refs: List[str] = field(default_factory=list)
+    artifact_refs: list[str] = field(default_factory=list)
     first_seen: str = field(default_factory=lambda: datetime.now().isoformat())
     last_seen: str = field(default_factory=lambda: datetime.now().isoformat())
-    sessions: List[str] = field(default_factory=list)
-    models: List[str] = field(default_factory=list)  # e.g., strategist model signatures
+    sessions: list[str] = field(default_factory=list)
+    models: list[str] = field(default_factory=list)  # e.g., strategist model signatures
     count: int = 0
 
 
 class PlanLedger(ConcurrentFileStore):
-    def _get_empty_data(self) -> Dict:
+    def _get_empty_data(self) -> dict:
         return {"frames": {}, "metadata": {"last_modified": datetime.now().isoformat()}}
 
-    def record(self, session_id: str, question: str, artifact_refs: List[str], model_sig: Optional[str] = None) -> str:
+    def record(self, session_id: str, question: str, artifact_refs: list[str], model_sig: str | None = None) -> str:
         key = _norm_key(question, artifact_refs)
 
         def update(data):
@@ -64,7 +63,7 @@ class PlanLedger(ConcurrentFileStore):
 
         return self.update_atomic(update)
 
-    def recent(self, k: int = 10) -> List[Dict[str, Any]]:
+    def recent(self, k: int = 10) -> list[dict[str, Any]]:
         lock = self._acquire_lock()
         try:
             data = self._load_data()

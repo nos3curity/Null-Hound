@@ -2,10 +2,11 @@
 Anthropic Claude provider implementation.
 """
 
+import json
 import os
 import time
-import json
-from typing import Type, TypeVar, Optional, Dict
+from typing import TypeVar
+
 from pydantic import BaseModel
 
 from .base_provider import BaseLLMProvider
@@ -20,8 +21,8 @@ class AnthropicProvider(BaseLLMProvider):
     def __init__(
         self,
         model_name: str = "claude-3-5-sonnet-20241022",
-        api_key: Optional[str] = None,
-        api_key_env: Optional[str] = None,
+        api_key: str | None = None,
+        api_key_env: str | None = None,
         timeout: int = 120,
         retries: int = 3,
         verbose: bool = False,
@@ -65,7 +66,7 @@ class AnthropicProvider(BaseLLMProvider):
         
         self.client = Anthropic(api_key=self.api_key)
     
-    def parse(self, *, system: str, user: str, schema: Type[T]) -> T:
+    def parse(self, *, system: str, user: str, schema: type[T]) -> T:
         """Make a structured call using Claude's structured output."""
         # Get schema definition from centralized source
         schema_info = get_schema_definition(schema)
@@ -78,6 +79,10 @@ class AnthropicProvider(BaseLLMProvider):
         if self.verbose:
             print("\n[Anthropic Request]")
             print(f"  Model: {self.model_name}")
+            try:
+                schema_name = getattr(schema, "__name__", str(schema))
+            except Exception:
+                schema_name = str(schema)
             print(f"  Schema: {schema_name}")
             print(f"  Total prompt: {request_chars:,} chars (~{request_chars//4:,} tokens)")
         
@@ -226,6 +231,6 @@ class AnthropicProvider(BaseLLMProvider):
         # Claude 3.5 Sonnet supports thinking through o1-style reasoning
         return self.thinking_enabled and "3-5-sonnet" in self.model_name.lower()
     
-    def get_last_token_usage(self) -> Optional[Dict[str, int]]:
+    def get_last_token_usage(self) -> dict[str, int] | None:
         """Return token usage from the last call if available."""
         return self._last_token_usage

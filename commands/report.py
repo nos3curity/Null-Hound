@@ -3,18 +3,16 @@ Generate professional security audit reports from project analysis.
 """
 
 import json
-import time
-from pathlib import Path
-from datetime import datetime
-from typing import Dict, List, Optional
 import random
+from datetime import datetime
+from pathlib import Path
 
 import click
 from rich.console import Console
 from rich.panel import Panel
 
-from commands.project import ProjectManager
 from analysis.report_generator import ReportGenerator
+from commands.project import ProjectManager
 
 console = Console()
 
@@ -28,8 +26,8 @@ console = Console()
 @click.option('--debug', is_flag=True, help="Enable debug mode")
 @click.option('--show-prompt', is_flag=True, help="Show the LLM prompt and response used to generate the report")
 @click.option('--all', 'include_all', is_flag=True, help="Include ALL hypotheses (not just confirmed) - WARNING: No QA performed, may contain false positives")
-def report(project_name: str, output: Optional[str], format: str, 
-          title: Optional[str], auditors: str, debug: bool, show_prompt: bool, include_all: bool):
+def report(project_name: str, output: str | None, format: str, 
+          title: str | None, auditors: str, debug: bool, show_prompt: bool, include_all: bool):
     """
     Generate a professional security audit report for a project.
     
@@ -58,7 +56,7 @@ def report(project_name: str, output: Optional[str], format: str,
     hypothesis_file = project_dir / "hypotheses.json"
     hypotheses = {}
     if hypothesis_file.exists():
-        with open(hypothesis_file, 'r') as f:
+        with open(hypothesis_file) as f:
             hyp_data = json.load(f)
             hypotheses = hyp_data.get("hypotheses", {})
     
@@ -73,7 +71,7 @@ def report(project_name: str, output: Optional[str], format: str,
     
     warning_text = ""
     if include_all:
-        warning_text = f"\n[bold yellow]⚠️  WARNING:[/bold yellow] Including ALL hypotheses (no QA performed)\n[yellow]Report may contain false positives![/yellow]\n"
+        warning_text = "\n[bold yellow]⚠️  WARNING:[/bold yellow] Including ALL hypotheses (no QA performed)\n[yellow]Report may contain false positives![/yellow]\n"
     
     console.print(Panel(
         f"[bold bright_cyan]Generating Security Audit Report[/bold bright_cyan]\n\n"
@@ -108,14 +106,14 @@ def report(project_name: str, output: Optional[str], format: str,
     
     # Resolve model names for narrative flavor
     models = (config or {}).get('models', {})
-    graph_model = (models.get('graph') or {}).get('model') or 'Graph-Model'
+    (models.get('graph') or {}).get('model') or 'Graph-Model'
     agent_model = (models.get('agent') or {}).get('model') or 'Agent-Model'
     guidance_model = (models.get('guidance') or {}).get('model') or 'Guidance-Model'
-    finalize_model = (models.get('finalize') or {}).get('model') or 'Finalize-Model'
+    (models.get('finalize') or {}).get('model') or 'Finalize-Model'
     reporting_model = (models.get('reporting') or {}).get('model') or 'Reporting-Model'
 
     # Progress callback from generator
-    def _progress_cb(ev: Dict):
+    def _progress_cb(ev: dict):
         status = ev.get('status', '')
         msg = ev.get('message', '')
         if status in ('start',):
@@ -131,7 +129,7 @@ def report(project_name: str, output: Optional[str], format: str,
             ])
             console.print(f"[bright_cyan]{line}[/bright_cyan]")
         elif status in ('llm_done',):
-            console.print(f"[bright_green]✅ Summary + overview ready[/bright_green]")
+            console.print("[bright_green]✅ Summary + overview ready[/bright_green]")
         elif status in ('findings',):
             hunt = random.choice([
                 "🔍 Hunting confirmed findings...",
@@ -206,7 +204,7 @@ def report(project_name: str, output: Optional[str], format: str,
             with open(output_path, 'w') as f:
                 f.write(report_data)
         
-        console.print(f"[bright_green]✓ Report generated successfully![/bright_green]")
+        console.print("[bright_green]✓ Report generated successfully![/bright_green]")
         console.print(f"[bright_green]Location: {output_path}[/bright_green]")
         
         # Report path is already displayed above, no need to open browser

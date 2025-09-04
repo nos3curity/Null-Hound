@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 """Dynamic Knowledge Graph Builder with agent-driven schema discovery."""
 
-import json
 import hashlib
+import json
 import sys
-from pathlib import Path
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, asdict, field
 import time
+from collections.abc import Callable
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from pydantic import BaseModel, Field
+
 from llm.client import LLMClient
 from llm.tokenization import count_tokens
-from pydantic import BaseModel, Field
 
 
 @dataclass
@@ -23,19 +25,19 @@ class DynamicNode:
     id: str
     type: str  # Dynamic type decided by agent
     label: str
-    properties: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    properties: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     
     # Optional structured fields
-    description: Optional[str] = None
+    description: str | None = None
     confidence: float = 1.0
-    source_refs: List[str] = field(default_factory=list)  # File paths or card IDs
+    source_refs: list[str] = field(default_factory=list)  # File paths or card IDs
     created_by: str = "agent"  # Which agent/pass created this
     iteration: int = 0  # When in the process it was created
     
     # Analysis fields - facts about the system (NOT security issues)
-    observations: List[Dict[str, Any]] = field(default_factory=list)  # Verified facts, invariants, behaviors
-    assumptions: List[Dict[str, Any]] = field(default_factory=list)  # Unverified assumptions, constraints
+    observations: list[dict[str, Any]] = field(default_factory=list)  # Verified facts, invariants, behaviors
+    assumptions: list[dict[str, Any]] = field(default_factory=list)  # Unverified assumptions, constraints
 
 
 @dataclass
@@ -45,12 +47,12 @@ class DynamicEdge:
     type: str  # Dynamic type decided by agent
     source_id: str
     target_id: str
-    properties: Dict[str, Any] = field(default_factory=dict)
+    properties: dict[str, Any] = field(default_factory=dict)
     
     # Optional structured fields
-    label: Optional[str] = None
+    label: str | None = None
     confidence: float = 1.0
-    evidence: List[str] = field(default_factory=list)  # Supporting evidence
+    evidence: list[str] = field(default_factory=list)  # Supporting evidence
     created_by: str = "agent"
     iteration: int = 0
 
@@ -60,9 +62,9 @@ class KnowledgeGraph:
     """A single knowledge graph with a specific focus"""
     name: str
     focus: str  # What this graph focuses on (structure, security, data flow, etc.)
-    nodes: Dict[str, DynamicNode] = field(default_factory=dict)
-    edges: Dict[str, DynamicEdge] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    nodes: dict[str, DynamicNode] = field(default_factory=dict)
+    edges: dict[str, DynamicEdge] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     
     def add_node(self, node: DynamicNode) -> bool:
         """Add a node. Returns True if node was actually added (not duplicate)."""
@@ -97,7 +99,7 @@ class KnowledgeGraph:
         self.edges[edge.id] = edge
         return True
     
-    def get_neighbors(self, node_id: str, edge_type: Optional[str] = None) -> List[str]:
+    def get_neighbors(self, node_id: str, edge_type: str | None = None) -> list[str]:
         """Get neighboring nodes, optionally filtered by edge type"""
         neighbors = []
         for edge in self.edges.values():
@@ -121,15 +123,15 @@ class GraphSpec(BaseModel):
 class GraphDiscovery(BaseModel):
     """Initial discovery of what graphs to build"""
     model_config = {"extra": "forbid"}
-    graphs_needed: List[GraphSpec] = Field(
+    graphs_needed: list[GraphSpec] = Field(
         default_factory=list,
         description="List of graphs to create"
     )
-    suggested_node_types: List[str] = Field(
+    suggested_node_types: list[str] = Field(
         default_factory=list,
         description="Custom node types needed for this codebase"
     )
-    suggested_edge_types: List[str] = Field(
+    suggested_edge_types: list[str] = Field(
         default_factory=list,
         description="Custom edge types needed for this codebase"
     )
@@ -143,7 +145,7 @@ class Observation(BaseModel):
     description: str = Field(description="Description of the observation")
     type: str = Field(default="general", description="Type: invariant, behavior, pattern, constraint, property")
     confidence: float = Field(1.0, description="Confidence in this observation")
-    evidence: List[str] = Field(default_factory=list, description="Evidence supporting this observation")
+    evidence: list[str] = Field(default_factory=list, description="Evidence supporting this observation")
 
 
 class Assumption(BaseModel):
@@ -161,7 +163,7 @@ class NodeSpec(BaseModel):
     id: str = Field(description="Unique node identifier (e.g., 'func_calculate', 'module_utils')")
     type: str = Field(description="Node type (e.g., function, class, module)")
     label: str = Field(description="Human-readable label for the node")
-    refs: List[str] = Field(default_factory=list, description="List of card IDs where this node appears")
+    refs: list[str] = Field(default_factory=list, description="List of card IDs where this node appears")
 
 
 class EdgeSpec(BaseModel):
@@ -170,19 +172,19 @@ class EdgeSpec(BaseModel):
     type: str = Field(description="Edge type (e.g., calls, uses, depends_on)")
     src: str = Field(description="Source node ID (must be an existing node ID, NOT a card ID)")
     dst: str = Field(description="Target node ID (must be an existing node ID, NOT a card ID)")
-    refs: List[str] = Field(default_factory=list, description="Card IDs that evidence this edge")
+    refs: list[str] = Field(default_factory=list, description="Card IDs that evidence this edge")
 
 
 class NodeUpdate(BaseModel):
     """Update for an existing node"""
     model_config = {"extra": "forbid"}
     id: str = Field(description="Node ID to update")
-    description: Optional[str] = Field(None, description="New description")
-    properties: Optional[str] = Field(None, description="JSON string of properties to update")
+    description: str | None = Field(None, description="New description")
+    properties: str | None = Field(None, description="JSON string of properties to update")
     
     # New observations/assumptions to add
-    new_observations: List[Observation] = Field(default_factory=list, description="[LEAVE EMPTY during graph building - only for agent analysis phase]")
-    new_assumptions: List[Assumption] = Field(default_factory=list, description="[LEAVE EMPTY during graph building - only for agent analysis phase]")
+    new_observations: list[Observation] = Field(default_factory=list, description="[LEAVE EMPTY during graph building - only for agent analysis phase]")
+    new_assumptions: list[Assumption] = Field(default_factory=list, description="[LEAVE EMPTY during graph building - only for agent analysis phase]")
 
 
 class GraphUpdate(BaseModel):
@@ -190,16 +192,16 @@ class GraphUpdate(BaseModel):
     model_config = {"extra": "forbid"}
     target_graph: str = Field(default="", description="Name of graph to update")
     
-    new_nodes: List[NodeSpec] = Field(
+    new_nodes: list[NodeSpec] = Field(
         default_factory=list,
         description="New nodes to add - return empty list if no new nodes found"
     )
-    new_edges: List[EdgeSpec] = Field(
+    new_edges: list[EdgeSpec] = Field(
         default_factory=list,
         description="New edges to add - return empty list if no new edges found"
     )
     
-    node_updates: List[NodeUpdate] = Field(
+    node_updates: list[NodeUpdate] = Field(
         default_factory=list,
         description="Updates to existing nodes with new invariants/observations"
     )
@@ -219,7 +221,7 @@ class GraphBuilder:
     4. Minimal pre-processing - just code cards
     """
     
-    def __init__(self, config: Dict, debug: bool = False, debug_logger=None):
+    def __init__(self, config: dict, debug: bool = False, debug_logger=None):
         self.config = config
         self.debug = debug
         self.debug_logger = debug_logger
@@ -238,10 +240,10 @@ class GraphBuilder:
             print(f"[*] Agent model: {agent_model} (for discovery)")
         
         # Knowledge graphs storage
-        self.graphs: Dict[str, KnowledgeGraph] = {}
+        self.graphs: dict[str, KnowledgeGraph] = {}
         
         # Card storage for later retrieval
-        self.card_store: Dict[str, Dict] = {}
+        self.card_store: dict[str, dict] = {}
         
         # Iteration counter
         self.iteration = 0
@@ -249,7 +251,7 @@ class GraphBuilder:
         self._progress_callback = None
         
         # Repository root for extracting full content
-        self._repo_root: Optional[Path] = None
+        self._repo_root: Path | None = None
 
     def _emit(self, status: str, message: str, **kwargs):
         """Emit progress events to callback and optionally print when debug."""
@@ -273,11 +275,11 @@ class GraphBuilder:
         manifest_dir: Path,
         output_dir: Path,
         max_iterations: int = 5,
-        focus_areas: Optional[List[str]] = None,
+        focus_areas: list[str] | None = None,
         max_graphs: int = 2,
-        force_graphs: Optional[List[Dict[str, str]]] = None,
-        progress_callback: Optional[callable] = None
-    ) -> Dict[str, Any]:
+        force_graphs: list[dict[str, str]] | None = None,
+        progress_callback: Callable[[dict], None] | None = None
+    ) -> dict[str, Any]:
         """
         Main entry point for dynamic graph building.
         
@@ -348,11 +350,11 @@ class GraphBuilder:
     
     def _discover_graphs(
         self,
-        manifest: Dict,
-        cards: List[Dict],
-        focus_areas: Optional[List[str]] = None,
+        manifest: dict,
+        cards: list[dict],
+        focus_areas: list[str] | None = None,
         max_graphs: int = 2,
-        force_graphs: Optional[List[Dict[str, str]]] = None
+        force_graphs: list[dict[str, str]] | None = None
     ):
         """Let agent discover what graphs to build"""
         
@@ -472,7 +474,7 @@ The FIRST must be the system/component/flow overview."""
         if discovery.suggested_edge_types:
             self._emit("note", f"Custom edge types: {', '.join(discovery.suggested_edge_types)}")
     
-    def _build_iteration(self, cards: List[Dict]) -> bool:
+    def _build_iteration(self, cards: list[dict]) -> bool:
         """
         Single iteration to build/refine graphs.
         Returns True if any graph was updated, False if all graphs are complete.
@@ -520,7 +522,7 @@ The FIRST must be the system/component/flow overview."""
         orphaned = set(graph.nodes.keys()) - connected_nodes
         return orphaned
     
-    def _update_graph(self, graph: KnowledgeGraph, cards: List[Dict]) -> Optional[GraphUpdate]:
+    def _update_graph(self, graph: KnowledgeGraph, cards: list[dict]) -> GraphUpdate | None:
         """Update graph with new nodes and edges based on current state"""
         
         # Store cards for later retrieval - filter out redundant peek fields
@@ -751,7 +753,7 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
     
     
     @staticmethod
-    def load_cards_from_manifest(manifest_dir: Path) -> tuple[List[Dict], Dict]:
+    def load_cards_from_manifest(manifest_dir: Path) -> tuple[list[dict], dict]:
         """
         Load cards and manifest from a project's manifest directory.
         Returns: (cards, manifest)
@@ -783,7 +785,7 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
         
         return cards, manifest
     
-    def prepare_code_context(self, cards: List[Dict]) -> List[Dict]:
+    def prepare_code_context(self, cards: list[dict]) -> list[dict]:
         """
         Prepare code context from cards for LLM prompts.
         Filters out redundant fields and returns clean context.
@@ -800,7 +802,7 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
             code_context.append(context_item)
         return code_context
     
-    def sample_cards_for_prompt(self, cards: List[Dict]) -> tuple[List[Dict], int, int]:
+    def sample_cards_for_prompt(self, cards: list[dict]) -> tuple[list[dict], int, int]:
         """
         Sample cards for LLM prompt, returning sampled cards and counts.
         Returns: (sampled_cards, original_count, sampled_count)
@@ -809,7 +811,7 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
         sampled_cards = self._sample_cards(cards)
         return sampled_cards, original_count, len(sampled_cards)
     
-    def _sample_cards_for_discovery(self, cards: List[Dict]) -> List[Dict]:
+    def _sample_cards_for_discovery(self, cards: list[dict]) -> list[dict]:
         """
         Sample cards specifically for the discovery phase.
         Uses strategist model's context limit or global default, NOT graph model's limit.
@@ -913,8 +915,8 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
     
     def _sample_cards(
         self,
-        cards: List[Dict]
-    ) -> List[Dict]:
+        cards: list[dict]
+    ) -> list[dict]:
         """Adaptive sampling based on token count to stay within context limits"""
         
         # Get max tokens for graph model specifically, if configured
@@ -1056,7 +1058,7 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
         
         return manifest, cards
     
-    def _save_results(self, output_dir: Path, manifest: Dict) -> Dict:
+    def _save_results(self, output_dir: Path, manifest: dict) -> dict:
         """Save all graphs and analysis results"""
         
         output_dir.mkdir(parents=True, exist_ok=True)

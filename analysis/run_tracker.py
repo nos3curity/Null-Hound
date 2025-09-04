@@ -1,11 +1,11 @@
 """Run tracking for agent analysis."""
 import json
-import time
 import sys
-from pathlib import Path
-from typing import Dict, Any, Optional, List
+import time
 from datetime import datetime
+from pathlib import Path
 from threading import Lock
+from typing import Any
 
 
 class RunTracker:
@@ -29,7 +29,7 @@ class RunTracker:
         self._lock = Lock()
         self._save()
     
-    def set_run_info(self, run_id: str, command_args: List[str]):
+    def set_run_info(self, run_id: str, command_args: list[str]):
         """Set basic run information."""
         with self._lock:
             self.data['run_id'] = run_id
@@ -43,7 +43,7 @@ class RunTracker:
             self._update_runtime()
             self._save()
     
-    def update_token_usage(self, token_summary: Dict[str, Any]):
+    def update_token_usage(self, token_summary: dict[str, Any]):
         """Update token usage statistics."""
         with self._lock:
             # Exclude the detailed history to keep the file size manageable
@@ -55,7 +55,7 @@ class RunTracker:
             self._update_runtime()
             self._save()
     
-    def add_investigation(self, investigation: Dict[str, Any]):
+    def add_investigation(self, investigation: dict[str, Any]):
         """Add an investigation result."""
         with self._lock:
             self.data['investigations'].append(investigation)

@@ -3,19 +3,19 @@ End-to-end tests for the complete analysis workflow.
 Tests the full pipeline from graph loading to hypothesis generation and reporting.
 """
 
-import unittest
 import json
-import tempfile
-import shutil
-from pathlib import Path
-from unittest.mock import patch, MagicMock, call
-import sys
 import os
+import shutil
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from analysis.agent_core import AutonomousAgent, AgentDecision
+from analysis.agent_core import AgentDecision, AutonomousAgent
 from analysis.concurrent_knowledge import HypothesisStore
 from analysis.finalization import Finalizer
 from analysis.report_generator import ReportGenerator
@@ -619,7 +619,7 @@ contract Vault {
     
     def test_hypothesis_store_integration(self):
         """Test hypothesis store works correctly during analysis."""
-        from analysis.concurrent_knowledge import Hypothesis, Evidence
+        from analysis.concurrent_knowledge import Evidence, Hypothesis
         
         # Create hypothesis store
         store_path = self.project_dir / "hypotheses.json"
@@ -680,7 +680,7 @@ contract Vault {
         self.assertLess(hyp2['confidence'], 0.5)  # Should be decreased by adjust_confidence
         
         # Test persistence
-        store2 = HypothesisStore(store_path)
+        HypothesisStore(store_path)
         with open(store_path) as f:
             reloaded_data = json.load(f)
         reloaded = reloaded_data.get('hypotheses', {})
@@ -730,7 +730,6 @@ class TestAnalysisComponents(unittest.TestCase):
         hypothesis_path.write_text(json.dumps(hypothesis_store_data))
         
         # Initialize Finalizer with required arguments
-        from analysis.finalization import Finalizer
         finalizer = Finalizer(
             graphs_metadata_path=graphs_metadata_path,
             manifest_path=manifest_path,

@@ -5,18 +5,17 @@ This module provides thread-safe, file-based storage for knowledge graphs and
 vulnerability hypotheses, allowing multiple agents to collaborate on analysis.
 """
 
-import json
 import fcntl
-import time
 import hashlib
-from pathlib import Path
+import json
 import threading
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, asdict, field
+import time
+from abc import ABC, abstractmethod
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
-from abc import ABC, abstractmethod
-
+from pathlib import Path
+from typing import Any
 
 # ============================================================================
 # Base Concurrent Store
@@ -25,7 +24,7 @@ from abc import ABC, abstractmethod
 class ConcurrentFileStore(ABC):
     """Base class for file-based storage with process-safe locking."""
     
-    def __init__(self, file_path: Path, agent_id: Optional[str] = None):
+    def __init__(self, file_path: Path, agent_id: str | None = None):
         self.file_path = Path(file_path)
         self.agent_id = agent_id or "anonymous"
         self.lock_path = self.file_path.with_suffix('.lock')
@@ -37,7 +36,7 @@ class ConcurrentFileStore(ABC):
             self._save_data(self._get_empty_data())
     
     @abstractmethod
-    def _get_empty_data(self) -> Dict:
+    def _get_empty_data(self) -> dict:
         """Return initial empty data structure."""
         pass
     
@@ -50,7 +49,7 @@ class ConcurrentFileStore(ABC):
             try:
                 fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 return lock_file
-            except IOError:
+            except OSError:
                 if time.time() - start_time > timeout:
                     lock_file.close()
                     raise TimeoutError(f"Lock timeout: {self.file_path}")
@@ -63,18 +62,18 @@ class ConcurrentFileStore(ABC):
             lock_file.close()
             if self.lock_path.exists():
                 self.lock_path.unlink()
-        except:
+        except Exception:
             pass
     
-    def _load_data(self) -> Dict:
+    def _load_data(self) -> dict:
         """Load data from file."""
         try:
-            with open(self.file_path, 'r') as f:
+            with open(self.file_path) as f:
                 return json.load(f)
-        except:
+        except Exception:
             return self._get_empty_data()
     
-    def _save_data(self, data: Dict):
+    def _save_data(self, data: dict):
         """Save data atomically using a unique temp file to avoid races."""
         import tempfile
         # Create temp file in same directory for atomic replace on same filesystem
@@ -98,7 +97,7 @@ class ConcurrentFileStore(ABC):
                 self._release_lock(lock)
 
     # ---------- Internal: per-file thread lock registry ----------
-    _locks_registry: Dict[str, threading.RLock] = {}
+    _locks_registry: dict[str, threading.RLock] = {}
     _locks_registry_guard = threading.Lock()
 
     @classmethod
@@ -132,8 +131,8 @@ class Evidence:
     description: str
     type: str  # supports/refutes/related
     confidence: float = 0.7
-    node_refs: List[str] = field(default_factory=list)
-    created_by: Optional[str] = None
+    node_refs: list[str] = field(default_factory=list)
+    created_by: str | None = None
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
 
@@ -146,16 +145,16 @@ class Hypothesis:
     severity: str  # low/medium/high/critical
     confidence: float = 0.5
     status: str = "proposed"
-    node_refs: List[str] = field(default_factory=list)
-    evidence: List[Evidence] = field(default_factory=list)
+    node_refs: list[str] = field(default_factory=list)
+    evidence: list[Evidence] = field(default_factory=list)
     reasoning: str = ""
-    properties: Dict[str, Any] = field(default_factory=dict)  # Store graph name, etc.
-    created_by: Optional[str] = None
-    reported_by_model: Optional[str] = None  # Legacy field for backward compatibility
-    junior_model: Optional[str] = None  # The agent model that discovered the vulnerability
-    senior_model: Optional[str] = None  # The guidance/deep think model that analyzed it
+    properties: dict[str, Any] = field(default_factory=dict)  # Store graph name, etc.
+    created_by: str | None = None
+    reported_by_model: str | None = None  # Legacy field for backward compatibility
+    junior_model: str | None = None  # The agent model that discovered the vulnerability
+    senior_model: str | None = None  # The guidance/deep think model that analyzed it
     # Session tagging
-    session_id: Optional[str] = None
+    session_id: str | None = None
     visibility: str = "global"  # 'global' or 'session'
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     id: str = ""
@@ -173,7 +172,7 @@ class Hypothesis:
 class HypothesisStore(ConcurrentFileStore):
     """Manages vulnerability hypotheses with concurrent access."""
     
-    def _get_empty_data(self) -> Dict:
+    def _get_empty_data(self) -> dict:
         return {
             "version": "1.0",
             "hypotheses": {},
@@ -184,7 +183,7 @@ class HypothesisStore(ConcurrentFileStore):
             }
         }
     
-    def propose(self, hypothesis: Hypothesis) -> Tuple[bool, str]:
+    def propose(self, hypothesis: Hypothesis) -> tuple[bool, str]:
         """Propose a new hypothesis with improved duplicate detection."""
         def update(data):
             hypotheses = data["hypotheses"]
@@ -279,7 +278,7 @@ class HypothesisStore(ConcurrentFileStore):
         
         return self.update_atomic(update)
     
-    def get_by_node(self, node_id: str) -> List[Dict]:
+    def get_by_node(self, node_id: str) -> list[dict]:
         """Get hypotheses for a node."""
         lock = self._acquire_lock()
         try:
@@ -296,7 +295,7 @@ class HypothesisStore(ConcurrentFileStore):
 class GraphStore(ConcurrentFileStore):
     """Manages graph files with concurrent access."""
     
-    def _get_empty_data(self) -> Dict:
+    def _get_empty_data(self) -> dict:
         return {
             "name": self.file_path.stem,
             "created_at": datetime.now().isoformat(),
@@ -305,7 +304,7 @@ class GraphStore(ConcurrentFileStore):
             "metadata": {"version": "1.0"}
         }
     
-    def save_graph(self, graph_data: Dict) -> bool:
+    def save_graph(self, graph_data: dict) -> bool:
         """Save entire graph data atomically."""
         def update(data):
             # Replace entire graph data
@@ -313,7 +312,7 @@ class GraphStore(ConcurrentFileStore):
         
         return self.update_atomic(update)
     
-    def load_graph(self) -> Dict:
+    def load_graph(self) -> dict:
         """Load graph data with shared lock."""
         lock = self._acquire_lock()
         try:
@@ -321,7 +320,7 @@ class GraphStore(ConcurrentFileStore):
         finally:
             self._release_lock(lock)
     
-    def update_nodes(self, node_updates: List[Dict]) -> bool:
+    def update_nodes(self, node_updates: list[dict]) -> bool:
         """Update specific nodes in the graph."""
         def update(data):
             # Create a map of node IDs to updates

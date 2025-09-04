@@ -1,7 +1,7 @@
 """CLI utility functions."""
 
-import sys
 import os
+import sys
 
 
 def get_cli_command() -> str:

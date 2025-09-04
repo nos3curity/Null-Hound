@@ -1,8 +1,7 @@
 """Token usage tracking for LLM providers."""
-from typing import Dict, List, Optional
-from dataclasses import dataclass, field
-from datetime import datetime
 import json
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from threading import Lock
 
@@ -16,7 +15,7 @@ class TokenUsage:
     input_tokens: int
     output_tokens: int
     total_tokens: int
-    profile: Optional[str] = None  # e.g., "agent", "graph", "guidance"
+    profile: str | None = None  # e.g., "agent", "graph", "guidance"
     
     def to_dict(self) -> dict:
         return {
@@ -34,10 +33,10 @@ class TokenTracker:
     """Tracks token usage across all LLM calls."""
     
     def __init__(self):
-        self.usage_history: List[TokenUsage] = []
-        self.usage_by_model: Dict[str, Dict[str, int]] = {}
+        self.usage_history: list[TokenUsage] = []
+        self.usage_by_model: dict[str, dict[str, int]] = {}
         self._lock = Lock()
-        self._output_file: Optional[Path] = None
+        self._output_file: Path | None = None
     
     def set_output_file(self, file_path: Path):
         """Set the output file for real-time updates."""
@@ -50,7 +49,7 @@ class TokenTracker:
                    model: str, 
                    input_tokens: int, 
                    output_tokens: int,
-                   profile: Optional[str] = None):
+                   profile: str | None = None):
         """Track token usage for a single LLM call."""
         with self._lock:
             usage = TokenUsage(

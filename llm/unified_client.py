@@ -2,18 +2,17 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, Optional, Type, TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
-from .base_provider import BaseLLMProvider
-from .openai_provider import OpenAIProvider
-from .gemini_provider import GeminiProvider
 from .anthropic_provider import AnthropicProvider
-from .xai_provider import XAIProvider
 from .deepseek_provider import DeepSeekProvider
+from .gemini_provider import GeminiProvider
 from .mock_provider import MockProvider
+from .openai_provider import OpenAIProvider
 from .token_tracker import get_token_tracker
+from .xai_provider import XAIProvider
 
 T = TypeVar('T', bound=BaseModel)
 
@@ -26,7 +25,7 @@ class UnifiedLLMClient:
     new providers like Gemini.
     """
     
-    def __init__(self, cfg: Dict[str, Any], profile: str = "graph", debug_logger=None):
+    def __init__(self, cfg: dict[str, Any], profile: str = "graph", debug_logger=None):
         """
         Initialize unified LLM client with config and profile.
         
@@ -138,9 +137,9 @@ class UnifiedLLMClient:
             print(f"[*] Initialized {self.provider.provider_name} provider with model: {self.model}")
             if self.provider.supports_thinking and hasattr(self.provider, 'thinking_enabled'):
                 if self.provider.thinking_enabled:
-                    print(f"    Thinking mode: Enabled")
+                    print("    Thinking mode: Enabled")
     
-    def parse(self, *, system: str, user: str, schema: Type[T], reasoning_effort: Optional[str] = None) -> T:
+    def parse(self, *, system: str, user: str, schema: type[T], reasoning_effort: str | None = None) -> T:
         """
         Structured call: returns an instance of `schema` (Pydantic BaseModel).
         
@@ -188,7 +187,7 @@ class UnifiedLLMClient:
                     profile=self.profile
                 )
     
-    def raw(self, *, system: str, user: str, reasoning_effort: Optional[str] = None) -> str:
+    def raw(self, *, system: str, user: str, reasoning_effort: str | None = None) -> str:
         """
         Plain text call (no schema).
         

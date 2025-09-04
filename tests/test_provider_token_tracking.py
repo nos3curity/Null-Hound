@@ -1,14 +1,14 @@
 """Unit tests for LLM provider token tracking."""
-import unittest
-from unittest.mock import Mock, patch, MagicMock
-from pathlib import Path
 import sys
+import unittest
+from pathlib import Path
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from llm.openai_provider import OpenAIProvider
-from llm.gemini_provider import GeminiProvider
 from llm.anthropic_provider import AnthropicProvider
+from llm.gemini_provider import GeminiProvider
+from llm.openai_provider import OpenAIProvider
 from llm.xai_provider import XAIProvider
 
 
@@ -80,7 +80,7 @@ class TestOpenAIProviderTokenTracking(unittest.TestCase):
                     setattr(self, k, v)
         
         # Make a parse call
-        result = self.provider.parse(system="Test", user="Test", schema=TestSchema)
+        self.provider.parse(system="Test", user="Test", schema=TestSchema)
         
         # Check token tracking
         usage = self.provider.get_last_token_usage()

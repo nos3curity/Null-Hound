@@ -1,16 +1,15 @@
 """Unit tests for run tracking functionality."""
 import json
+import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from llm.token_tracker import TokenTracker, get_token_tracker
 from analysis.run_tracker import RunTracker
+from llm.token_tracker import TokenTracker
 
 
 class TestTokenTracker(unittest.TestCase):

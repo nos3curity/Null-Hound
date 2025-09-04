@@ -4,16 +4,15 @@ Captures all prompts and responses in a simple log format for easy debugging.
 """
 
 import json
-import time
-from pathlib import Path
-from typing import Dict, Any, Optional
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 
 class DebugLogger:
     """Logs all LLM interactions to a log file for debugging."""
     
-    def __init__(self, session_id: str, output_dir: Optional[Path] = None):
+    def __init__(self, session_id: str, output_dir: Path | None = None):
         """
         Initialize debug logger.
         
@@ -85,11 +84,11 @@ Started: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
         system_prompt: str,
         user_prompt: str,
         response: Any,
-        schema: Optional[Any] = None,
-        duration: Optional[float] = None,
-        error: Optional[str] = None,
-        tool_calls: Optional[list] = None,
-        profile: Optional[str] = None
+        schema: Any | None = None,
+        duration: float | None = None,
+        error: str | None = None,
+        tool_calls: list | None = None,
+        profile: str | None = None
     ):
         """
         Log a single LLM interaction.
@@ -114,7 +113,7 @@ Started: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
         else:
             try:
                 response_str = json.dumps(response, indent=2, default=str)
-            except:
+            except Exception:
                 response_str = str(response)
         
         # Build log entry
@@ -159,7 +158,7 @@ RESPONSE:
                 'profile': profile,
                 'system': system_prompt,
                 'user': user_prompt,
-                'response': response if isinstance(response, (str, int, float, list, dict, type(None))) else str(response),
+                'response': response if isinstance(response, str | int | float | list | dict | type(None)) else str(response),
                 'schema': str(schema) if schema is not None else None,
                 'duration_seconds': duration,
                 'error': error,
@@ -170,7 +169,7 @@ RESPONSE:
         except Exception:
             pass
     
-    def log_event(self, event_type: str, message: str, details: Optional[Dict] = None):
+    def log_event(self, event_type: str, message: str, details: dict | None = None):
         """
         Log a general event (not an LLM interaction).
         
@@ -197,7 +196,7 @@ Message: {message}{details_str}
         with open(self.log_file, 'a') as f:
             f.write(event_log)
     
-    def finalize(self, summary: Optional[Dict] = None):
+    def finalize(self, summary: dict | None = None):
         """
         Finalize the debug log with summary statistics.
         

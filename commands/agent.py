@@ -3,34 +3,34 @@ Agent command for autonomous security analysis.
 """
 
 import json
-import click
+import random
+import sys
 import time
+from datetime import datetime
 from pathlib import Path
-from typing import Optional, List
+
+import click
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
-from rich.progress import Progress, SpinnerColumn, TextColumn
-import random
-from rich.syntax import Syntax
-from datetime import datetime, timedelta
-import sys
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from analysis.scout import Scout
-from analysis.strategist import Strategist
-from analysis.session_tracker import SessionTracker
-from llm.token_tracker import get_token_tracker
 from pydantic import BaseModel, Field
+
+from analysis.scout import Scout
+from analysis.session_tracker import SessionTracker
+from analysis.strategist import Strategist
+from llm.token_tracker import get_token_tracker
+from llm.unified_client import UnifiedLLMClient
+
 
 def get_project_dir(project_id: str) -> Path:
     """Get project directory path."""
     return Path.home() / ".hound" / "projects" / project_id
 
-def run_investigation(project_path: str, prompt: str, iterations: Optional[int] = None, config_path: Optional[Path] = None, debug: bool = False, platform: Optional[str] = None, model: Optional[str] = None):
+def run_investigation(project_path: str, prompt: str, iterations: int | None = None, config_path: Path | None = None, debug: bool = False, platform: str | None = None, model: str | None = None):
     """Run a user-driven investigation."""
     console = Console()
     
@@ -118,13 +118,12 @@ def run_investigation(project_path: str, prompt: str, iterations: Optional[int] 
     )
     
     # Run investigation with live display
-    from rich.live import Live
-    from rich.panel import Panel
-    from rich.text import Text
-    
-    # Create a live display with rolling event log
-    from rich.markdown import Markdown
     from datetime import datetime
+
+    from rich.live import Live
+
+    # Create a live display with rolling event log
+    from rich.panel import Panel
     
     event_log = []  # list of strings (renderables)
     
@@ -239,7 +238,7 @@ def display_investigation_report(report: dict):
     
     # Hypothesis summary
     hyp_stats = report['hypotheses']
-    console.print(f"[bold cyan]Hypotheses:[/bold cyan]")
+    console.print("[bold cyan]Hypotheses:[/bold cyan]")
     console.print(f"  • Total: {hyp_stats['total']}")
     console.print(f"  • [green]Confirmed: {hyp_stats['confirmed']}[/green]")
     console.print(f"  • [red]Rejected: {hyp_stats['rejected']}[/red]")
@@ -288,7 +287,7 @@ def display_investigation_report(report: dict):
         console.print()
     
     # Conclusion
-    console.print(f"[bold]Conclusion:[/bold]")
+    console.print("[bold]Conclusion:[/bold]")
     conclusion = report.get('conclusion', 'No conclusion available')
     if 'LIKELY TRUE' in conclusion:
         console.print(f"  [green]{conclusion}[/green]")
@@ -336,7 +335,7 @@ def format_tool_call(call):
     
     return Panel(
         content,
-        title=f"[bold cyan]Tool Call[/bold cyan]",
+        title="[bold cyan]Tool Call[/bold cyan]",
         border_style="cyan"
     )
 
@@ -557,10 +556,10 @@ def display_agent_summary(summary, time_limit_reached=False):
 class AgentRunner:
     """Manages agent execution with beautiful output."""
     
-    def __init__(self, project_id: str, config_path: Optional[Path] = None, 
-                 iterations: Optional[int] = None, time_limit_minutes: Optional[int] = None,
-                 debug: bool = False, platform: Optional[str] = None, model: Optional[str] = None,
-                 session: Optional[str] = None, new_session: bool = False):
+    def __init__(self, project_id: str, config_path: Path | None = None, 
+                 iterations: int | None = None, time_limit_minutes: int | None = None,
+                 debug: bool = False, platform: str | None = None, model: str | None = None,
+                 session: str | None = None, new_session: bool = False):
         self.project_id = project_id
         self.config_path = config_path
         self.max_iterations = iterations
@@ -571,15 +570,15 @@ class AgentRunner:
         self.agent = None
         self.start_time = None
         self.completed_investigations = []  # Track completed investigation goals
-        self.session_tracker: Optional[SessionTracker] = None
-        self.project_dir: Optional[Path] = None
+        self.session_tracker: SessionTracker | None = None
+        self.project_dir: Path | None = None
         self.plan_store = None
-        self.session_id: Optional[str] = session
+        self.session_id: str | None = session
         self.new_session: bool = new_session
-        self._agent_log: List[str] = []
-        self._last_applied_steer: Optional[str] = None
+        self._agent_log: list[str] = []
+        self._last_applied_steer: str | None = None
         # Track which steering text triggered a forced replan (to avoid repeats)
-        self._last_replan_steer: Optional[str] = None
+        self._last_replan_steer: str | None = None
         
     def initialize(self):
         """Initialize the agent."""
@@ -601,7 +600,7 @@ class AgentRunner:
         # If knowledge_graphs.json doesn't exist, look for any graph file
         if knowledge_graphs_path.exists():
             # Use the SystemOverview graph or first available graph
-            with open(knowledge_graphs_path, 'r') as f:
+            with open(knowledge_graphs_path) as f:
                 graphs_meta = json.load(f)
             if graphs_meta.get('graphs'):
                 graphs_dict = graphs_meta['graphs']
@@ -697,9 +696,8 @@ class AgentRunner:
         
         # Initialize plan store and session directory
         try:
-            from analysis.plan_store import PlanStore
+            from analysis.plan_store import PlanStatus, PlanStore
             from analysis.session_manager import SessionManager
-            from analysis.plan_store import PlanStatus
             # Create or find session dir
             sm = SessionManager(self.project_dir)
             if not self.session_id:
@@ -790,7 +788,7 @@ class AgentRunner:
         except Exception:
             return []
 
-    def _find_latest_urgent_steer(self) -> Optional[dict]:
+    def _find_latest_urgent_steer(self) -> dict | None:
         """Return the newest steering entry interpreted as actionable (urgent),
         newer than the last consumed timestamp. Treats both explicit verbs and
         broad/global directives as urgent.
@@ -828,8 +826,8 @@ class AgentRunner:
     def _get_hypotheses_summary(self) -> str:
         """Get a summary of current hypotheses for the Strategist."""
         try:
-            from pathlib import Path as _Path
             import json as _json
+            from pathlib import Path as _Path
             hyp_file = (_Path(self.project_dir) / 'hypotheses.json') if self.project_dir else None
             if hyp_file and hyp_file.exists():
                 data = _json.loads(hyp_file.read_text())
@@ -853,7 +851,7 @@ class AgentRunner:
         except Exception:
             return "Error reading hypotheses"
     
-    def _get_investigation_results_summary(self) -> List[str]:
+    def _get_investigation_results_summary(self) -> list[str]:
         """Get investigation results with findings, not just goals."""
         if not self.session_tracker:
             return list(self.completed_investigations)
@@ -884,8 +882,8 @@ class AgentRunner:
         """Return hypothesis stats from project hypotheses.json."""
         stats = {"total": 0, "confirmed": 0, "rejected": 0, "uncertain": 0}
         try:
-            from pathlib import Path as _Path
             import json as _json
+            from pathlib import Path as _Path
             hyp_file = (_Path(self.project_dir) / 'hypotheses.json') if self.project_dir else None
             if hyp_file and hyp_file.exists():
                 data = _json.loads(hyp_file.read_text())
@@ -1002,11 +1000,11 @@ class AgentRunner:
         except Exception as e:
             return f"(error summarizing graphs: {str(e)})"
 
-    def _plan_investigations(self, n: int) -> List[object]:
+    def _plan_investigations(self, n: int) -> list[object]:
         """Plan next investigations using Strategist by default."""
         from types import SimpleNamespace
         # 0) Optional: honor recent steering as an urgent goal
-        prepared: List[object] = []
+        prepared: list[object] = []
         try:
             urgent_ent = self._find_latest_urgent_steer()
             if urgent_ent:
@@ -1152,14 +1150,14 @@ class AgentRunner:
 
         class InvestigationItem(BaseModel):
             goal: str = Field(description="Investigation goal or question")
-            focus_areas: List[str] = Field(default_factory=list)
+            focus_areas: list[str] = Field(default_factory=list)
             priority: int = Field(ge=1, le=10, description="1-10, 10 = highest")
             reasoning: str = Field(default="", description="Rationale for why this is promising")
             category: str = Field(default="aspect", description="aspect | suspicion")
             expected_impact: str = Field(default="medium", description="high | medium | low")
 
         class InvestigationPlan(BaseModel):
-            investigations: List[InvestigationItem] = Field(
+            investigations: list[InvestigationItem] = Field(
                 default_factory=list,
                 description=f"List of exactly {n} investigation items to plan"
             )
@@ -1241,7 +1239,7 @@ class AgentRunner:
             # Re-raise the exception to fail the analysis
             raise
 
-    def _render_checklist(self, items: List[object], completed_index: int = -1):
+    def _render_checklist(self, items: list[object], completed_index: int = -1):
         """Render a simple checklist; items up to completed_index are checked."""
         console.print("\n[bold cyan]Investigation Checklist[/bold cyan]")
         for i, it in enumerate(items):
@@ -1256,11 +1254,10 @@ class AgentRunner:
                 meta += f", {cat}"
             console.print(f"  {mark} {it.goal}  ({meta})")
 
-    def _log_planning_status(self, items: List[object], current_index: int = -1):
+    def _log_planning_status(self, items: list[object], current_index: int = -1):
         """Log beautiful planning status and coverage information."""
-        from rich.table import Table
         from rich.box import ROUNDED
-        from rich.panel import Panel
+        from rich.table import Table
         
         # Clear previous output for clean display
         console.print("\n" + "="*80)
@@ -1457,7 +1454,7 @@ class AgentRunner:
                 
                 # Special formatting for deep_think
                 if act == 'deep_think':
-                    console.print(f"\n[bold magenta]══════ CALLING STRATEGIST MODEL FOR DEEP ANALYSIS ══════[/bold magenta]")
+                    console.print("\n[bold magenta]══════ CALLING STRATEGIST MODEL FOR DEEP ANALYSIS ══════[/bold magenta]")
                     console.print("[yellow]Strategist is analyzing the collected context...[/yellow]")
                 elif params:
                     # Show parameters compactly for non-deep-think actions
@@ -1477,7 +1474,7 @@ class AgentRunner:
                 
                 if action == 'deep_think':
                     if result.get('status') == 'success':
-                        console.print(f"\n[bold green]══════ STRATEGIST ANALYSIS COMPLETE ══════[/bold green]")
+                        console.print("\n[bold green]══════ STRATEGIST ANALYSIS COMPLETE ══════[/bold green]")
                         
                         # Show the strategist's analysis
                         full_response = result.get('full_response', '')
@@ -1550,7 +1547,6 @@ class AgentRunner:
             planned_round += 1
             # Show an animated status while strategist plans the next batch
             try:
-                from rich.status import Status
                 with console.status("[cyan]Strategist planning next steps...[/cyan]", spinner="dots", spinner_style="cyan"):
                     items = self._plan_investigations(max(1, plan_n))
             except Exception:
@@ -1769,7 +1765,7 @@ class AgentRunner:
                             
                             # Special handling for deep_think
                             if act == 'deep_think':
-                                console.print(f"\n[bold magenta]═══ CALLING STRATEGIST FOR DEEP ANALYSIS ═══[/bold magenta]")
+                                console.print("\n[bold magenta]═══ CALLING STRATEGIST FOR DEEP ANALYSIS ═══[/bold magenta]")
                                 try:
                                     strat_cfg = (self.config or {}).get('models', {}).get('strategist', {})
                                     eff = strat_cfg.get('hypothesize_reasoning_effort') or strat_cfg.get('reasoning_effort')
@@ -1779,7 +1775,7 @@ class AgentRunner:
                                         console.print(f"[dim]Strategist model: {prov}/{mdl} | effort: {eff or 'default'}[/dim]")
                                 except Exception:
                                     pass
-                                console.print(f"[yellow]Strategist is analyzing the collected context...[/yellow]")
+                                console.print("[yellow]Strategist is analyzing the collected context...[/yellow]")
                             
                             # Update agent log
                             self._agent_log.append(f"Iter {it}: {act} - {reasoning[:100] if reasoning else 'no reasoning'}")
@@ -1809,7 +1805,7 @@ class AgentRunner:
                             if action == 'deep_think':
                                 # Special formatting for deep_think results
                                 if result.get('status') == 'success':
-                                    console.print(f"\n[bold green]═══ STRATEGIST ANALYSIS COMPLETE ═══[/bold green]")
+                                    console.print("\n[bold green]═══ STRATEGIST ANALYSIS COMPLETE ═══[/bold green]")
                                     full_response = result.get('full_response', '')
                                     if full_response:
                                         console.print(Panel(full_response, border_style="green", title="Strategist Output"))
@@ -1877,7 +1873,6 @@ class AgentRunner:
                     # Show an animated status while the agent thinks/acts for this investigation
                     replan_requested = False
                     try:
-                        from rich.status import Status
                         with console.status("[cyan]Agent thinking deeply...[/cyan]", spinner="line", spinner_style="cyan"):
                             report = self.agent.investigate(inv.goal, max_iterations=max_iters, progress_callback=_cb)
                     except _TimeLimitReached:
@@ -2006,7 +2001,7 @@ class AgentRunner:
         
         # Show final coverage
         coverage_stats = self.session_tracker.get_coverage_stats()
-        console.print(f"\n[bold cyan]Final Coverage Statistics:[/bold cyan]")
+        console.print("\n[bold cyan]Final Coverage Statistics:[/bold cyan]")
         console.print(f"  Nodes visited: {coverage_stats['nodes']['visited']}/{coverage_stats['nodes']['total']} ([cyan]{coverage_stats['nodes']['percent']:.1f}%[/cyan])")
         console.print(f"  Cards analyzed: {coverage_stats['cards']['visited']}/{coverage_stats['cards']['total']} ([cyan]{coverage_stats['cards']['percent']:.1f}%[/cyan])")
         
@@ -2064,10 +2059,10 @@ class AgentRunner:
 @click.option('--session-private-hypotheses', is_flag=True, help='Keep new hypotheses private to this session')
 @click.option('--telemetry', is_flag=True, help='Expose local (localhost) telemetry SSE/control and register instance')
 @click.option('--strategist-two-pass', is_flag=True, help='Enable strategist two-pass self-critique to reduce false positives')
-def agent(project_id: str, iterations: Optional[int], plan_n: int, time_limit: Optional[int], 
-          config: Optional[str], debug: bool, platform: Optional[str], model: Optional[str],
-          strategist_platform: Optional[str], strategist_model: Optional[str],
-          session: Optional[str], new_session: bool, session_private_hypotheses: bool,
+def agent(project_id: str, iterations: int | None, plan_n: int, time_limit: int | None, 
+          config: str | None, debug: bool, platform: str | None, model: str | None,
+          strategist_platform: str | None, strategist_model: str | None,
+          session: str | None, new_session: bool, session_private_hypotheses: bool,
           telemetry: bool, strategist_two_pass: bool):
     """Run autonomous security analysis agent."""
     
@@ -2152,14 +2147,14 @@ def agent(project_id: str, iterations: Optional[int], plan_n: int, time_limit: O
         # Try to save partial results
         try:
             runner.finalize_tracking('interrupted')
-        except:
+        except Exception:
             pass
     except Exception as e:
         console.print(f"\n[red]Error:[/red] {e}")
         # Try to save partial results
         try:
             runner.finalize_tracking('failed')
-        except:
+        except Exception:
             pass
         raise
     finally:

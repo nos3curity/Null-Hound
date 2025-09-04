@@ -2,13 +2,14 @@
 Tests for report CLI command to ensure --show-prompt wiring and generation call.
 """
 
-import unittest
-import tempfile
 import shutil
+import tempfile
+import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
+
 from commands.report import report as report_cmd
 
 

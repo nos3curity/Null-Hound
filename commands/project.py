@@ -5,18 +5,18 @@ Projects organize analysis results and configurations for specific codebases.
 """
 
 import json
+import os
+import random
 import shutil
 import sys
-import os
-from pathlib import Path
 from datetime import datetime
-from typing import Optional, Dict, List
+from pathlib import Path
+
 import click
 from rich.console import Console
-import random
-from rich.table import Table
 from rich.panel import Panel
 from rich.prompt import Confirm
+from rich.table import Table
 
 console = Console()
 
@@ -36,19 +36,19 @@ class ProjectManager:
             with open(str(self.registry_file), 'w') as f:
                 json.dump({"projects": {}}, f, indent=2)
     
-    def _load_registry(self) -> Dict:
+    def _load_registry(self) -> dict:
         """Load project registry."""
-        with open(str(self.registry_file), 'r') as f:
+        with open(str(self.registry_file)) as f:
             return json.load(f)
     
-    def _save_registry(self, registry: Dict):
+    def _save_registry(self, registry: dict):
         """Save project registry."""
         with open(str(self.registry_file), 'w') as f:
             json.dump(registry, f, indent=2)
     
     def create_project(self, name: str, source_path: str, 
-                      description: Optional[str] = None,
-                      auto_name: bool = False) -> Dict:
+                      description: str | None = None,
+                      auto_name: bool = False) -> dict:
         """Create a new project."""
         source_path = Path(source_path).resolve()
         
@@ -99,7 +99,7 @@ class ProjectManager:
         
         return project_config
     
-    def list_projects(self) -> List[Dict]:
+    def list_projects(self) -> list[dict]:
         """List all projects."""
         registry = self._load_registry()
         projects = []
@@ -110,7 +110,7 @@ class ProjectManager:
                 # Load full project config
                 config_file = project_dir / "project.json"
                 if config_file.exists():
-                    with open(config_file, 'r') as f:
+                    with open(config_file) as f:
                         config = json.load(f)
                     
                     # Check for analysis results
@@ -123,7 +123,7 @@ class ProjectManager:
                     try:
                         hyp_file = project_dir / 'hypotheses.json'
                         if hyp_file.exists():
-                            with open(hyp_file, 'r') as hf:
+                            with open(hyp_file) as hf:
                                 hyp_data = json.load(hf)
                                 hypotheses = (hyp_data or {}).get('hypotheses', {})
                                 hypotheses_count = len(hypotheses)
@@ -148,7 +148,7 @@ class ProjectManager:
         
         return projects
     
-    def get_project(self, name: str) -> Optional[Dict]:
+    def get_project(self, name: str) -> dict | None:
         """Get project by name."""
         registry = self._load_registry()
         
@@ -163,20 +163,20 @@ class ProjectManager:
         if not config_file.exists():
             return None
         
-        import time
         import fcntl
+        import time
         
         # Retry logic for reading JSON with file locking
         max_retries = 5
         for attempt in range(max_retries):
             try:
-                with open(config_file, 'r') as f:
+                with open(config_file) as f:
                     # Try to get a shared lock for reading
                     try:
                         fcntl.flock(f.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
                         content = f.read()
                         fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-                    except IOError:
+                    except OSError:
                         # If we can't get lock, just read anyway
                         content = f.read()
                     
@@ -190,7 +190,7 @@ class ProjectManager:
                     
                     config = json.loads(content)
                     break
-            except (json.JSONDecodeError, IOError) as e:
+            except (OSError, json.JSONDecodeError):
                 if attempt < max_retries - 1:
                     time.sleep(0.1 * (attempt + 1))
                     continue
@@ -207,7 +207,7 @@ class ProjectManager:
                     fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                     json.dump(config, f, indent=2)
                     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-                except IOError:
+                except OSError:
                     # If we can't get lock, skip updating last_accessed
                     pass
         except Exception:
@@ -251,7 +251,7 @@ class ProjectManager:
         
         return True
     
-    def get_project_path(self, name: str) -> Optional[Path]:
+    def get_project_path(self, name: str) -> Path | None:
         """Get project directory path."""
         project = self.get_project(name)
         if project:
@@ -272,7 +272,7 @@ def project():
 @click.argument('source_path')
 @click.option('--description', '-d', help="Project description")
 @click.option('--auto-name', '-a', is_flag=True, help="Auto-generate project name")
-def create(name: str, source_path: str, description: Optional[str], auto_name: bool):
+def create(name: str, source_path: str, description: str | None, auto_name: bool):
     """Create a new project."""
     manager = ProjectManager()
     
@@ -306,7 +306,7 @@ def create(name: str, source_path: str, description: Optional[str], auto_name: b
             else:
                 cli_cmd = f"python {cli_cmd}"
         
-        console.print(f"\n[cyan]To analyze this project, run:[/cyan]")
+        console.print("\n[cyan]To analyze this project, run:[/cyan]")
         console.print(f"  {cli_cmd} graph build --project {config['name']}")
         console.print(f"  {cli_cmd} agent audit --project {config['name']}")
         
@@ -374,10 +374,10 @@ def list_projects_cmd(output_json: bool):
     from random import choice as _choice
     console.print(_choice([
         f"\n[white]Normal lists scroll by, but YOUR {len(projects)} projects line up like a guard of honor.[/white]",
-        f"\n[white]This isn’t just a list — it’s a roster awaiting YOUR command.[/white]",
-        f"\n[white]Normal counts inform; YOUR count inspires logistics to keep up.[/white]",
-        f"\n[white]This is not inventory — it’s a procession because YOU arrived.[/white]",
-        f"\n[white]Normal summaries whisper; YOUR summary announces an agenda.[/white]",
+        "\n[white]This isn’t just a list — it’s a roster awaiting YOUR command.[/white]",
+        "\n[white]Normal counts inform; YOUR count inspires logistics to keep up.[/white]",
+        "\n[white]This is not inventory — it’s a procession because YOU arrived.[/white]",
+        "\n[white]Normal summaries whisper; YOUR summary announces an agenda.[/white]",
     ]))
 
 
@@ -409,7 +409,7 @@ def info(name: str):
         # Get most recent session
         latest_session_file = max(sessions, key=lambda x: x.stat().st_mtime)
         try:
-            with open(latest_session_file, 'r') as f:
+            with open(latest_session_file) as f:
                 latest_session = json.load(f)
                 if 'coverage' in latest_session:
                     coverage_stats = latest_session['coverage']
@@ -421,7 +421,7 @@ def info(name: str):
     hypothesis_file = project_dir / "hypotheses.json"
     if hypothesis_file.exists():
         try:
-            with open(hypothesis_file, 'r') as f:
+            with open(hypothesis_file) as f:
                 hyp_data = json.load(f)
                 hypotheses = hyp_data.get("hypotheses", {})
                 hypothesis_stats["total"] = len(hypotheses)
@@ -481,7 +481,7 @@ def info(name: str):
     # Show hypothesis counts by status if hypotheses.json exists
     if hypothesis_file.exists():
         try:
-            with open(hypothesis_file, 'r') as f:
+            with open(hypothesis_file) as f:
                 hyp_data = json.load(f)
             hypotheses = hyp_data.get("hypotheses", {}) or {}
             status_counts = {
@@ -535,19 +535,19 @@ def info(name: str):
         for session_file in sorted(sessions, key=lambda x: x.stat().st_mtime, reverse=True)[:5]:
             # Try to get session details
             try:
-                with open(session_file, 'r') as f:
+                with open(session_file) as f:
                     sess_data = json.load(f)
                     sess_id = sess_data.get('session_id', session_file.stem)
                     sess_status = sess_data.get('status', 'unknown')
                     console.print(f"  • {sess_id} [{sess_status}]")
-            except:
+            except Exception:
                 console.print(f"  • {session_file.name}")
     
     # Show top hypotheses if any exist
     if hypothesis_file.exists() and hypothesis_stats["total"] > 0:
         console.print("\n[bold]Top Hypotheses (by confidence):[/bold]")
         try:
-            with open(hypothesis_file, 'r') as f:
+            with open(hypothesis_file) as f:
                 hyp_data = json.load(f)
                 hypotheses = hyp_data.get("hypotheses", {})
                 
@@ -630,7 +630,7 @@ def hypotheses(name: str, details: bool = False):
         raise click.Exit(0)
     
     # Load hypotheses
-    with open(hypothesis_file, 'r') as f:
+    with open(hypothesis_file) as f:
         hyp_data = json.load(f)
     
     hypotheses = hyp_data.get("hypotheses", {})
@@ -758,12 +758,12 @@ def hypotheses(name: str, details: bool = False):
     ]))
     
     # Summary stats
-    metadata = hyp_data.get("metadata", {})
+    hyp_data.get("metadata", {})
     total = len(hypotheses)
     confirmed = sum(1 for h in hypotheses.values() if h.get("status") == "confirmed")
     high_conf = sum(1 for h in hypotheses.values() if h.get("confidence", 0) >= 0.75)
     
-    console.print(f"\n[bold]Summary:[/bold]")
+    console.print("\n[bold]Summary:[/bold]")
     console.print(f"  Total hypotheses: {total}")
     console.print(f"  [green]Confirmed: {confirmed}[/green]")
     console.print(f"  [yellow]High confidence (≥75%): {high_conf}[/yellow]")
@@ -791,7 +791,7 @@ def set_hypothesis_status(project_name: str, hypothesis_id: str, status: str, fo
         raise click.Exit(1)
     
     # Load hypotheses
-    with open(hypothesis_file, 'r') as f:
+    with open(hypothesis_file) as f:
         hyp_data = json.load(f)
     
     hypotheses = hyp_data.get("hypotheses", {})
@@ -845,7 +845,7 @@ def set_hypothesis_status(project_name: str, hypothesis_id: str, status: str, fo
         if h_status in status_counts:
             status_counts[h_status] += 1
     
-    console.print(f"\n[bold]Status Summary:[/bold]")
+    console.print("\n[bold]Status Summary:[/bold]")
     console.print(f"  [green]Confirmed: {status_counts['confirmed']}[/green]")
     console.print(f"  [red]Rejected: {status_counts['rejected']}[/red]")
     console.print(f"  [dim]Proposed: {status_counts['proposed']}[/dim]")
@@ -886,7 +886,7 @@ def reset_hypotheses(name: str, force: bool):
     
     # Load current hypotheses to show what will be deleted
     try:
-        with open(hypothesis_file, 'r') as f:
+        with open(hypothesis_file) as f:
             hyp_data = json.load(f)
             hypotheses = hyp_data.get("hypotheses", {})
             num_hypotheses = len(hypotheses)
@@ -925,7 +925,7 @@ def reset_hypotheses(name: str, force: bool):
 @click.argument('session_id', required=False)
 @click.option('--list', 'list_sessions', is_flag=True, help="List all sessions for the project")
 @click.option('--json', 'output_json', is_flag=True, help="Output as JSON")
-def sessions(project_name: str, session_id: Optional[str], list_sessions: bool, output_json: bool):
+def sessions(project_name: str, session_id: str | None, list_sessions: bool, output_json: bool):
     """View audit sessions for a project (preferred over legacy 'runs').
 
     Examples:
@@ -982,7 +982,7 @@ def _list_sessions(sessions_dir: Path, output_json: bool):
         try:
             dt = datetime.fromisoformat((it['start_time'] or '').replace('Z', '+00:00'))
             time_str = dt.strftime("%Y-%m-%d %H:%M")
-        except:
+        except Exception:
             time_str = (it['start_time'] or '')[:19]
         status = (it.get('status', 'unknown') or '').lower()
         if status == 'completed':
@@ -1102,7 +1102,7 @@ def plan(project_name: str, session_id: str, output_json: bool):
         return
 
     # Resolve the specific session directory to inspect
-    session_dirs: List[Path] = []
+    session_dirs: list[Path] = []
     cand = sessions_dir / session_id
     if cand.exists() and cand.is_dir():
         session_dirs = [cand]
@@ -1117,7 +1117,7 @@ def plan(project_name: str, session_id: str, output_json: bool):
             return
 
     # Collect plan items across selected sessions
-    all_items: List[dict] = []
+    all_items: list[dict] = []
     from analysis.plan_store import PlanStore
     for sdir in sorted(session_dirs, key=lambda p: p.stat().st_mtime, reverse=True):
         plan_file = sdir / 'plan.json'

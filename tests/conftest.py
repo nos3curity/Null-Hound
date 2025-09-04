@@ -6,8 +6,8 @@ we explicitly alias `llm` and its submodules to `hound.llm.*` in sys.modules
 before test collection.
 """
 
-import sys
 import importlib
+import sys
 from pathlib import Path
 
 # Ensure current directory (package root) is at the front of sys.path

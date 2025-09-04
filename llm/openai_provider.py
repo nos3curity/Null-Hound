@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import random
 import time
-from typing import Any, Dict, Optional, Type, TypeVar
+from typing import Any, TypeVar
 
 from openai import OpenAI
 from pydantic import BaseModel
@@ -19,14 +19,14 @@ class OpenAIProvider(BaseLLMProvider):
     
     def __init__(
         self, 
-        config: Dict[str, Any], 
+        config: dict[str, Any], 
         model_name: str,
         timeout: int = 120,
         retries: int = 3,
         backoff_min: float = 2.0,
         backoff_max: float = 8.0,
-        reasoning_effort: Optional[str] = None,
-        text_verbosity: Optional[str] = None,
+        reasoning_effort: str | None = None,
+        text_verbosity: str | None = None,
         **kwargs
     ):
         """Initialize OpenAI provider."""
@@ -56,7 +56,7 @@ class OpenAIProvider(BaseLLMProvider):
         env_force_resp = os.environ.get("HOUND_OPENAI_USE_RESPONSES", "").lower() in {"1","true","yes","on"}
         self.use_responses = bool(env_force_resp or mdl.startswith("gpt-5"))
     
-    def parse(self, *, system: str, user: str, schema: Type[T], reasoning_effort: Optional[str] = None) -> T:
+    def parse(self, *, system: str, user: str, schema: type[T], reasoning_effort: str | None = None) -> T:
         """Make a structured call. Uses Responses API for GPT-5; otherwise Chat Completions parse."""
         messages = [
             {"role": "system", "content": system},
@@ -66,7 +66,7 @@ class OpenAIProvider(BaseLLMProvider):
         # Log request details
         request_chars = len(system) + len(user)
         if self.verbose:
-            print(f"\n[OpenAI Request]")
+            print("\n[OpenAI Request]")
             print(f"  Model: {self.model_name}")
             print(f"  Schema: {schema.__name__}")
             print(f"  Total prompt: {request_chars:,} chars (~{request_chars//4:,} tokens)")
@@ -75,12 +75,12 @@ class OpenAIProvider(BaseLLMProvider):
         
         for attempt in range(self.retries):
             try:
-                attempt_start = time.time()
+                time.time()
                 if self.verbose:
                     print(f"  Attempt {attempt + 1}/{self.retries}...")
                 if self.use_responses:
                     # Responses API without server-side schema; we instruct strict JSON and validate locally
-                    text_params: Dict[str, Any] = {}
+                    text_params: dict[str, Any] = {}
                     if self.text_verbosity:
                         text_params['verbosity'] = self.text_verbosity
                     # Embed schema hint in instructions to increase compliance
@@ -96,7 +96,7 @@ class OpenAIProvider(BaseLLMProvider):
                         import json as _json
                         schema_hint = "\nFollow this JSON schema exactly (no extra keys, all required):\n" + _json.dumps(json_schema)
                     strict_instr = "\nReturn ONLY valid JSON. No markdown. No prose."
-                    params: Dict[str, Any] = {
+                    params: dict[str, Any] = {
                         'model': self.model_name,
                         'input': user,
                         'instructions': (system or '') + schema_hint + strict_instr,
@@ -173,7 +173,7 @@ class OpenAIProvider(BaseLLMProvider):
         
         raise RuntimeError(f"OpenAI call failed after {self.retries} attempts: {last_err}")
     
-    def raw(self, *, system: str, user: str, reasoning_effort: Optional[str] = None) -> str:
+    def raw(self, *, system: str, user: str, reasoning_effort: str | None = None) -> str:
         """Make a plain text call."""
         messages = [
             {"role": "system", "content": system},
@@ -186,10 +186,10 @@ class OpenAIProvider(BaseLLMProvider):
                 if self.use_responses:
                     # Favor JSON output only when caller explicitly asks for strict JSON in the system message.
                     # This keeps deep_think and other free-text prompts working as normal text.
-                    text_params: Dict[str, Any] = {}
+                    text_params: dict[str, Any] = {}
                     if self.text_verbosity:
                         text_params['verbosity'] = self.text_verbosity
-                    params: Dict[str, Any] = {
+                    params: dict[str, Any] = {
                         'model': self.model_name,
                         'input': user,
                         'instructions': system or '',
@@ -264,6 +264,6 @@ class OpenAIProvider(BaseLLMProvider):
         """OpenAI models may support reasoning effort but not explicit thinking mode."""
         return False
     
-    def get_last_token_usage(self) -> Optional[Dict[str, int]]:
+    def get_last_token_usage(self) -> dict[str, int] | None:
         """Return token usage from the last call if available."""
         return self._last_token_usage

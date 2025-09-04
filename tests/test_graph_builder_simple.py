@@ -3,14 +3,14 @@ Simplified unit tests for GraphBuilder with mocked LLM responses.
 Shows how to test graph generation without API keys.
 """
 
-import unittest
 import json
-import tempfile
-import shutil
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-import sys
 import os
+import shutil
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

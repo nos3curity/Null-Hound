@@ -1,18 +1,19 @@
 """Custom graph builder that reuses the main graph building logic."""
 
 import json
+import random
 import sys
 from pathlib import Path
-from typing import Optional
+
+from rich.console import Console
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from analysis.graph_builder import GraphBuilder
-import random
-from llm.client import LLMClient
 from pydantic import BaseModel, Field
-from typing import List as ListType
+
+from analysis.graph_builder import GraphBuilder
+from llm.client import LLMClient
 from utils.config_loader import load_config
 
 
@@ -22,14 +23,14 @@ class CustomGraphSpec(BaseModel):
     name: str = Field(description="Graph name")
     focus: str = Field(description="What this graph focuses on")
     node_selection: str = Field(description="Criteria for selecting nodes")
-    edge_types: ListType[str] = Field(description="Types of edges to include")
+    edge_types: list[str] = Field(description="Types of edges to include")
 
 
 def build_custom_graph(
     project_path: Path,
     description: str,
-    name: Optional[str],
-    config_path: Optional[Path] = None,
+    name: str | None,
+    config_path: Path | None = None,
     iterations: int = 1,
     debug: bool = False
 ) -> Path:
@@ -164,7 +165,7 @@ def build_custom_graph(
     
     if graph_path.exists():
         # Load and show summary
-        with open(graph_path, 'r') as f:
+        with open(graph_path) as f:
             graph_data = json.load(f)
         
         stats = graph_data.get('stats', {})
@@ -174,5 +175,4 @@ def build_custom_graph(
         console.print(f"  Iterations: {iterations}")
     
     return graph_path
-from rich.console import Console
 console = Console()

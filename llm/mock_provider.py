@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional, Type, TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -14,7 +14,7 @@ T = TypeVar('T', bound=BaseModel)
 class MockProvider(BaseLLMProvider):
     """Mock LLM provider for testing purposes."""
     
-    def __init__(self, config: Dict[str, Any], model_name: str, **kwargs):
+    def __init__(self, config: dict[str, Any], model_name: str, **kwargs):
         """Initialize mock provider."""
         self.config = config
         self.model_name = model_name
@@ -31,7 +31,7 @@ class MockProvider(BaseLLMProvider):
         self.responses = responses
         self.response_index = 0
         
-    def parse(self, *, system: str, user: str, schema: Type[T]) -> T:
+    def parse(self, *, system: str, user: str, schema: type[T]) -> T:
         """Return structured response based on mock configuration."""
         self.call_count += 1
         
@@ -60,7 +60,7 @@ class MockProvider(BaseLLMProvider):
                 try:
                     data = json.loads(response) if isinstance(response, str) else response
                     return schema(**data)
-                except:
+                except Exception:
                     # Return a minimal valid instance
                     return self._create_minimal_instance(schema)
         
@@ -116,11 +116,11 @@ class MockProvider(BaseLLMProvider):
         """Mock provider doesn't support thinking mode."""
         return False
     
-    def get_last_token_usage(self) -> Optional[Dict[str, int]]:
+    def get_last_token_usage(self) -> dict[str, int] | None:
         """Return mock token usage."""
         return self._last_token_usage
     
-    def _create_minimal_instance(self, schema: Type[T]) -> T:
+    def _create_minimal_instance(self, schema: type[T]) -> T:
         """Create a minimal valid instance of the schema."""
         # This is a simplified version - in real tests you'd want more control
         fields = {}
@@ -143,10 +143,10 @@ class MockProvider(BaseLLMProvider):
         # Try to create instance with minimal fields
         try:
             return schema(**fields)
-        except:
+        except Exception:
             # If that fails, try with empty dict
             try:
                 return schema()
-            except:
+            except Exception:
                 # Last resort - raise error
                 raise ValueError(f"Cannot create mock instance of {schema}")

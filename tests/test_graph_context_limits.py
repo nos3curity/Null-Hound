@@ -2,13 +2,13 @@
 Test that GraphBuilder properly uses model-specific context limits.
 """
 
-import unittest
 import json
-import tempfile
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-import sys
 import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -165,7 +165,7 @@ class TestGraphContextLimits(unittest.TestCase):
         
         captured_output = io.StringIO()
         with redirect_stdout(captured_output):
-            sampled = builder._sample_cards(small_cards)
+            builder._sample_cards(small_cards)
         
         output = captured_output.getvalue()
         

@@ -5,10 +5,10 @@ import json
 import os
 import random
 import time
-from typing import Any, Dict, Optional, Type, TypeVar
+from typing import Any, TypeVar
 
 import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
+from google.generativeai.types import HarmBlockThreshold, HarmCategory
 from pydantic import BaseModel
 
 from .base_provider import BaseLLMProvider
@@ -22,7 +22,7 @@ class GeminiProvider(BaseLLMProvider):
     
     def __init__(
         self, 
-        config: Dict[str, Any], 
+        config: dict[str, Any], 
         model_name: str,
         timeout: int = 120,
         retries: int = 3,
@@ -86,7 +86,7 @@ class GeminiProvider(BaseLLMProvider):
         try:
             if hasattr(HarmCategory, 'HARM_CATEGORY_CIVIC_INTEGRITY'):
                 safety_settings[HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY] = HarmBlockThreshold.BLOCK_NONE
-        except:
+        except Exception:
             pass
         
         self.model = genai.GenerativeModel(
@@ -95,7 +95,7 @@ class GeminiProvider(BaseLLMProvider):
             safety_settings=safety_settings
         )
     
-    def parse(self, *, system: str, user: str, schema: Type[T]) -> T:
+    def parse(self, *, system: str, user: str, schema: type[T]) -> T:
         """Make a structured call using Gemini's response_schema."""
         # Get schema definition from centralized source
         schema_info = get_schema_definition(schema)
@@ -104,7 +104,7 @@ class GeminiProvider(BaseLLMProvider):
         prompt = f"{system}{schema_info}\n\n{user}"
         
         # Calculate request size for potential debugging
-        request_chars = len(prompt)
+        len(prompt)
         
         last_err = None
         
@@ -140,7 +140,7 @@ class GeminiProvider(BaseLLMProvider):
                 )
                 
                 # Log response details
-                response_time = time.time() - attempt_start
+                time.time() - attempt_start
                 
                 # Track token usage if available
                 if hasattr(response, 'usage_metadata'):
@@ -245,6 +245,6 @@ class GeminiProvider(BaseLLMProvider):
         """Gemini 2.5 models support thinking mode."""
         return "2.5" in self.model_name
     
-    def get_last_token_usage(self) -> Optional[Dict[str, int]]:
+    def get_last_token_usage(self) -> dict[str, int] | None:
         """Return token usage from the last call if available."""
         return self._last_token_usage

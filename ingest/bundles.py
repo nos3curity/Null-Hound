@@ -1,29 +1,27 @@
 """Adaptive bundling system for grouping related code cards."""
 
-import os
 import json
-from dataclasses import dataclass, asdict
+import os
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
 
 # Disable joblib parallelization to avoid multiprocessing warnings
 os.environ['JOBLIB_MULTIPROCESSING'] = '0'
 
 import networkx as nx
 from sklearn.cluster import SpectralClustering
-import numpy as np
 
 
 @dataclass
 class Bundle:
     """A bundle of related cards."""
     id: str
-    card_ids: List[str]
-    file_paths: List[str]
+    card_ids: list[str]
+    file_paths: list[str]
     total_chars: int
     preview: str  # Brief description of bundle contents
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert to dictionary."""
         return asdict(self)
 
@@ -31,7 +29,7 @@ class Bundle:
 class AdaptiveBundler:
     """Groups cards into bundles based on similarity and size constraints."""
     
-    def __init__(self, cards: List, files: List, config: Dict):
+    def __init__(self, cards: list, files: list, config: dict):
         """Initialize bundler with cards and configuration."""
         self.cards = {c.id: c for c in cards}
         self.files = files
@@ -98,7 +96,7 @@ class AdaptiveBundler:
         
         return min(score, 1.0)
     
-    def create_bundles(self) -> List[Bundle]:
+    def create_bundles(self) -> list[Bundle]:
         """Create bundles using graph clustering."""
         if not self.cards:
             return []
@@ -117,7 +115,7 @@ class AdaptiveBundler:
         
         return bundles
     
-    def _cluster_cards(self) -> List[Bundle]:
+    def _cluster_cards(self) -> list[Bundle]:
         """Cluster cards using spectral clustering."""
         # Convert graph to adjacency matrix
         node_list = list(self.graph.nodes())
@@ -151,7 +149,7 @@ class AdaptiveBundler:
             return self._fallback_clustering()
         
         # Group cards by cluster label
-        clusters: Dict[int, List[str]] = {}
+        clusters: dict[int, list[str]] = {}
         for card_id, label in zip(node_list, labels):
             if label not in clusters:
                 clusters[label] = []
@@ -166,7 +164,7 @@ class AdaptiveBundler:
         
         return bundles
     
-    def _fallback_clustering(self) -> List[Bundle]:
+    def _fallback_clustering(self) -> list[Bundle]:
         """Fallback clustering by grouping cards from same files."""
         bundles = []
         current_bundle_cards = []
@@ -201,7 +199,7 @@ class AdaptiveBundler:
         
         return bundles
     
-    def _optimize_bundle_sizes(self, bundles: List[Bundle]) -> List[Bundle]:
+    def _optimize_bundle_sizes(self, bundles: list[Bundle]) -> list[Bundle]:
         """Optimize bundle sizes to meet constraints."""
         optimized = []
         
@@ -219,7 +217,7 @@ class AdaptiveBundler:
         
         return optimized
     
-    def _split_bundle(self, bundle: Bundle) -> List[Bundle]:
+    def _split_bundle(self, bundle: Bundle) -> list[Bundle]:
         """Split a large bundle into smaller ones."""
         card_ids = bundle.card_ids
         num_splits = int(bundle.total_chars / self.target_chars) + 1
@@ -238,7 +236,7 @@ class AdaptiveBundler:
         
         return splits
     
-    def _create_bundle(self, bundle_id: str, card_ids: List[str]) -> Optional[Bundle]:
+    def _create_bundle(self, bundle_id: str, card_ids: list[str]) -> Bundle | None:
         """Create a bundle from card IDs."""
         valid_cards = [cid for cid in card_ids if cid in self.cards]
         if not valid_cards:
@@ -264,11 +262,11 @@ class AdaptiveBundler:
             preview=preview
         )
     
-    def _create_single_bundle(self, card_ids: List[str]) -> Bundle:
+    def _create_single_bundle(self, card_ids: list[str]) -> Bundle:
         """Create a single bundle containing all cards."""
         return self._create_bundle("bundle_000", card_ids)
     
-    def _generate_preview(self, card_ids: List[str], file_paths: List[str]) -> str:
+    def _generate_preview(self, card_ids: list[str], file_paths: list[str]) -> str:
         """Generate a preview description of bundle contents."""
         # Simple preview: list main files
         if len(file_paths) == 1:
@@ -279,7 +277,7 @@ class AdaptiveBundler:
             # Show first 2 and count
             return f"Files: {file_paths[0]}, {file_paths[1]} (+{len(file_paths)-2} more)"
     
-    def save_bundles(self, output_dir: Path) -> Dict:
+    def save_bundles(self, output_dir: Path) -> dict:
         """Save bundles to JSON."""
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)

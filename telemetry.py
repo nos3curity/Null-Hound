@@ -8,7 +8,6 @@ import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Optional
 
 
 class _EventBus:
@@ -92,7 +91,7 @@ class _Handler(BaseHTTPRequestHandler):
                 self.send_error(HTTPStatus.UNAUTHORIZED)
                 return
             try:
-                from urllib.parse import urlparse, parse_qs
+                from urllib.parse import parse_qs, urlparse
                 q = parse_qs(urlparse(self.path).query)
                 try:
                     limit = int(q.get("limit", ["40"])[0])
@@ -165,7 +164,7 @@ class _Handler(BaseHTTPRequestHandler):
     def _auth_ok(self, tok: str) -> bool:
         # Accept token via query (?token=...) or header Authorization: Bearer <token>
         try:
-            from urllib.parse import urlparse, parse_qs
+            from urllib.parse import parse_qs, urlparse
             q = parse_qs(urlparse(self.path).query)
             if q.get("token", [None])[0] == tok:
                 return True
@@ -177,7 +176,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 class TelemetryServer:
-    def __init__(self, project_id: str, project_dir: Path, registry_dir: Optional[Path] = None):
+    def __init__(self, project_id: str, project_dir: Path, registry_dir: Path | None = None):
         self.project_id = project_id
         self.project_dir = Path(project_dir)
         # Respect HOUND_REGISTRY_DIR env var for consistency with the chatbot
@@ -188,12 +187,12 @@ class TelemetryServer:
         default_dir = Path(os.path.expanduser("~/.local/state/hound/instances"))
         self.registry_dir = Path(registry_dir) if registry_dir else (Path(env_dir) if env_dir else default_dir)
         self.bus = _EventBus()
-        self.httpd: Optional[ThreadingHTTPServer] = None
-        self.thread: Optional[threading.Thread] = None
+        self.httpd: ThreadingHTTPServer | None = None
+        self.thread: threading.Thread | None = None
         self.token = os.urandom(12).hex()
         self.started_at = time.time()
-        self.registry_file: Optional[Path] = None
-        self.session_id: Optional[str] = None
+        self.registry_file: Path | None = None
+        self.session_id: str | None = None
 
     def start(self):
         # Bind to localhost only

@@ -4,9 +4,9 @@ This module provides a Finalizer that focuses on filtering hypotheses and
 checking potential false positives via LLM, without positioning it as an agent.
 """
 
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 
 from .agent_core import AutonomousAgent
 from .concurrent_knowledge import HypothesisStore
@@ -20,7 +20,7 @@ class Finalizer(AutonomousAgent):
 
     def __init__(self, graphs_metadata_path: Path, manifest_path: Path,
                  hypothesis_path: Path, agent_id: str,
-                 config: Optional[Dict] = None, debug: bool = False):
+                 config: dict | None = None, debug: bool = False):
         """Initialize finalizer."""
 
         # Call parent init (but we'll override the model profile)
@@ -47,9 +47,9 @@ class Finalizer(AutonomousAgent):
         self.candidates_to_review = []
         self.review_results = []
 
-    def finalize(self, candidates: List[Tuple[str, Dict]],
+    def finalize(self, candidates: list[tuple[str, dict]],
                  max_iterations: int = 10,
-                 progress_callback: Optional[callable] = None) -> Dict:
+                 progress_callback: Callable[[dict], None] | None = None) -> dict:
         """
         Main finalization method - review and confirm/reject hypotheses.
 
@@ -88,7 +88,7 @@ class Finalizer(AutonomousAgent):
 
             # Get source files from hypothesis properties
             source_files = hypothesis.get('properties', {}).get('source_files', [])
-            affected_functions = hypothesis.get('properties', {}).get('affected_functions', [])
+            hypothesis.get('properties', {}).get('affected_functions', [])
 
             # Load source code directly if available
             source_code = {}
@@ -97,7 +97,7 @@ class Finalizer(AutonomousAgent):
                     try:
                         full_path = self._repo_root / file_path
                         if full_path.exists():
-                            with open(full_path, 'r') as f:
+                            with open(full_path) as f:
                                 source_code[file_path] = f.read()
                     except Exception as e:
                         print(f"[!] Failed to load {file_path}: {e}")
@@ -183,7 +183,7 @@ class Finalizer(AutonomousAgent):
         # Generate report
         return self._generate_finalization_report(confirmed, rejected, uncertain)
 
-    def _build_review_context(self, hyp_id: str, hypothesis: Dict, source_code: Dict[str, str]) -> str:
+    def _build_review_context(self, hyp_id: str, hypothesis: dict, source_code: dict[str, str]) -> str:
         """Build context for reviewing a specific hypothesis."""
         context_parts = []
 
@@ -223,43 +223,9 @@ class Finalizer(AutonomousAgent):
 
         return "\n".join(context_parts)
 
-    def _get_determination(self, context: str) -> Dict:
+    def _get_determination(self, context: str) -> dict:
         """Get model's determination on the hypothesis."""
 
-        prompt = f"""You are a security expert performing final review of a vulnerability hypothesis.
-
-{context}
-
-=== YOUR TASK ===
-Review the SOURCE CODE provided to determine if this hypothesis represents a REAL vulnerability.
-
-Focus on:
-1. Does the SOURCE CODE show the vulnerability exists?
-2. Is there a clear attack vector in the code?
-3. Are there checks/guards that prevent exploitation?
-4. Is this a false positive based on the actual implementation?
-
-Examine the specific functions mentioned and trace the data flow.
-
-Provide your determination in this EXACT JSON format:
-{{
-    "verdict": "confirmed|rejected|uncertain",
-    "reasoning": "A detailed one-paragraph explanation (100-200 words) suitable for inclusion in a professional security report. Start with 'Upon reviewing...' or 'After analyzing...' and explain what you examined, what you found, and why you reached your conclusion. Be specific about the code elements you reviewed.",
-    "confidence": 0.0-1.0
-}}
-
-Rules:
-- "confirmed" = Vulnerability clearly exists in the code with exploitable path
-  Example reasoning: "After analyzing the TokenManager contract's transfer function at line 142, I confirmed this reentrancy vulnerability is exploitable. The function updates state variables after making external calls to untrusted contracts, allowing attackers to recursively call back into the function before the initial execution completes. The lack of reentrancy guards and the specific ordering of operations creates a clear attack vector that could drain funds from the contract."
-
-- "rejected" = Code analysis shows this is a false positive or mitigated  
-  Example reasoning: "Upon reviewing the alleged integer overflow in the calculateRewards function, I determined this is a false positive. The function properly uses SafeMath operations throughout, and all arithmetic operations are protected against overflow. Additionally, the input validation at line 87 ensures that values cannot exceed safe bounds. The initial hypothesis appears to have misidentified standard safe arithmetic patterns as vulnerable code."
-
-- "uncertain" = Need human analysis to be sure
-  Example reasoning: "After examining the access control implementation, I cannot definitively confirm or reject this authorization bypass vulnerability. While the code does implement role-based checks, the interaction between multiple proxy contracts and delegatecall patterns creates complex control flows that require deeper analysis. The specific initialization sequence and upgrade mechanisms would need manual review to determine if the theoretical attack vector is actually exploitable in practice."
-
-Be conservative - only confirm if there is clearly an exploitable vulnerability.
-"""
 
         try:
             # Get reasoning effort from config if available
@@ -289,7 +255,7 @@ Be conservative - only confirm if there is clearly an exploitable vulnerability.
             "confidence": 0.5
         }
 
-    def _generate_finalization_report(self, confirmed: int, rejected: int, uncertain: int) -> Dict:
+    def _generate_finalization_report(self, confirmed: int, rejected: int, uncertain: int) -> dict:
         """Generate final report."""
 
         confirmed_vulns = [r for r in self.review_results if r.get('verdict') == 'confirmed']

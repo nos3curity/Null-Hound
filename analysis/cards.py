@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, Any, List, Tuple
+from typing import Any
 
 
-def load_card_index(graphs_metadata_path: Path, manifest_path: Path) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, List[str]]]:
+def load_card_index(graphs_metadata_path: Path, manifest_path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, list[str]]]:
     """Load a card index and file→card mapping.
 
     Returns (card_index, file_to_cards).
     """
-    card_index: Dict[str, Dict[str, Any]] = {}
-    file_to_cards: Dict[str, List[str]] = {}
+    card_index: dict[str, dict[str, Any]] = {}
+    file_to_cards: dict[str, list[str]] = {}
 
     # Prefer graph card store if available
     try:
@@ -63,7 +63,7 @@ def load_card_index(graphs_metadata_path: Path, manifest_path: Path) -> Tuple[Di
     return card_index, file_to_cards
 
 
-def extract_card_content(card: Dict[str, Any], repo_root: Path | None) -> str:
+def extract_card_content(card: dict[str, Any], repo_root: Path | None) -> str:
     """Get best-available content from a card record."""
     content = card.get('content')
     if content:

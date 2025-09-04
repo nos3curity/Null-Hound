@@ -2,19 +2,18 @@
 Unit tests for GraphStore and related graph loading functionality.
 """
 
-import unittest
 import json
-import tempfile
-import shutil
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-import sys
 import os
+import shutil
+import sys
+import tempfile
+import unittest
+from pathlib import Path
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from analysis.concurrent_knowledge import GraphStore, HypothesisStore, ConcurrentFileStore
+from analysis.concurrent_knowledge import ConcurrentFileStore, GraphStore, HypothesisStore
 
 
 class TestConcurrentFileStore(unittest.TestCase):
@@ -269,7 +268,7 @@ class TestHypothesisStore(unittest.TestCase):
     
     def test_add_evidence(self):
         """Test adding evidence to a hypothesis."""
-        from analysis.concurrent_knowledge import Hypothesis, Evidence
+        from analysis.concurrent_knowledge import Evidence, Hypothesis
         
         # Create hypothesis
         hyp = Hypothesis(
@@ -383,6 +382,7 @@ class TestHypothesisStore(unittest.TestCase):
     def test_concurrent_hypothesis_operations(self):
         """Test that concurrent hypothesis operations are handled safely."""
         import threading
+
         from analysis.concurrent_knowledge import Hypothesis
         
         results = []
@@ -431,7 +431,7 @@ class TestHypothesisStore(unittest.TestCase):
     
     def test_hypothesis_status_transitions(self):
         """Test hypothesis status transitions through evidence."""
-        from analysis.concurrent_knowledge import Hypothesis, Evidence
+        from analysis.concurrent_knowledge import Evidence, Hypothesis
         
         hyp = Hypothesis(
             title="Status Test",

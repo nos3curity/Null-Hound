@@ -1,26 +1,26 @@
 """Session tracker with coverage tracking for audit sessions."""
 
 import json
-from pathlib import Path
-from datetime import datetime
-from typing import Dict, List, Set, Optional, Any
-from dataclasses import dataclass, field, asdict
 import threading
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 
 @dataclass
 class SessionCoverage:
     """Track coverage statistics for a session."""
-    visited_nodes: Set[str] = field(default_factory=set)
-    visited_cards: Set[str] = field(default_factory=set)
+    visited_nodes: set[str] = field(default_factory=set)
+    visited_cards: set[str] = field(default_factory=set)
     total_nodes: int = 0
     total_cards: int = 0
     # Per-node/card visit counts
-    node_visit_counts: Dict[str, int] = field(default_factory=dict)
-    card_visit_counts: Dict[str, int] = field(default_factory=dict)
+    node_visit_counts: dict[str, int] = field(default_factory=dict)
+    card_visit_counts: dict[str, int] = field(default_factory=dict)
     # Known IDs to bound coverage
-    known_node_ids: Set[str] = field(default_factory=set)
-    known_card_ids: Set[str] = field(default_factory=set)
+    known_node_ids: set[str] = field(default_factory=set)
+    known_card_ids: set[str] = field(default_factory=set)
     
     def add_node(self, node_id: str):
         """Mark a node as visited."""
@@ -32,7 +32,7 @@ class SessionCoverage:
         self.visited_cards.add(card_id)
         self.card_visit_counts[card_id] = int(self.card_visit_counts.get(card_id, 0)) + 1
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get coverage statistics bounded to known IDs to avoid >100%."""
         # Default totals
         nodes_total = len(self.known_node_ids) if self.known_node_ids else self.total_nodes
@@ -88,13 +88,13 @@ class SessionTracker:
             self.coverage.total_nodes = cov_data.get('nodes', {}).get('total', 0)
             self.coverage.total_cards = cov_data.get('cards', {}).get('total', 0)
     
-    def _load_or_init(self) -> Dict[str, Any]:
+    def _load_or_init(self) -> dict[str, Any]:
         """Load existing session or initialize new one."""
         self.session_dir.mkdir(parents=True, exist_ok=True)
         
         if self.session_file.exists():
             try:
-                with open(self.session_file, 'r') as f:
+                with open(self.session_file) as f:
                     return json.load(f)
             except Exception:
                 pass
@@ -131,7 +131,7 @@ class SessionTracker:
         if graphs_dir.exists():
             for graph_file in graphs_dir.glob("graph_*.json"):
                 try:
-                    with open(graph_file, 'r') as f:
+                    with open(graph_file) as f:
                         graph_data = json.load(f)
                         nodes = graph_data.get('nodes', [])
                         total_nodes += len(nodes)
@@ -147,7 +147,7 @@ class SessionTracker:
         manifest_file = manifest_dir / "manifest.json" if manifest_dir.exists() else None
         if manifest_file and manifest_file.exists():
             try:
-                with open(manifest_file, 'r') as f:
+                with open(manifest_file) as f:
                     manifest_data = json.load(f)
                     # Try both formats - num_cards or files array
                     if 'num_cards' in manifest_data:
@@ -159,10 +159,10 @@ class SessionTracker:
         
         # Build known card IDs and file->cards mapping for accurate tracking
         try:
-            self._file_to_cards: Dict[str, List[str]] = {}
+            self._file_to_cards: dict[str, list[str]] = {}
             cards_jsonl = manifest_dir / 'cards.jsonl'
             if cards_jsonl.exists():
-                with open(cards_jsonl, 'r') as f:
+                with open(cards_jsonl) as f:
                     for line in f:
                         try:
                             card = json.loads(line)
@@ -176,7 +176,7 @@ class SessionTracker:
                             continue
             files_json = manifest_dir / 'files.json'
             if files_json.exists():
-                with open(files_json, 'r') as f:
+                with open(files_json) as f:
                     files_list = json.load(f)
                 if isinstance(files_list, list):
                     for fi in files_list:
@@ -203,7 +203,7 @@ class SessionTracker:
         """Track that a code card was analyzed."""
         with self.lock:
             # Try to map file path to card IDs for accurate card coverage
-            ids: List[str] = []
+            ids: list[str] = []
             try:
                 # Normalize path to relpath if possible
                 rel = card_path
@@ -225,21 +225,21 @@ class SessionTracker:
                 self.coverage.add_card(card_path)
             self._save()
     
-    def track_nodes_batch(self, node_ids: List[str]):
+    def track_nodes_batch(self, node_ids: list[str]):
         """Track multiple nodes visited at once."""
         with self.lock:
             for node_id in node_ids:
                 self.coverage.add_node(node_id)
             self._save()
     
-    def track_cards_batch(self, card_paths: List[str]):
+    def track_cards_batch(self, card_paths: list[str]):
         """Track multiple cards analyzed at once."""
         with self.lock:
             for card_path in card_paths:
                 self.coverage.add_card(card_path)
             self._save()
     
-    def add_investigation(self, investigation: Dict[str, Any]):
+    def add_investigation(self, investigation: dict[str, Any]):
         """Add an investigation to the session history."""
         with self.lock:
             self.session_data['investigations'].append({
@@ -248,7 +248,7 @@ class SessionTracker:
             })
             self._save()
     
-    def add_planning(self, plan_items: List[Dict[str, Any]]):
+    def add_planning(self, plan_items: list[dict[str, Any]]):
         """Add a planning batch to the history."""
         with self.lock:
             self.session_data['planning_history'].append({
@@ -257,7 +257,7 @@ class SessionTracker:
             })
             self._save()
     
-    def update_token_usage(self, tokens: Dict[str, Any]):
+    def update_token_usage(self, tokens: dict[str, Any]):
         """Update token usage statistics."""
         with self.lock:
             # The token tracker passes a complex structure with total_usage, by_model, and history
@@ -265,7 +265,7 @@ class SessionTracker:
             self.session_data['token_usage'] = tokens
             self._save()
     
-    def get_coverage_stats(self) -> Dict[str, Any]:
+    def get_coverage_stats(self) -> dict[str, Any]:
         """Get current coverage statistics."""
         return self.coverage.get_stats()
     

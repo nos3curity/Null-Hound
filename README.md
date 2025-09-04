@@ -197,6 +197,60 @@ The quality and duration depend heavily on the models used. Faster models provid
 
 **What happens during an audit:**
 
+
+## Chatbot (Telemetry UI)
+
+Hound ships with a lightweight web UI for steering and monitoring a running audit session. It discovers local runs via a simple telemetry registry and streams status/decisions live.
+
+Prerequisites:
+- Set API keys (at least `OPENAI_API_KEY`): `source ../API_KEYS.txt` or export manually
+- Install Python deps in this submodule: `pip install -r requirements.txt`
+
+1) Start the agent with telemetry enabled
+
+```bash
+# From the hound/ directory
+./hound.py agent audit myaudit --telemetry --debug
+
+# Notes
+# - The --telemetry flag exposes a local SSE/control endpoint and registers the run
+# - Optional: ensure the registry dir matches the chatbot by setting:
+#   export HOUND_REGISTRY_DIR="$HOME/.local/state/hound/instances"
+```
+
+2) Launch the chatbot server
+
+```bash
+# From the hound/ directory
+python chatbot/run.py
+
+# Optional: customize host/port
+HOST=0.0.0.0 PORT=5280 python chatbot/run.py
+```
+
+Open the UI: http://127.0.0.1:5280
+
+3) Select the running instance and stream activity
+
+- The input next to “Start” lists detected instances as `project_path | instance_id`.
+- Click “Start” to attach; the UI auto‑connects the realtime channel and begins streaming decisions/results.
+- The lower panel has tabs:
+  - Activity: live status/decisions
+  - Plan: current strategist plan (✓ done, ▶ active, • pending)
+  - Findings: hypotheses with confidence; you can Confirm/Reject manually
+
+4) Steer the audit
+
+- Use the “Steer” form (e.g., “Investigate reentrancy across the whole app next”).
+- Steering is queued at `<project>/.hound/steering.jsonl` and consumed exactly once when applied.
+- Broad, global instructions may preempt the current investigation and trigger immediate replanning.
+
+Troubleshooting
+- No instances in dropdown: ensure you started the agent with `--telemetry`.
+- Wrong or stale project shown: clear the input; the UI defaults to the most recent alive instance.
+- Registry mismatch: confirm both processes print the same `Using registry dir:` or set `HOUND_REGISTRY_DIR` for both.
+- Raw API: open `/api/instances` in the browser to inspect entries (includes `alive` flag and registry path).
+
 The audit is a **dynamic, iterative process** with continuous interaction between Strategist and Scout:
 
 1. **Initial Planning** (Strategist)

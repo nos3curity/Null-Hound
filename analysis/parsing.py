@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict
+from typing import Any
 
 
-def parse_agent_decision_fallback(response: str) -> Dict[str, Any] | None:
+def parse_agent_decision_fallback(response: str) -> dict[str, Any] | None:
     """Attempt to salvage a JSON object from a free-form LLM response.
 
     Returns a dict or None.

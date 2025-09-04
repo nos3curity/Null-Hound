@@ -6,18 +6,18 @@ avoid redundant work while enabling revisits when new evidence appears.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Any
 
 from .concurrent_knowledge import ConcurrentFileStore
 
 
 @dataclass
 class InvestigationRecord:
-    frame_id: Optional[str]
-    node_ids: List[str]
+    frame_id: str | None
+    node_ids: list[str]
     status: str  # planned|in_progress|done|dropped|superseded
     timestamp: str = datetime.now().isoformat()
 
@@ -25,7 +25,7 @@ class InvestigationRecord:
 class CoverageIndex(ConcurrentFileStore):
     """Per-project coverage index with atomic updates."""
 
-    def _get_empty_data(self) -> Dict:
+    def _get_empty_data(self) -> dict:
         return {
             "nodes": {},  # node_id -> {last_seen, seen_count, evidence_count}
             "cards": {},  # card_id -> {last_seen, seen_count}
@@ -68,7 +68,7 @@ class CoverageIndex(ConcurrentFileStore):
             return data, True
         self.update_atomic(update)
 
-    def record_investigation(self, frame_id: Optional[str], node_ids: List[str], status: str) -> None:
+    def record_investigation(self, frame_id: str | None, node_ids: list[str], status: str) -> None:
         def update(data):
             inv = asdict(InvestigationRecord(frame_id=frame_id, node_ids=node_ids, status=status))
             data.setdefault("investigations", []).append(inv)
@@ -95,7 +95,7 @@ class CoverageIndex(ConcurrentFileStore):
         finally:
             self._release_lock(lock)
 
-    def compute_stats(self, graphs_dir: Path, manifest_dir: Path) -> Dict[str, Any]:
+    def compute_stats(self, graphs_dir: Path, manifest_dir: Path) -> dict[str, Any]:
         """Compute total and visited counts for nodes and cards with percentages."""
         lock = self._acquire_lock()
         try:

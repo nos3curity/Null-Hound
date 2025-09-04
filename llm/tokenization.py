@@ -1,8 +1,7 @@
+import os as _os
 from functools import lru_cache
-from typing import Dict, Optional
 
 from rich.console import Console
-import os as _os
 
 console = Console()
 _VERBOSE = _os.environ.get("HOUND_LLM_VERBOSE", "").lower() in {"1","true","yes","on"}
@@ -18,7 +17,7 @@ class TokenCounter:
         self._anthropic = None
 
         # Cache for tiktoken encoders
-        self._encoder_cache: Dict[str, any] = {}
+        self._encoder_cache: dict[str, any] = {}
 
         # Try to load tokenizer libraries
         self._tiktoken_available = self._try_import_tiktoken()
@@ -152,7 +151,7 @@ class TokenCounter:
             console.print(f"Token counting failed for {provider}:{model}: {e}")
             return max(1, len(text) // 4)
 
-    def get_diagnostics(self) -> Dict[str, any]:
+    def get_diagnostics(self) -> dict[str, any]:
         """Get tokenization system diagnostics."""
         return {
             "tiktoken_available": self._tiktoken_available,
@@ -169,7 +168,7 @@ class TokenCounter:
 
 
 # Global instance
-_token_counter: Optional[TokenCounter] = None
+_token_counter: TokenCounter | None = None
 
 
 def get_token_counter() -> TokenCounter:
@@ -185,6 +184,6 @@ def count_tokens(text: str, provider: str, model: str) -> int:
     return get_token_counter().count_tokens(text, provider, model)
 
 
-def get_diagnostics() -> Dict[str, any]:
+def get_diagnostics() -> dict[str, any]:
     """Get tokenization diagnostics."""
     return get_token_counter().get_diagnostics()

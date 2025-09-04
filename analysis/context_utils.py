@@ -6,18 +6,16 @@ keep agent classes lean and avoid large files.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 
-def format_graph_for_display(graph_data: Dict[str, Any], graph_name: str, max_edges: int = 50) -> List[str]:
+def format_graph_for_display(graph_data: dict[str, Any], graph_name: str, max_edges: int = 50) -> list[str]:
     """Format a graph for compact display with observations/assumptions.
 
     Mirrors the display used by the junior agent so Strategist and Scout share
     a consistent view.
     """
-    lines: List[str] = []
+    lines: list[str] = []
     lines.append(f"\n--- Graph: {graph_name} ---")
 
     nodes = graph_data.get('nodes', [])
@@ -48,7 +46,7 @@ def format_graph_for_display(graph_data: Dict[str, Any], graph_name: str, max_ed
 
             observations = node.get('observations', [])
             assumptions = node.get('assumptions', [])
-            annots: List[str] = []
+            annots: list[str] = []
 
             if observations:
                 # take up to 2
@@ -78,7 +76,7 @@ def format_graph_for_display(graph_data: Dict[str, Any], graph_name: str, max_ed
 
     if edges:
         lines.append("\nEDGE TYPES:")
-        edge_types: Dict[str, int] = {}
+        edge_types: dict[str, int] = {}
         for edge in edges:
             t = edge.get('type', 'unknown')
             edge_types[t] = edge_types.get(t, 0) + 1
@@ -94,7 +92,7 @@ def format_graph_for_display(graph_data: Dict[str, Any], graph_name: str, max_ed
 
             edge_obs = edge.get('observations', [])
             edge_assum = edge.get('assumptions', [])
-            edge_annots: List[str] = []
+            edge_annots: list[str] = []
             if edge_obs:
                 edge_annots.append(f"obs:{'; '.join(str(o) for o in edge_obs[:2])}")
             if edge_assum:
@@ -109,7 +107,7 @@ def format_graph_for_display(graph_data: Dict[str, Any], graph_name: str, max_ed
     return lines
 
 
-def hypotheses_summary(hypothesis_data: Dict[str, Any], limit: int = 10) -> str:
+def hypotheses_summary(hypothesis_data: dict[str, Any], limit: int = 10) -> str:
     """Return a compact textual summary of top hypotheses for prompts."""
     hyps = hypothesis_data.get("hypotheses", {})
     if not hyps:
@@ -126,10 +124,10 @@ def hypotheses_summary(hypothesis_data: Dict[str, Any], limit: int = 10) -> str:
 
 def build_investigation_context(
     investigation_goal: str,
-    available_graphs: Dict[str, Any],
-    loaded_data: Dict[str, Any],
-    memory_notes: Optional[List[str]] = None,
-    action_log: Optional[List[Dict[str, Any]]] = None,
+    available_graphs: dict[str, Any],
+    loaded_data: dict[str, Any],
+    memory_notes: list[str] | None = None,
+    action_log: list[dict[str, Any]] | None = None,
 ) -> str:
     """Build a consistent context string for LLM prompts from core fields.
 
@@ -138,7 +136,7 @@ def build_investigation_context(
     memory_notes = memory_notes or []
     action_log = action_log or []
 
-    parts: List[str] = []
+    parts: list[str] = []
     parts.append("=== INVESTIGATION GOAL ===")
     parts.append(investigation_goal)
     parts.append("")

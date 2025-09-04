@@ -2,12 +2,12 @@
 Tests for ReportGenerator to ensure it builds reports and calls LLM.
 """
 
-import unittest
-import tempfile
-import shutil
-from pathlib import Path
 import json
-from unittest.mock import patch, MagicMock
+import shutil
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from analysis.report_generator import ReportGenerator
 

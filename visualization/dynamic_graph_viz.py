@@ -2,12 +2,11 @@
 
 import json
 from pathlib import Path
-from typing import Dict, List, Any, Optional
 
 
 def generate_dynamic_visualization(
     graphs_dir: Path,
-    output_path: Optional[Path] = None,
+    output_path: Path | None = None,
     include_card_viewer: bool = True
 ) -> Path:
     """

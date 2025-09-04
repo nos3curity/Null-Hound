@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 # Re-export the unified client as LLMClient for backward compatibility
-from .unified_client import UnifiedLLMClient as LLMClient, T
+from .unified_client import T, UnifiedLLMClient as LLMClient
+
 
 # Also export the error class for backward compatibility
 class StructuredCallError(RuntimeError):

@@ -5,11 +5,12 @@ Atomic, file-locked storage of plan items, similar to HypothesisStore.
 
 from __future__ import annotations
 
+import builtins
 import hashlib
-from dataclasses import dataclass, asdict, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Any
 
 from .concurrent_knowledge import ConcurrentFileStore
 
@@ -22,7 +23,7 @@ class PlanStatus(str, Enum):
     SUPERSEDED = "superseded"
 
 
-def _make_frame_id(session_id: str, question: str, artifact_refs: List[str]) -> str:
+def _make_frame_id(session_id: str, question: str, artifact_refs: list[str]) -> str:
     key = f"{session_id}:{question}:{','.join(sorted(artifact_refs or []))}"
     return f"frame_{hashlib.md5(key.encode()).hexdigest()[:12]}"
 
@@ -32,30 +33,30 @@ class PlanItem:
     frame_id: str
     session_id: str
     question: str
-    artifact_refs: List[str] = field(default_factory=list)
+    artifact_refs: list[str] = field(default_factory=list)
     priority: int = 5
     status: str = PlanStatus.PLANNED.value
     rationale: str = ""
-    created_by: Optional[str] = None
-    assigned_to: Optional[str] = None
-    investigation_id: Optional[str] = None
+    created_by: str | None = None
+    assigned_to: str | None = None
+    investigation_id: str | None = None
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
-    history: List[Dict[str, Any]] = field(default_factory=list)
+    history: list[dict[str, Any]] = field(default_factory=list)
 
 
 class PlanStore(ConcurrentFileStore):
     """Manage plan frames with concurrent-safe operations."""
 
-    def _get_empty_data(self) -> Dict:
+    def _get_empty_data(self) -> dict:
         return {
             "version": "1.0",
             "items": {},
             "metadata": {"total": 0, "last_modified": datetime.now().isoformat()},
         }
 
-    def propose(self, session_id: str, question: str, artifact_refs: Optional[List[str]] = None,
-                priority: int = 5, rationale: str = "", created_by: Optional[str] = None) -> Tuple[bool, str]:
+    def propose(self, session_id: str, question: str, artifact_refs: builtins.list[str] | None = None,
+                priority: int = 5, rationale: str = "", created_by: str | None = None) -> tuple[bool, str]:
         """Add a new plan item with duplicate detection within a session."""
         artifact_refs = artifact_refs or []
         frame_id = _make_frame_id(session_id, question, artifact_refs)
@@ -88,7 +89,7 @@ class PlanStore(ConcurrentFileStore):
         return self.update_atomic(update)
 
     def update_status(self, frame_id: str, new_status: PlanStatus, rationale: str = "",
-                      investigation_id: Optional[str] = None) -> bool:
+                      investigation_id: str | None = None) -> bool:
         def update(data):
             items = data["items"]
             if frame_id not in items:
@@ -112,7 +113,7 @@ class PlanStore(ConcurrentFileStore):
 
         return self.update_atomic(update)
 
-    def list(self, session_id: Optional[str] = None, status: Optional[PlanStatus] = None) -> List[Dict[str, Any]]:
+    def list(self, session_id: str | None = None, status: PlanStatus | None = None) -> builtins.list[dict[str, Any]]:
         lock = self._acquire_lock()
         try:
             data = self._load_data()
@@ -128,7 +129,7 @@ class PlanStore(ConcurrentFileStore):
         finally:
             self._release_lock(lock)
 
-    def get(self, frame_id: str) -> Optional[Dict[str, Any]]:
+    def get(self, frame_id: str) -> dict[str, Any] | None:
         lock = self._acquire_lock()
         try:
             data = self._load_data()

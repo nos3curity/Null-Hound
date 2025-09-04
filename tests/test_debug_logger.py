@@ -2,9 +2,9 @@
 Tests for DebugLogger to ensure it writes HTML logs with prompts and responses.
 """
 
-import unittest
-import tempfile
 import shutil
+import tempfile
+import unittest
 from pathlib import Path
 
 from analysis.debug_logger import DebugLogger

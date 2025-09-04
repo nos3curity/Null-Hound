@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Optional
+from typing import Any
 
 
-def extract_json_object(text: str) -> Optional[Any]:
+def extract_json_object(text: str) -> Any | None:
     """Extract a JSON object from arbitrary text.
 
     Handles common LLM output patterns:

@@ -5,9 +5,10 @@ Tests for the config_loader module.
 import os
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
 import pytest
 import yaml
-from unittest.mock import patch, MagicMock
 
 from utils.config_loader import load_config
 
