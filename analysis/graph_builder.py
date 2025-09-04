@@ -259,12 +259,16 @@ class GraphBuilder:
         graph_cfg["thinking_enabled"] = False
         # Preserve existing thinking_budget if present; otherwise keep default
         graph_cfg.setdefault("thinking_budget", -1)
+        # Ensure generous context to include all cards when possible
+        graph_cfg.setdefault("max_context", 1_000_000)
         # Force strategist profile (discovery)
         strat_cfg = models_cfg.setdefault("strategist", {})
         strat_cfg["provider"] = "gemini"
         strat_cfg["model"] = "gemini-2.5-pro"
         strat_cfg["thinking_enabled"] = True
         strat_cfg.setdefault("thinking_budget", -1)
+        # Match graph context to maximize chance of including all cards
+        strat_cfg.setdefault("max_context", graph_cfg.get("max_context", 1_000_000))
         # Save effective config
         self.config = cfg
         self.debug = debug
@@ -362,6 +366,7 @@ class GraphBuilder:
         
         # Phase 1: Discovery - Let agent decide what to build
         self._emit("phase", "Graph Discovery")
+        # Run discovery; emit a stern warning if sampling was required inside discovery
         self._discover_graphs(manifest, cards, focus_areas, max_graphs, force_graphs)
         
         # Phase 2: Iterative Graph Building
@@ -420,6 +425,13 @@ class GraphBuilder:
         self._emit("discover", "Analyzing codebase for graph discovery...")
         # Sample cards to stay within STRATEGIST model's context limits (not graph model's)
         code_samples = self._sample_cards_for_discovery(cards)
+        if len(code_samples) != len(cards):
+            msg = (
+                f"Discovery context limit reached — sampling active: using {len(code_samples)}/{len(cards)} cards. "
+                f"Consider restricting input files with --files (whitelist), and/or using a larger-context model or increasing models.strategist.max_context."
+            )
+            self._emit("warn", msg)
+            self._emit("sample", msg)
         
         # Allow forcing specific graph type through focus_areas (backward compatibility)
         if focus_areas and "call_graph" in focus_areas:
@@ -553,10 +565,12 @@ The FIRST must be the system/component/flow overview."""
             # Try to use ALL cards if possible within token limits
             relevant_cards = self._sample_cards(cards)
             if len(relevant_cards) != len(cards):
-                self._emit(
-                    "sample",
-                    f"Sampled {len(relevant_cards)} of {len(cards)} cards to fit context; for large codebases consider increasing iterations or using a graph model with a larger context size."
+                msg = (
+                    f"Context limit reached — sampling active: using {len(relevant_cards)}/{len(cards)} cards. "
+                    f"Consider restricting input files with --files (whitelist), and/or using a model with a larger context or increasing models.graph.max_context."
                 )
+                self._emit("warn", msg)
+                self._emit("sample", msg)
             
             # Update the graph
             update = self._update_graph(graph, relevant_cards)
