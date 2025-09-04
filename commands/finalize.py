@@ -145,6 +145,8 @@ def finalize(project_name: str, threshold: float, debug: bool, platform: str | N
     
     # Initialize debug logger if needed
     debug_logger = None
+    # Legacy: pre-filter debug logger no longer used, keep sentinel to avoid NameError
+    filter_debug_logger = None
     if debug:
         from analysis.debug_logger import DebugLogger
         debug_logger = DebugLogger(f"finalize_{project_name}")
@@ -174,7 +176,7 @@ def finalize(project_name: str, threshold: float, debug: bool, platform: str | N
     
     # Process candidates for review
     if not candidates:
-        console.print("\n[green]✓ Pre-filtering complete. No hypotheses require manual review.[/green]")
+        console.print("\n[green]✓ No hypotheses meet the threshold for review.[/green]")
         sys.exit(0)
     
     # Narrative model names
