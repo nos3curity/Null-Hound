@@ -17,7 +17,6 @@
 <p align="center">
   <sub>
     <a href="#overview"><b>Overview</b></a>
-    • <a href="#quick-start"><b>Quick Start</b></a>
     • <a href="#configuration"><b>Configuration</b></a>
     • <a href="#complete-audit-workflow"><b>Workflow</b></a>
     • <a href="#chatbot-telemetry-ui"><b>Chatbot</b></a>
@@ -83,76 +82,18 @@ Set up your API keys, e.g.:
 export OPENAI_API_KEY=your_key_here
 ```
 
-Most users can start with defaults. For advanced tuning, expand below:
-
-<details>
-  <summary><b>Advanced Configuration (config.yaml)</b></summary>
-
-
-```yaml
-graph:
-  provider: openai
-  model: gpt-4.1
-  max_context: 1000000  # 1M tokens for GPT-4.1
-
-scout:
-  provider: openai
-  model: gpt-5-mini
-  max_context: 256000
-
-strategist:
-  provider: openai
-  model: gpt-5
-  max_context: 256000
-  plan_reasoning_effort: medium
-  hypothesize_reasoning_effort: high
-
-finalize:
-  provider: openai
-  model: gpt-5
-  reasoning_effort: high
-
-reporting:
-  provider: openai
-  model: gpt-4o
-```
-
-</details>
-
-## Quick Start
-
-Here's the essential workflow:
+Copy the example configuration and edit as needed:
 
 ```bash
-# Setup
-./hound.py project create myaudit /path/to/code
-./hound.py graph build myaudit
-
-# Audit (adjust time based on desired depth)
-./hound.py agent audit myaudit --time-limit 60
-./hound.py hypotheses list myaudit  # Check progress
-
-# Quality assurance
-./hound.py finalize myaudit
-
-# Create PoCs (optional)
-#./hound.py poc (...))
-
-# Create report
-./hound.py report myaudit
+cp hound/config.yaml.example hound/config.yaml
+# then edit hound/config.yaml to select providers/models and options
 ```
 
-## Repository Layout
+Notes:
+- Defaults work out-of-the-box; you can override many options via CLI flags.
+- Keep API keys out of the repo; `API_KEYS.txt` is gitignored and can be sourced.
 
-```text
-hound/
-├─ hound.py          # CLI entrypoint
-├─ commands/         # CLI commands (agent, graph, project, report, ...)
-├─ analysis/         # Graph builder, strategist, scout, session manager
-├─ llm/              # Providers + unified client
-├─ chatbot/          # Optional telemetry UI
-└─ tests/            # Unit tests
-```
+<!-- Quick Start and Repository Layout removed to avoid duplication; see Complete Audit Workflow below. -->
 
 **Note:** Audit quality scales with time and model capability. Use longer runs and advanced models for more complete results.
 
@@ -207,12 +148,17 @@ The audit phase uses the **senior/junior pattern** with planning and investigati
 # Set time limit (in minutes)
 ./hound.py agent audit myaudit --time-limit 30
 
+# Start with telemetry (connect the Chatbot UI to steer)
+./hound.py agent audit myaudit --telemetry --time-limit 30
+
 # Enable debug logging (captures all prompts/responses)
 ./hound.py agent audit myaudit --debug
 
 # Attach to an existing session and continue where you left off
 ./hound.py agent audit myaudit --session <session_id>
 ```
+
+Tip: When started with `--telemetry`, you can connect the Chatbot UI and steer the audit interactively (see Chatbot section above).
 
 **Key parameters:**
 - **--time-limit**: Stop after N minutes (useful for incremental audits)
@@ -229,60 +175,6 @@ Hound is designed to deliver increasingly complete results with longer audits. T
 The quality and duration depend heavily on the models used. Faster models provide quick results but may miss subtle issues, while advanced reasoning models find deeper vulnerabilities but require more time.
 
 **What happens during an audit:**
-
-
-## Chatbot (Telemetry UI)
-
-Hound ships with a lightweight web UI for steering and monitoring a running audit session. It discovers local runs via a simple telemetry registry and streams status/decisions live.
-
-Prerequisites:
-- Set API keys (at least `OPENAI_API_KEY`): `source ../API_KEYS.txt` or export manually
-- Install Python deps in this submodule: `pip install -r requirements.txt`
-
-1) Start the agent with telemetry enabled
-
-```bash
-# From the hound/ directory
-./hound.py agent audit myaudit --telemetry --debug
-
-# Notes
-# - The --telemetry flag exposes a local SSE/control endpoint and registers the run
-# - Optional: ensure the registry dir matches the chatbot by setting:
-#   export HOUND_REGISTRY_DIR="$HOME/.local/state/hound/instances"
-```
-
-2) Launch the chatbot server
-
-```bash
-# From the hound/ directory
-python chatbot/run.py
-
-# Optional: customize host/port
-HOST=0.0.0.0 PORT=5280 python chatbot/run.py
-```
-
-Open the UI: http://127.0.0.1:5280
-
-3) Select the running instance and stream activity
-
-- The input next to “Start” lists detected instances as `project_path | instance_id`.
-- Click “Start” to attach; the UI auto‑connects the realtime channel and begins streaming decisions/results.
-- The lower panel has tabs:
-  - Activity: live status/decisions
-  - Plan: current strategist plan (✓ done, ▶ active, • pending)
-  - Findings: hypotheses with confidence; you can Confirm/Reject manually
-
-4) Steer the audit
-
-- Use the “Steer” form (e.g., “Investigate reentrancy across the whole app next”).
-- Steering is queued at `<project>/.hound/steering.jsonl` and consumed exactly once when applied.
-- Broad, global instructions may preempt the current investigation and trigger immediate replanning.
-
-Troubleshooting
-- No instances in dropdown: ensure you started the agent with `--telemetry`.
-- Wrong or stale project shown: clear the input; the UI defaults to the most recent alive instance.
-- Registry mismatch: confirm both processes print the same `Using registry dir:` or set `HOUND_REGISTRY_DIR` for both.
-- Raw API: open `/api/instances` in the browser to inspect entries (includes `alive` flag and registry path).
 
 The audit is a **dynamic, iterative process** with continuous interaction between Strategist and Scout:
 
@@ -335,7 +227,11 @@ Hypotheses Status:
 
 ### Step 4: Monitor Progress
 
-Check audit progress and findings at any time during the audit:
+Check audit progress and findings at any time during the audit. If you started the agent with `--telemetry`, you can also monitor and steer via the Chatbot UI:
+
+- Open http://127.0.0.1:5280 and attach to the running instance
+- Watch live Activity, Plan, and Findings
+- Use the Steer form to guide the next investigations
 
 ```bash
 # View current hypotheses (findings)
@@ -475,59 +371,7 @@ Produce comprehensive audit reports with all findings and PoCs:
 
 **Note:** The report uses a professional dark theme and includes all imported PoCs automatically.
 
-## Complete Example Workflow
-
-Here's a full audit from start to finish with explanations:
-
-```bash
-# 1. Create project from source code
-./hound.py project create myaudit /path/to/code
-
-# 2. Build knowledge graphs (foundation for analysis)
-./hound.py graph build myaudit --graphs 5 --iterations 3
-
-# 3. Run initial audit (set time limit based on your needs)
-./hound.py agent audit myaudit --time-limit 60  # Adjust as needed
-
-# 4. Check findings mid-audit
-./hound.py hypotheses list myaudit
-# Note the session ID from output for resuming
-
-# 5. Continue audit if coverage < 80% or promising leads remain
-./hound.py agent audit myaudit --session <session_id> --time-limit 60
-
-# 6. Run quality assurance (reviews and confirms findings)
-./hound.py finalize myaudit --confidence-threshold 0.7
-
-# 7. Generate PoC prompts for confirmed vulnerabilities
-./hound.py poc make-prompt myaudit
-# Copy prompts to Claude Code or another coding agent
-
-# 8. Import created PoCs
-./hound.py poc import myaudit hyp_abc123 exploit.sol \
-  --description "Reentrancy exploit demonstration"
-
-# 9. Generate final professional report
-./hound.py report myaudit
-
-# 10. View results in browser
-./hound.py report view myaudit
-```
-
-**Duration guidance:**
-The time for each step varies dramatically based on:
-- **Model selection**: GPT-4o-mini vs GPT-5 can be 10x difference in speed
-- **Codebase size**: From small contracts to large systems
-- **Depth desired**: Quick scan vs exhaustive analysis
-- **Coverage goals**: 50% coverage vs 95% coverage
-
-Typical ranges:
-- **Graph building**: Minutes to hours depending on codebase size and iteration depth
-- **Audit phase**: 1 hour to multiple days - Hound finds more with longer runs
-- **Quality assurance**: Proportional to number of findings
-- **PoC creation**: Varies by complexity of vulnerabilities
-
-**Remember:** Hound is designed for depth. Longer audits with advanced models yield more complete and nuanced findings. Use time limits for incremental progress, then resume to continue deeper analysis.
+<!-- Removed duplicate "Complete Example Workflow" in favor of the detailed Complete Audit Workflow. -->
 
 ## Session Management
 
@@ -588,6 +432,59 @@ When you attach to a session, its status is set to `active` while the audit runs
 # Attach later and continue planning/execution under the same session
 ./hound.py agent audit myaudit --session <session_id>
 ```
+
+## Chatbot (Telemetry UI)
+
+Hound ships with a lightweight web UI for steering and monitoring a running audit session. It discovers local runs via a simple telemetry registry and streams status/decisions live.
+
+Prerequisites:
+- Set API keys (at least `OPENAI_API_KEY`): `source ../API_KEYS.txt` or export manually
+- Install Python deps in this submodule: `pip install -r requirements.txt`
+
+1) Start the agent with telemetry enabled
+
+```bash
+# From the hound/ directory
+./hound.py agent audit myaudit --telemetry --debug
+
+# Notes
+# - The --telemetry flag exposes a local SSE/control endpoint and registers the run
+# - Optional: ensure the registry dir matches the chatbot by setting:
+#   export HOUND_REGISTRY_DIR="$HOME/.local/state/hound/instances"
+```
+
+2) Launch the chatbot server
+
+```bash
+# From the hound/ directory
+python chatbot/run.py
+
+# Optional: customize host/port
+HOST=0.0.0.0 PORT=5280 python chatbot/run.py
+```
+
+Open the UI: http://127.0.0.1:5280
+
+3) Select the running instance and stream activity
+
+- The input next to “Start” lists detected instances as `project_path | instance_id`.
+- Click “Start” to attach; the UI auto‑connects the realtime channel and begins streaming decisions/results.
+- The lower panel has tabs:
+  - Activity: live status/decisions
+  - Plan: current strategist plan (✓ done, ▶ active, • pending)
+  - Findings: hypotheses with confidence; you can Confirm/Reject manually
+
+4) Steer the audit
+
+- Use the “Steer” form (e.g., “Investigate reentrancy across the whole app next”).
+- Steering is queued at `<project>/.hound/steering.jsonl` and consumed exactly once when applied.
+- Broad, global instructions may preempt the current investigation and trigger immediate replanning.
+
+Troubleshooting
+- No instances in dropdown: ensure you started the agent with `--telemetry`.
+- Wrong or stale project shown: clear the input; the UI defaults to the most recent alive instance.
+- Registry mismatch: confirm both processes print the same `Using registry dir:` or set `HOUND_REGISTRY_DIR` for both.
+- Raw API: open `/api/instances` in the browser to inspect entries (includes `alive` flag and registry path).
 
 ## Managing Hypotheses
 
