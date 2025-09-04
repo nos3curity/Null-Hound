@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="static/hound.png" alt="Hound" width="315" />
+  <img src="banner.png" alt="Hound Banner" width="70%">
   
   # Hound
   
