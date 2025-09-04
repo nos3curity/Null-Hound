@@ -1,24 +1,41 @@
-<div align="center">
-  <img src="static/hound.png" alt="Hound Banner" width="70%">
-  
-  # Hound
-  
-  **Autonomous agents for code security auditing**
-  
-  [![Tests](https://github.com/muellerberndt/hound/workflows/Tests/badge.svg)](https://github.com/muellerberndt/hound/actions)
-  [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE.txt)
-  [![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/downloads/)
-  [![OpenAI](https://img.shields.io/badge/OpenAI-Compatible-74aa9c)](https://openai.com)
-  [![Gemini](https://img.shields.io/badge/Gemini-Compatible-4285F4)](https://ai.google.dev/)
-  [![Anthropic](https://img.shields.io/badge/Anthropic-Compatible-6B46C1)](https://anthropic.com)
-  
-</div>
+<p align="center">
+  <img src="static/hound.png" alt="Hound Banner" width="75%">
+</p>
+# Hound
+
+**Autonomous agents for code security auditing**
+
+<p align="center">
+  <a href="https://github.com/muellerberndt/hound/actions"><img src="https://github.com/muellerberndt/hound/workflows/Tests/badge.svg" alt="Tests"></a>
+  <a href="LICENSE.txt"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.8%2B-blue" alt="Python 3.8+"/></a>
+  <a href="https://openai.com"><img src="https://img.shields.io/badge/OpenAI-Compatible-74aa9c" alt="OpenAI"/></a>
+  <a href="https://ai.google.dev/"><img src="https://img.shields.io/badge/Gemini-Compatible-4285F4" alt="Gemini"/></a>
+  <a href="https://anthropic.com"><img src="https://img.shields.io/badge/Anthropic-Compatible-6B46C1" alt="Anthropic"/></a>
+</p>
+
+<p align="center">
+  <a href="#overview">Overview</a>
+  · <a href="#quick-start">Quick Start</a>
+  · <a href="#configuration">Configuration</a>
+  · <a href="#complete-audit-workflow">Workflow</a>
+  · <a href="#chatbot-telemetry-ui">Chatbot</a>
+  · <a href="#contributing">Contributing</a>
+</p>
 
 ---
 
 ## Overview
 
 Hound is a security audit automation pipeline for AI-assisted code review that mirrors how expert auditors think, learn, and collaborate. 
+
+### Key Features
+
+- Graph-driven analysis: adaptive architecture/access control/value-flow graphs with code-grounded annotations
+- Senior/Junior loop: Strategist plans investigations; Scout executes targeted code reads
+- Precise evidence: findings reference exact files, functions, and code spans
+- Sessionized audits: resumable runs with coverage metrics and token usage
+- Provider‑agnostic models: OpenAI, Anthropic, Google, XAI, plus mock for offline
 
 ### How It Works
 
@@ -64,36 +81,41 @@ Set up your API keys, e.g.:
 export OPENAI_API_KEY=your_key_here
 ```
 
-Configure models in `config.yaml`:
+Most users can start with defaults. For advanced tuning, expand below:
+
+<details>
+  <summary><b>Advanced Configuration (config.yaml)</b></summary>
+
 
 ```yaml
+graph:
+  provider: openai
+  model: gpt-4.1
+  max_context: 1000000  # 1M tokens for GPT-4.1
 
-  graph:
-    provider: openai
-    model: gpt-4.1
-    max_context: 1000000  # 1M tokens for GPT-4.1
-    
-  scout:
-    provider: openai
-    model: gpt-5-mini
-    max_context: 256000
-  
-  strategist:
-    provider: openai
-    model: gpt-5
-    max_context: 256000
-    plan_reasoning_effort: medium
-    hypothesize_reasoning_effort: high
-  
-  finalize:
-    provider: openai
-    model: gpt-5
-    reasoning_effort: high
-  
-  reporting:
-    provider: openai
-    model: gpt-4o
+scout:
+  provider: openai
+  model: gpt-5-mini
+  max_context: 256000
+
+strategist:
+  provider: openai
+  model: gpt-5
+  max_context: 256000
+  plan_reasoning_effort: medium
+  hypothesize_reasoning_effort: high
+
+finalize:
+  provider: openai
+  model: gpt-5
+  reasoning_effort: high
+
+reporting:
+  provider: openai
+  model: gpt-4o
 ```
+
+</details>
 
 ## Quick Start
 
@@ -116,8 +138,18 @@ Here's the essential workflow:
 
 # Create report
 ./hound.py report myaudit
+```
 
+## Repository Layout
 
+```text
+hound/
+├─ hound.py          # CLI entrypoint
+├─ commands/         # CLI commands (agent, graph, project, report, ...)
+├─ analysis/         # Graph builder, strategist, scout, session manager
+├─ llm/              # Providers + unified client
+├─ chatbot/          # Optional telemetry UI
+└─ tests/            # Unit tests
 ```
 
 **Note:** Audit quality scales with time and model capability. Use longer runs and advanced models for more complete results.
