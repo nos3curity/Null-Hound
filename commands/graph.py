@@ -133,11 +133,22 @@ def build(
     token_tracker = get_token_tracker()
     token_tracker.reset()
     
+    # Determine effective graph count for header (respect shortcuts/forced spec)
+    _forced_spec = with_spec or graph_spec
+    if _forced_spec:
+        header_graphs = 1
+    elif init:
+        header_graphs = 1
+    elif auto:
+        header_graphs = 5
+    else:
+        header_graphs = max_graphs
+
     # Header
     console.print(Panel.fit(
         f"[bold bright_cyan]Building Knowledge Graphs[/bold bright_cyan]\n"
         f"Project: [white]{repo_name}[/white] (repo: {repo_path.name})\n"
-        f"Graphs: [white]{max_graphs}[/white] | Iterations: [white]{max_iterations}[/white]",
+        f"Graphs: [white]{header_graphs}[/white] | Iterations: [white]{max_iterations}[/white]",
         box=box.ROUNDED
     ))
     # A little hype for the journey
@@ -362,6 +373,9 @@ def build(
                     if refine_only:
                         skip_disc = True
 
+                    # If a forced spec is provided, do NOT load/refine existing graphs
+                    _refine_existing = False if forced else refine_existing
+
                     results = builder.build(
                         manifest_dir=manifest_dir,
                         output_dir=graphs_dir,
@@ -369,7 +383,7 @@ def build(
                         focus_areas=focus_list,
                         max_graphs=(1 if forced else to_create),
                         force_graphs=forced,
-                        refine_existing=refine_existing,
+                        refine_existing=_refine_existing,
                         skip_discovery_if_existing=skip_disc,
                         progress_callback=builder_callback,
                         refine_only=([refine_only] if refine_only else None)
@@ -417,6 +431,9 @@ def build(
                 if refine_only:
                     skip_disc = True
 
+                # If a forced spec is provided, do NOT load/refine existing graphs
+                _refine_existing = False if forced else refine_existing
+
                 results = builder.build(
                     manifest_dir=manifest_dir,
                     output_dir=graphs_dir,
@@ -424,7 +441,7 @@ def build(
                     focus_areas=focus_list,
                     max_graphs=(1 if forced else to_create),
                     force_graphs=forced,
-                    refine_existing=refine_existing,
+                    refine_existing=_refine_existing,
                     skip_discovery_if_existing=skip_disc,
                     progress_callback=builder_callback,
                     refine_only=([refine_only] if refine_only else None)

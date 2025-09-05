@@ -582,6 +582,9 @@ class AgentRunner:
         self._last_applied_steer: str | None = None
         # Track which steering text triggered a forced replan (to avoid repeats)
         self._last_replan_steer: str | None = None
+        # Cache of graph node IDs to avoid re-reading files repeatedly
+        self._known_node_ids_cache: set[str] | None = None
+        self._node_to_graph_map_cache: dict[str, str] | None = None
         
     def initialize(self):
         """Initialize the agent."""
@@ -602,13 +605,16 @@ class AgentRunner:
         
         # If knowledge_graphs.json doesn't exist, look for any graph file
         if knowledge_graphs_path.exists():
-            # Use the SystemOverview graph or first available graph
+            # Prefer SystemArchitecture, then SystemOverview, otherwise first available
             with open(knowledge_graphs_path) as f:
                 graphs_meta = json.load(f)
             if graphs_meta.get('graphs'):
                 graphs_dict = graphs_meta['graphs']
-                # Prefer SystemOverview if it exists
-                if 'SystemOverview' in graphs_dict:
+                # Prefer SystemArchitecture first
+                if 'SystemArchitecture' in graphs_dict:
+                    graph_path = Path(graphs_dict['SystemArchitecture'])
+                # Then fallback to SystemOverview
+                elif 'SystemOverview' in graphs_dict:
                     graph_path = Path(graphs_dict['SystemOverview'])
                 else:
                     # Use the first available graph
@@ -619,13 +625,16 @@ class AgentRunner:
                 console.print("[red]Error:[/red] No graphs found in knowledge_graphs.json")
                 return False
         elif graphs_dir.exists():
-            # Fallback: look for any graph_*.json file, preferably SystemOverview
+            # Fallback: look for any graph_*.json file, preferably SystemArchitecture then SystemOverview
             graph_files = list(graphs_dir.glob("graph_*.json"))
             if graph_files:
-                # Prefer SystemOverview if it exists
-                system_overview = graphs_dir / "graph_SystemOverview.json"
-                if system_overview.exists():
-                    graph_path = system_overview
+                # Prefer SystemArchitecture if it exists
+                system_arch = graphs_dir / "graph_SystemArchitecture.json"
+                if system_arch.exists():
+                    graph_path = system_arch
+                # Then prefer SystemOverview
+                elif (graphs_dir / "graph_SystemOverview.json").exists():
+                    graph_path = graphs_dir / "graph_SystemOverview.json"
                 else:
                     graph_path = graph_files[0]
                 console.print(f"[yellow]Using graph: {graph_path.name}[/yellow]")
@@ -960,7 +969,7 @@ class AgentRunner:
                 parts.append(f"\n=== {graph_name.upper()} GRAPH ===")
                 parts.append(f"{len(nodes)} nodes, {len(edges)} edges")
                 
-                # List all nodes compactly with inline annotations
+                # List all nodes compactly with inline annotations and explicit IDs
                 for n in nodes:
                     nid = n.get('id', '')
                     lbl = n.get('label') or nid
@@ -968,8 +977,8 @@ class AgentRunner:
                     observations = n.get('observations', [])
                     assumptions = n.get('assumptions', [])
                     
-                    # Build compact line
-                    line = f"• {lbl} ({typ})"
+                    # Build compact line with node id visible
+                    line = f"• [{nid}] {lbl} ({typ})"
                     
                     # Add inline annotations
                     annotations = []
@@ -998,7 +1007,7 @@ class AgentRunner:
                 parts.append(f"\n=== {graph_name.upper()} GRAPH ===")
                 parts.append(f"{len(nodes)} nodes, {len(edges)} edges")
                 
-                # List all nodes compactly with inline annotations
+                # List all nodes compactly with inline annotations and explicit IDs
                 for n in nodes:
                     nid = n.get('id', '')
                     lbl = n.get('label') or nid
@@ -1006,8 +1015,8 @@ class AgentRunner:
                     observations = n.get('observations', [])
                     assumptions = n.get('assumptions', [])
                     
-                    # Build compact line
-                    line = f"• {lbl} ({typ})"
+                    # Build compact line with node id visible
+                    line = f"• [{nid}] {lbl} ({typ})"
                     
                     # Add inline annotations
                     annotations = []
@@ -1101,9 +1110,25 @@ class AgentRunner:
                 f"({cov_stats['cards']['percent']:.1f}%)"
             )
             if cov_stats['visited_node_ids']:
-                coverage_summary += f"\nVisited nodes: {', '.join(cov_stats['visited_node_ids'][:10])}"
+                try:
+                    annotated_visited = self._annotate_nodes_with_graph(cov_stats['visited_node_ids'][:10])
+                    coverage_summary += f"\nVisited nodes: {', '.join(annotated_visited)}"
+                except Exception:
+                    coverage_summary += f"\nVisited nodes: {', '.join(cov_stats['visited_node_ids'][:10])}"
                 if len(cov_stats['visited_node_ids']) > 10:
                     coverage_summary += f" ... and {len(cov_stats['visited_node_ids']) - 10} more"
+            # Append a concise list of unvisited node IDs to guide coverage
+            try:
+                unvisited_sample, unvisited_count = self._get_unvisited_nodes_sample(max_n=15)
+                if unvisited_count > 0 and unvisited_sample:
+                    try:
+                        annotated_unvisited = self._annotate_nodes_with_graph(unvisited_sample[:10])
+                        sample_str = ', '.join(annotated_unvisited)
+                    except Exception:
+                        sample_str = ', '.join(unvisited_sample[:10])
+                    coverage_summary += f"\nUnvisited nodes: {unvisited_count} (sample: {sample_str}{'' if len(unvisited_sample) <= 10 else ', ...'})"
+            except Exception:
+                pass
 
         strategist = Strategist(config=self.config, debug=self.debug, session_id=self.session_id)
         need = max(0, n - len(prepared))
@@ -1174,6 +1199,58 @@ class AgentRunner:
             if frame_id:
                 existing_frame_ids.add(frame_id)
         return prepared
+
+    def _get_unvisited_nodes_sample(self, max_n: int = 15) -> tuple[list[str], int]:
+        """Compute a sample of unvisited node IDs from graphs vs session coverage.
+
+        Returns (sample_list, total_unvisited_count).
+        """
+        try:
+            # Build known nodes cache if missing
+            if self._known_node_ids_cache is None or self._node_to_graph_map_cache is None:
+                all_nodes: set[str] = set()
+                node_to_graph: dict[str, str] = {}
+                graphs_dir = (self.project_dir or Path.cwd()) / 'graphs'
+                if graphs_dir.exists():
+                    import json as _json
+                    for gfile in graphs_dir.glob('graph_*.json'):
+                        try:
+                            gd = _json.loads(Path(gfile).read_text())
+                            gname = gd.get('internal_name') or gd.get('name') or gfile.stem.replace('graph_', '')
+                            for n in gd.get('nodes', []) or []:
+                                nid = n.get('id')
+                                if nid:
+                                    sid = str(nid)
+                                    all_nodes.add(sid)
+                                    if sid not in node_to_graph:
+                                        node_to_graph[sid] = str(gname)
+                        except Exception:
+                            continue
+                self._known_node_ids_cache = all_nodes
+                self._node_to_graph_map_cache = node_to_graph
+            visited = set()
+            try:
+                stats = self.session_tracker.get_coverage_stats() if self.session_tracker else {}
+                visited = set(stats.get('visited_node_ids') or [])
+            except Exception:
+                visited = set()
+            unvisited = list((self._known_node_ids_cache or set()) - visited)
+            unvisited.sort()  # deterministic
+            return (unvisited[:max_n], len(unvisited))
+        except Exception:
+            return ([], 0)
+
+    def _annotate_nodes_with_graph(self, node_ids: list[str]) -> list[str]:
+        """Return node ids annotated with their graph name as nid@Graph.\n\n        If graph is unknown, use '?' as placeholder.
+        """
+        try:
+            # Ensure mapping cache exists
+            if self._node_to_graph_map_cache is None or self._known_node_ids_cache is None:
+                self._get_unvisited_nodes_sample(0)  # builds caches
+            m = self._node_to_graph_map_cache or {}
+            return [f"{nid}@{m.get(nid, '?')}" for nid in node_ids]
+        except Exception:
+            return list(node_ids)
 
         class InvestigationItem(BaseModel):
             goal: str = Field(description="Investigation goal or question")
@@ -1311,14 +1388,24 @@ class AgentRunner:
         console.print("[bold cyan]STRATEGIST PLANNING & AUDIT STATUS[/bold cyan]")
         console.print("="*80)
         
-        # Coverage statistics from session tracker
+        # Compact coverage line
         if self.session_tracker:
             cov = self.session_tracker.get_coverage_stats()
-            console.print("\n[bold yellow]Coverage Statistics:[/bold yellow]")
-            console.print(f"  Nodes visited: {cov['nodes']['visited']}/{cov['nodes']['total']} ([cyan]{cov['nodes']['percent']:.1f}%[/cyan])")
-            console.print(f"  Cards analyzed: {cov['cards']['visited']}/{cov['cards']['total']} ([cyan]{cov['cards']['percent']:.1f}%[/cyan])")
+            try:
+                sample, count = self._get_unvisited_nodes_sample(max_n=5)
+                if count > 0 and sample:
+                    sample = self._annotate_nodes_with_graph(sample)
+            except Exception:
+                sample, count = ([], 0)
+            line = (
+                f"Coverage: Nodes {cov['nodes']['visited']}/{cov['nodes']['total']} ({cov['nodes']['percent']:.1f}%) | "
+                f"Cards {cov['cards']['visited']}/{cov['cards']['total']} ({cov['cards']['percent']:.1f}%)"
+            )
+            if count > 0 and sample:
+                line += f" | Unvisited: {count} (sample: {', '.join(sample)})"
+            console.print("\n" + line)
         else:
-            console.print("\n[bold yellow]Coverage Statistics:[/bold yellow] [dim]Not available[/dim]")
+            console.print("\nCoverage: [dim]Not available[/dim]")
         
         # Hypothesis statistics
         hyp = self._hypothesis_stats()
@@ -1467,6 +1554,17 @@ class AgentRunner:
         if self.time_limit_minutes:
             config_text += f"\nTime Limit: [red]{self.time_limit_minutes} minutes[/red]"
         console.print(Panel.fit(config_text, border_style="cyan"))
+        # Early compact coverage snapshot
+        try:
+            if self.session_tracker:
+                cov = self.session_tracker.get_coverage_stats()
+                # Show a concise one-liner; no samples here to keep it compact
+                console.print(
+                    f"Coverage: Nodes {cov['nodes']['visited']}/{cov['nodes']['total']} ({cov['nodes']['percent']:.1f}%) | "
+                    f"Cards {cov['cards']['visited']}/{cov['cards']['total']} ({cov['cards']['percent']:.1f}%)"
+                )
+        except Exception:
+            pass
 
         # Enhanced progress callback with beautiful logging
         def progress_cb(info: dict):
@@ -1612,6 +1710,21 @@ class AgentRunner:
             self._agent_log.append(f"Planning batch {planned_round} (top {plan_n})")
             # Log planning status at start of batch
             console.print(f"\n[bold cyan]═══ Planning Batch {planned_round} ═══[/bold cyan]")
+            # Show current coverage stats and a sample of unvisited nodes
+            try:
+                if self.session_tracker:
+                    _cov = self.session_tracker.get_coverage_stats()
+                    console.print(
+                        f"Coverage: Nodes {_cov['nodes']['visited']}/{_cov['nodes']['total']} "
+                        f"({_cov['nodes']['percent']:.1f}%) | "
+                        f"Cards {_cov['cards']['visited']}/{_cov['cards']['total']} "
+                        f"({_cov['cards']['percent']:.1f}%)"
+                    )
+                    sample, count = self._get_unvisited_nodes_sample(max_n=10)
+                    if count > 0 and sample:
+                        console.print(f"Unvisited nodes (sample): {', '.join(sample)}")
+            except Exception:
+                pass
             self._log_planning_status(items, current_index=-1)
             
             # If no items, log and stop
@@ -1697,6 +1810,18 @@ class AgentRunner:
                 # Log current investigation with updated coverage
                 console.print(f"\n[bold magenta]═══ Starting Investigation {idx+1}/{len(items)} ═══[/bold magenta]")
                 console.print(f"[bold]Goal:[/bold] {inv.goal}")
+                # Snapshot coverage at the start of the investigation
+                try:
+                    if self.session_tracker:
+                        _cov = self.session_tracker.get_coverage_stats()
+                        console.print(
+                            f"Coverage: Nodes {_cov['nodes']['visited']}/{_cov['nodes']['total']} "
+                            f"({_cov['nodes']['percent']:.1f}%) | "
+                            f"Cards {_cov['cards']['visited']}/{_cov['cards']['total']} "
+                            f"({_cov['cards']['percent']:.1f}%)"
+                        )
+                except Exception:
+                    pass
                 self._log_planning_status(items, current_index=idx)
                 # Mark plan item in_progress if we have a frame_id
                 try:
@@ -2003,6 +2128,18 @@ class AgentRunner:
                     raise
                 # Show completion
                 console.print(f"\n[bold green]✓ Investigation Completed:[/bold green] {inv.goal}")
+                # Show updated coverage after completion
+                try:
+                    if self.session_tracker:
+                        _cov = self.session_tracker.get_coverage_stats()
+                        console.print(
+                            f"Coverage: Nodes {_cov['nodes']['visited']}/{_cov['nodes']['total']} "
+                            f"({_cov['nodes']['percent']:.1f}%) | "
+                            f"Cards {_cov['cards']['visited']}/{_cov['cards']['total']} "
+                            f"({_cov['cards']['percent']:.1f}%)"
+                        )
+                except Exception:
+                    pass
                 self._agent_log.append(f"✓ Completed: {inv.goal}")
                 # Mark plan item done
                 try:

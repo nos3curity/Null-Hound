@@ -140,6 +140,7 @@ class Strategist:
             "- Look for common vulnerability patterns in unexplored areas\n"
             "- Build upon existing hypotheses - if we found issue X, check for related issue Y\n"
             "- Focus on uncovered nodes that handle value, permissions, or state changes\n"
+            "- Include at least one investigation that targets UNVISITED nodes listed under COVERAGE STATUS (if any)\n"
             "- Avoid repeating completed investigations unless new evidence suggests revisiting\n"
             "- Provide exactly the requested number of items\n\n"
             "FOR EACH ITEM include in 'reasoning': (a) WHY NOW (signal/coverage need), and (b) EXIT CRITERIA (what evidence ends this thread).\n"
