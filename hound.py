@@ -51,6 +51,14 @@ app.add_typer(agent_app, name="agent")
 poc_app = typer.Typer(help="Manage proof-of-concept exploits")
 app.add_typer(poc_app, name="poc")
 
+# Create graph subcommand groups
+graph_app = typer.Typer(help="Build and manage knowledge graphs")
+app.add_typer(graph_app, name="graph")
+
+# Plural 'graphs' group for bulk operations
+graphs_app = typer.Typer(help="Bulk graph operations (all graphs)")
+app.add_typer(graphs_app, name="graphs")
+
 # Helper to invoke Click command functions without noisy tracebacks
 def _invoke_click(cmd_func, params: dict):
     import click
@@ -812,6 +820,54 @@ def graph_rm(
     }
     # Call through the same function
     graph_delete(**ctx_params)  # type: ignore[misc]
+
+
+@graphs_app.command("reset")
+def graphs_reset(
+    project: str = typer.Argument(..., help="Project name"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force delete without confirmation")
+):
+    """Delete ALL graphs for a project.
+
+    WARNING: Permanently removes all graph_*.json files under the project's graphs directory.
+    """
+    from rich.prompt import Confirm
+
+    manager = ProjectManager()
+    proj = manager.get_project(project)
+    if not proj:
+        console.print(f"[red]Project '{project}' not found.[/red]")
+        raise typer.Exit(1)
+
+    project_path = manager.get_project_path(project)
+    graphs_dir = project_path / 'graphs'
+    if not graphs_dir.exists():
+        console.print(f"[yellow]No graphs directory found for project '{project}'.[/yellow]")
+        raise typer.Exit(0)
+
+    graph_files = sorted(graphs_dir.glob('graph_*.json'))
+    if not graph_files:
+        console.print(f"[yellow]No graph files to delete for project '{project}'.[/yellow]")
+        raise typer.Exit(0)
+
+    if not force:
+        if not Confirm.ask(
+            f"[yellow]This will DELETE ALL {len(graph_files)} graph file(s) for '{project}'. Proceed?[/yellow]",
+            default=False
+        ):
+            console.print("[dim]Aborted by user.[/dim]")
+            raise typer.Exit(1)
+
+    deleted = 0
+    for p in graph_files:
+        try:
+            p.unlink()
+            deleted += 1
+            console.print(f"[green]✓[/green] Deleted {p.name}")
+        except Exception as e:
+            console.print(f"[red]✗[/red] Failed to delete {p.name}: {e}")
+
+    console.print(f"[bright_green]Deleted {deleted}/{len(graph_files)} graph file(s).[/bright_green]")
 
 
 @app.command()

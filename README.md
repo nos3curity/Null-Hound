@@ -116,36 +116,42 @@ Projects organize your audits and store all analysis data:
 
 ### Step 2: Build Knowledge Graphs
 
-Hound analyzes your codebase and builds aspect-oriented knowledge graphs that serve as the foundation for all subsequent analysis:
+Hound analyzes your codebase and builds aspect‑oriented knowledge graphs that serve as the foundation for all subsequent analysis.
+
+Recommended (one‑liner):
 
 ```bash
-# Initialize baseline SystemArchitecture graph (required before auditing)
-./hound.py graph build myaudit --init --iterations 1
-
-# Or auto-generate a default set of graphs (5) and refine once
-./hound.py graph build myaudit --auto --iterations 2
-
-Note: `--auto` always includes the SystemArchitecture graph as the first graph. You do not need to run `--init` in addition to `--auto`.
-
-If `--init` is used and a `SystemArchitecture` graph already exists, initialization is skipped to avoid redundant work. Use `--auto` to add more graphs or delete the existing file to re-initialize.
-
-When running `--auto` and graphs already exist, Hound asks for confirmation before updating/overwriting graphs (including `SystemArchitecture`). If you want to clear graphs, use:
-
-```bash
-./hound.py graph delete myaudit --all   # delete all graphs
-./hound.py graph delete myaudit --name SystemArchitecture   # delete one graph
-```
-
-# Use a whitelist to constrain scope (comma-separated file paths)
-./hound.py graph build myaudit --init --iterations 1 --files "path/a.rs,path/b.rs"
+# Auto-generate a default set of graphs (up to 5) and refine
+./hound.py graph build myaudit --auto
 
 # View generated graphs
 ./hound.py graph ls myaudit
 ```
 
-Notes:
-- The audit requires the SystemArchitecture graph. The build command will save graphs incrementally, and the agent will refuse to start if SystemArchitecture is missing (run `graph build <project> --init` or `graph build <project> --auto`).
-- For large repos, build with a whitelist via `--files` (comma‑separated). You can generate one with the whitelist builder and pass it directly.
+Alternative (manual guidance):
+
+```bash
+# 1) Initialize the baseline SystemArchitecture graph
+./hound.py graph build myaudit --init
+
+# 2) Add a specific graph with your own description
+./hound.py graph build myaudit \
+  --graph-spec "Call graph focusing on function call relationships across modules"
+
+# (Repeat --graph-spec for additional targeted graphs as needed)
+```
+
+Operational notes:
+- `--auto` always includes the SystemArchitecture graph as the first graph. You do not need to run `--init` in addition to `--auto`.
+- If `--init` is used and a `SystemArchitecture` graph already exists, initialization is skipped. Use `--auto` to add more graphs, or remove existing graphs first if you want a clean re‑init.
+- When running `--auto` and graphs already exist, Hound asks for confirmation before updating/overwriting graphs (including SystemArchitecture). To clear graphs:
+
+```bash
+./hound.py graph rm myaudit --all                 # remove all graphs
+./hound.py graph rm myaudit --name SystemArchitecture  # remove one graph
+```
+
+- For large repos, you can constrain scope with `--files` (comma‑separated whitelist) alongside either approach.
 
 **What happens:** Hound inspects the codebase and creates specialized graphs for different aspects (e.g., access control, value flows, state management). Each graph contains:
 - **Nodes**: Key concepts, functions, and state variables
@@ -258,14 +264,14 @@ Check audit progress and findings at any time during the audit. If you started t
 # See detailed hypothesis information
 ./hound.py project hypotheses myaudit --details
 
-# Filter by confidence level
-./hound.py hypotheses list myaudit --min-confidence 0.8
+# List hypotheses with confidence ratings
+./hound.py project hypotheses myaudit
 
 # Check coverage statistics
 ./hound.py project coverage myaudit
 
 # View session details
-./hound.py project info myaudit
+./hound.py project sessions myaudit --list
 ```
 
 **Understanding hypotheses:** Each hypothesis represents a potential vulnerability with:
@@ -310,12 +316,11 @@ A reasoning model reviews all hypotheses and updates their status based on evide
 ./hound.py finalize myaudit
 
 # Customize confidence threshold
-./hound.py finalize myaudit \
-  --confidence-threshold 0.7 \
-  --model gpt-4o
+./hound.py finalize myaudit -t 0.7 --model gpt-4o
 
 # Include all findings (not just confirmed)
-./hound.py finalize myaudit --include-all
+# (Use on the report command, not finalize)
+./hound.py report myaudit --include-all
 ```
 
 **What happens during finalization:**
@@ -371,9 +376,6 @@ Produce comprehensive audit reports with all findings and PoCs:
 # Include all hypotheses, not just confirmed
 ./hound.py report myaudit --include-all
 
-# View the generated report
-./hound.py report view myaudit
-
 # Export report to specific location
 ./hound.py report myaudit --output /path/to/report.html
 ```
@@ -402,7 +404,7 @@ Each audit run operates under a session with comprehensive tracking and per-sess
 
 ```bash
 # View session details
-./hound.py project info myaudit
+./hound.py project sessions myaudit <session_id>
 
 # List and inspect sessions
 ./hound.py project sessions myaudit --list
@@ -509,24 +511,20 @@ Troubleshooting
 Hypotheses are the core findings that accumulate across sessions:
 
 ```bash
-# List all hypotheses with confidence scores
-./hound.py hypotheses list myaudit
+# List hypotheses with confidence scores
+./hound.py project hypotheses myaudit
 
 # View with full details
-./hound.py hypotheses list myaudit --verbose
-
-# Filter by status or confidence
-./hound.py hypotheses list myaudit --status confirmed
-./hound.py hypotheses list myaudit --min-confidence 0.8
+./hound.py project hypotheses myaudit --details
 
 # Update hypothesis status
-./hound.py hypotheses update myaudit hyp_12345 --status confirmed
+./hound.py project set-hypothesis-status myaudit hyp_12345 confirmed
 
 # Reset hypotheses (creates backup)
-./hound.py hypotheses reset myaudit
+./hound.py project reset-hypotheses myaudit
 
 # Force reset without confirmation
-./hound.py hypotheses reset myaudit --force
+./hound.py project reset-hypotheses myaudit --force
 ```
 
 Hypothesis statuses:
@@ -546,8 +544,7 @@ Override default models per component:
 # Use different models for each role
 ./hound.py agent audit myaudit \
   --platform openai --model gpt-4o-mini \           # Scout
-  --strategist-platform anthropic --strategist-model claude-3-opus \  # Strategist
-  --finalizer-platform openai --finalizer-model gpt-4o  # Finalizer
+  --strategist-platform anthropic --strategist-model claude-3-opus   # Strategist
 ```
 
 ### Debug Mode
