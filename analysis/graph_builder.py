@@ -334,6 +334,11 @@ class GraphBuilder:
         """
         start_time = time.time()
         self._progress_callback = progress_callback
+        # Track strict refine-only mode
+        try:
+            self._refine_only = bool(refine_only)
+        except Exception:
+            self._refine_only = False
         
         # Remember output dir for incremental saves
         try:
@@ -374,23 +379,27 @@ class GraphBuilder:
 
         # If refining only a specific subset, filter loaded graphs
         if refine_existing and refine_only:
-            targets_norm = {str(n or '').strip().replace(' ', '_').lower() for n in refine_only}
-            if self.graphs:
-                filtered: dict[str, KnowledgeGraph] = {}
-                for name, g in self.graphs.items():
-                    disp = (g.metadata or {}).get('display_name') or name
-                    candidates = {
-                        name.strip().replace(' ', '_').lower(),
-                        disp.strip().replace(' ', '_').lower(),
-                        disp.strip().lower(),
-                    }
-                    if targets_norm & candidates:
-                        filtered[name] = g
-                if filtered:
-                    self.graphs = filtered
-                    self._emit('note', f"Refining only: {', '.join(filtered.keys())}")
-                else:
-                    self._emit('warn', 'Refine target not found among existing graphs; no graphs will be refined.')
+            # Special sentinel to indicate refine-all without filtering
+            if len(refine_only) == 1 and str(refine_only[0]).strip().lower() == '__all__':
+                pass  # keep all loaded graphs, but remain in refine-only mode
+            else:
+                targets_norm = {str(n or '').strip().replace(' ', '_').lower() for n in refine_only}
+                if self.graphs:
+                    filtered: dict[str, KnowledgeGraph] = {}
+                    for name, g in self.graphs.items():
+                        disp = (g.metadata or {}).get('display_name') or name
+                        candidates = {
+                            name.strip().replace(' ', '_').lower(),
+                            disp.strip().replace(' ', '_').lower(),
+                            disp.strip().lower(),
+                        }
+                        if targets_norm & candidates:
+                            filtered[name] = g
+                    if filtered:
+                        self.graphs = filtered
+                        self._emit('note', f"Refining only: {', '.join(filtered.keys())}")
+                    else:
+                        self._emit('warn', 'Refine target not found among existing graphs; no graphs will be refined.')
 
         # Phase 1: Discovery - Let agent decide what to build (unless refining existing only)
         do_discovery = True
@@ -748,11 +757,19 @@ Prioritize COMPLETENESS over simplicity - it's better to have too many nodes tha
                     if unused_edge_types:
                         type_guidance += f"\n\nUNUSED EDGE TYPES (consider using): {', '.join(unused_edge_types[:10])}"
             
+            # Stricter constraints in refine-only mode
+            refine_constraints = "\nOnly add new nodes when strictly required and CONNECT them immediately to existing nodes (≤ 3)." 
+            try:
+                if getattr(self, '_refine_only', False):
+                    refine_constraints = "\nDO NOT add new nodes; focus on EDGES and NODE UPDATES only."
+            except Exception:
+                pass
+
             system_prompt = f"""Refine {graph.focus}. Current: {len(graph.nodes)}N/{len(graph.edges)}E, {orphan_count} orphans.
 {focus_instruction}
 
 GOAL: Create a COMPREHENSIVE model that captures ALL aspects of {graph.focus}.
-The graph should be COMPLETE - every important component, relationship, and interaction should be represented.{type_guidance}
+The graph should be COMPLETE - every important component, relationship, and interaction should be represented.{type_guidance}{refine_constraints}
 
 IMPORTANT: This is ONLY structural discovery - do NOT add observations or assumptions.
 Those will be added later during analysis.
@@ -764,7 +781,7 @@ DO NOT create nodes for:
 - Third-party libraries
 Only reference external dependencies in edge relationships if needed.
 
-DO NOT add new nodes unless they connect to existing ones.
+DO NOT add new nodes unless they connect to existing ones (and ONLY if strictly necessary).
 Nodes: If adding new nodes, include refs array with card IDs where they appear; prefer function/storage granularity.
   - MUST be defined in the project's source files (not just imported/used)
 Edges: type, src (existing NODE id), dst (existing NODE id), refs (card IDs evidencing the relationship). 
@@ -875,8 +892,21 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
         nodes_added = 0
         edges_added = 0
         
+        # Optionally constrain new nodes during refinement
+        new_nodes_specs = list(update.new_nodes or [])
+        if getattr(self, '_refine_only', False):
+            existing_ids = set(graph.nodes.keys())
+            # Keep only new nodes referenced in edges that connect to an existing node; cap to 3
+            referenced_with_existing: set[str] = set()
+            for e in update.new_edges or []:
+                if e.src in existing_ids and e.dst not in existing_ids:
+                    referenced_with_existing.add(e.dst)
+                if e.dst in existing_ids and e.src not in existing_ids:
+                    referenced_with_existing.add(e.src)
+            new_nodes_specs = [ns for ns in new_nodes_specs if ns.id in referenced_with_existing][:3]
+
         # Add new nodes
-        for node_spec in update.new_nodes:
+        for node_spec in new_nodes_specs:
             # Parse properties if provided as JSON string
             properties = {}
             
@@ -898,7 +928,11 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
                 nodes_added += 1
         
         # Add new edges (will be deduplicated in add_edge method)
-        for edge_spec in update.new_edges:
+        for edge_spec in (update.new_edges or []):
+            if getattr(self, '_refine_only', False):
+                # Only add edges where both endpoints exist (after node filtering)
+                if edge_spec.src not in graph.nodes or edge_spec.dst not in graph.nodes:
+                    continue
             edge = DynamicEdge(
                 id=self._generate_id("edge"),
                 type=edge_spec.type,

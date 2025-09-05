@@ -199,6 +199,7 @@ You can resume/refine an existing graph without creating new ones using `graph r
 Notes on refinement:
 - Argument order is `graph refine <project> [NAME]`. Example: `./hound.py graph refine fider AuthorizationMap`. If you put the name first, it will be treated as the project.
 - Refinement uses the stored whitelist from the initial ingestion by default. Passing a new `--files` list will rebuild ingestion for that run with the new whitelist.
+- Refinement prioritizes connecting and improving existing structure. It minimizes new node creation and, when refining a single graph, only accepts new nodes that immediately connect to existing nodes (kept to a small number). For broader expansion, prefer `graph build --auto`.
 
 **What happens:** Hound inspects the codebase and creates specialized graphs for different aspects (e.g., access control, value flows, state management). Each graph contains:
 - **Nodes**: Key concepts, functions, and state variables

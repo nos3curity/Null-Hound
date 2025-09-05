@@ -607,7 +607,8 @@ def graph_refine(
         console.print("[red]Error:[/red] Specify a graph NAME or use --all.")
         raise typer.Exit(2)
 
-    refine_only = name if not all else None
+    # Pass a sentinel to activate strict refine mode for all graphs without filtering
+    refine_only = name if not all else "__ALL__"
 
     graph_build_impl(
         project_id=project,
