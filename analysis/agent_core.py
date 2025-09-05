@@ -445,34 +445,42 @@ class AutonomousAgent:
                 
                 # Execute the decision
                 result = self._execute_action(decision)
-                # Surface result to UI (generic)
+                # Surface result to UI (generic) with defensive guards
                 if progress_callback:
                     try:
+                        safe = result if isinstance(result, dict) else {'status': 'error', 'error': 'No result'}
+                        msg = None
+                        try:
+                            msg = safe.get('summary') or f"{decision.action} -> {safe.get('status', 'done')}"
+                        except Exception:
+                            msg = f"{decision.action} -> done"
                         progress_callback({
                             'status': 'result',
                             'iteration': iterations,
                             'action': decision.action,
-                            'result': result,
-                            'message': result.get('summary') or f"{decision.action} -> {result.get('status', 'done')}"
+                            'result': safe,
+                            'message': msg
                         })
                     except Exception:
                         pass
                 
                 # Log the result - use formatted display for readability
+                # Defensive: coerce result to dict for safe access
+                safe_result = result if isinstance(result, dict) else {}
                 # For successful graph/node loads, show the formatted display
-                if result.get('status') == 'success':
+                if safe_result.get('status') == 'success':
                     if 'graph_display' in result:
                         # load_graph action - show formatted graph
-                        content = f"SUCCESS: {result.get('summary', '')}\n{result['graph_display']}"
+                        content = f"SUCCESS: {safe_result.get('summary', '')}\n{result['graph_display']}"
                     elif 'nodes_display' in result:
                         # load_nodes action - show formatted nodes with code
-                        content = f"SUCCESS: {result.get('summary', '')}\n{result['nodes_display']}"
+                        content = f"SUCCESS: {safe_result.get('summary', '')}\n{result['nodes_display']}"
                     else:
                         # Other successful actions - show as JSON but more readable
-                        content = json.dumps(result, indent=2)
+                        content = json.dumps(safe_result, indent=2)
                 else:
                     # Errors and other statuses - show as JSON
-                    content = json.dumps(result, indent=2)
+                    content = json.dumps(safe_result or {'status': 'unknown'}, indent=2)
                 
                 self.conversation_history.append({
                     'role': 'system',
@@ -488,7 +496,7 @@ class AutonomousAgent:
                 self.action_log.append({
                     'action': decision.action,
                     'params': params_obj,
-                    'result': result.get('summary') or result.get('status') or 'ok'
+                    'result': safe_result.get('summary') or safe_result.get('status') or 'ok'
                 })
 
                 # Maybe compress history if near budget
@@ -530,19 +538,19 @@ class AutonomousAgent:
                     break
                 
                 # Update progress based on action
-                if decision.action == 'form_hypothesis' and result.get('status') == 'success':
+                if decision.action == 'form_hypothesis' and safe_result.get('status') == 'success':
                     if progress_callback:
                         progress_callback({
                             'status': 'hypothesis_formed',
                             'iteration': iterations,
                             'message': f"Formed hypothesis: {decision.parameters.get('description', 'Unknown')}"
                         })
-                elif decision.action == 'load_nodes' and result.get('status') == 'success':
+                elif decision.action == 'load_nodes' and safe_result.get('status') == 'success':
                     if progress_callback:
                         progress_callback({
                             'status': 'code_loaded',
                             'iteration': iterations,
-                            'message': result.get('summary', 'Loaded nodes')
+                            'message': safe_result.get('summary', 'Loaded nodes')
                         })
                         
             except Exception as e:
@@ -1829,7 +1837,8 @@ DO NOT include any text before or after the JSON object."""
                 config=self.config or {}, 
                 debug=self.debug, 
                 session_id=self.session_id,
-                debug_logger=getattr(self, 'debug_logger', None)
+                debug_logger=getattr(self, 'debug_logger', None),
+                mission=getattr(self, 'mission', None)
             )
             items = strategist.deep_think(context=context) or []
             added = 0

@@ -342,6 +342,9 @@ def format_tool_call(call):
 
 def format_tool_result(result):
     """Format tool execution result."""
+    # Defensive: ensure result is a dict
+    if not isinstance(result, dict):
+        result = {'status': 'error', 'error': 'No result'}
     if result.get('status') == 'success':
         style = "green"
         icon = "✓"
@@ -686,6 +689,12 @@ class AgentRunner:
             debug=self.debug,
             session_id=self.session_id
         )
+        # Ensure overarching mission is visible to the agent/strategist
+        try:
+            if getattr(self, 'mission', None):
+                self.agent.mission = self.mission
+        except Exception:
+            pass
 
         # Set debug flag and route per-interaction files to project .debug
         self.agent.debug = self.debug
@@ -739,6 +748,12 @@ class AgentRunner:
                     'created_at': datetime.now().isoformat(),
                     'models': self.config.get('models', {}) if self.config else {},
                 }
+                # Persist mission for visibility
+                try:
+                    if getattr(self, 'mission', None):
+                        state['mission'] = self.mission
+                except Exception:
+                    pass
                 import json as _json
                 state_path.write_text(_json.dumps(state, indent=2))
             except Exception:
@@ -1173,10 +1188,24 @@ class AgentRunner:
                 default_factory=list,
                 description=f"List of exactly {n} investigation items to plan"
             )
+        # Ensure overarching mission is visible to the agent/strategist
+        try:
+            if getattr(self, 'mission', None):
+                self.agent.mission = self.mission
+        except Exception:
+            pass
 
         llm = UnifiedLLMClient(cfg=self.config, profile="guidance")
 
+        mission_block = ""
+        try:
+            if getattr(self, "mission", None):
+                mission_block = f"GLOBAL MISSION: {self.mission}\n\n"
+        except Exception:
+            mission_block = ""
+
         system = (
+            mission_block +
             "You are a senior smart-contract security auditor planning an audit roadmap.\n"
             "Plan the next investigations based on the system architecture graph.\n\n"
             "GUIDELINES:\n"
@@ -1200,6 +1229,12 @@ class AgentRunner:
             completed_str +
             f"\n\nPlan the top {n} NEW investigations (avoid repeating completed ones)."
         )
+        # Ensure overarching mission is visible to the agent/strategist
+        try:
+            if getattr(self, 'mission', None):
+                self.agent.mission = self.mission
+        except Exception:
+            pass
 
         try:
             if self.debug:
@@ -1485,7 +1520,12 @@ class AgentRunner:
                 result = info.get('result', {})
                 
                 if action == 'deep_think':
-                    if result.get('status') == 'success':
+                    # Robustness: handle unexpected result types gracefully
+                    if not isinstance(result, dict):
+                        error_msg = f"Unexpected strategist result type: {type(result).__name__}"
+                        console.print(f"\n[bold red]Strategist Error:[/bold red] {error_msg}")
+                        console.print("[yellow]Continuing with scout exploration...[/yellow]")
+                    elif result.get('status') == 'success':
                         console.print("\n[bold green]══════ STRATEGIST ANALYSIS COMPLETE ══════[/bold green]")
                         
                         # Show the strategist's analysis
@@ -1518,6 +1558,12 @@ class AgentRunner:
             "Perform a focused security audit of this codebase based on the available graphs. "
             "Identify potential vulnerabilities or risky patterns, form hypotheses, and summarize findings."
         )
+        # Ensure overarching mission is visible to the agent/strategist
+        try:
+            if getattr(self, 'mission', None):
+                self.agent.mission = self.mission
+        except Exception:
+            pass
 
         results = []
         planned_round = 0
@@ -1816,7 +1862,11 @@ class AgentRunner:
                             
                             if action == 'deep_think':
                                 # Special formatting for deep_think results
-                                if result.get('status') == 'success':
+                                if not isinstance(result, dict):
+                                    error_msg = f"Unexpected strategist result type: {type(result).__name__}"
+                                    console.print(f"\n[bold red]Strategist Error:[/bold red] {error_msg}")
+                                    console.print("[yellow]Continuing with scout exploration...[/yellow]")
+                                elif result.get('status') == 'success':
                                     console.print("\n[bold green]═══ STRATEGIST ANALYSIS COMPLETE ═══[/bold green]")
                                     full_response = result.get('full_response', '')
                                     if full_response:
@@ -2075,16 +2125,21 @@ class AgentRunner:
 @click.option('--session-private-hypotheses', is_flag=True, help='Keep new hypotheses private to this session')
 @click.option('--telemetry', is_flag=True, help='Expose local (localhost) telemetry SSE/control and register instance')
 @click.option('--strategist-two-pass', is_flag=True, help='Enable strategist two-pass self-critique to reduce false positives')
+@click.option('--mission', default=None, help='Overarching mission for the audit (always visible to the Strategist)')
 def agent(project_id: str, iterations: int | None, plan_n: int, time_limit: int | None, 
           config: str | None, debug: bool, platform: str | None, model: str | None,
           strategist_platform: str | None, strategist_model: str | None,
           session: str | None, new_session: bool, session_private_hypotheses: bool,
-          telemetry: bool, strategist_two_pass: bool):
+          telemetry: bool, strategist_two_pass: bool, mission: str | None):
     """Run autonomous security analysis agent."""
     
     config_path = Path(config) if config else None
     
     runner = AgentRunner(project_id, config_path, iterations, time_limit, debug, platform, model, session=session, new_session=new_session)
+    try:
+        runner.mission = mission
+    except Exception:
+        pass
     
     if not runner.initialize():
         return

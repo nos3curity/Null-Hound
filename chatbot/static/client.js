@@ -13,14 +13,53 @@ let activityES = null;
 let pendingEvt = null;
 let nowInvTimer = null;
 let codeViewEl = null;
+let hoverCardEl = null;
+let hypoDetailEl = null;
+let avatarHoldTimer = null;
 
-const AVATARS = {
-  neutral: '/static/avatars/neutral.png',
-  normal: '/static/avatars/neutral.png',
-  concentrated: '/static/avatars/neutral.png', // fallback until user adds
-  amused: '/static/avatars/neutral.png',       // fallback
-  shy: '/static/avatars/neutral.png'           // fallback
-};
+// Inuzumi avatar asset rules
+const INUZUMI_BASE = '/static/inuzumi';
+// Exactly six allowed emotions (match existing asset names)
+// Use hyphenated tokens where applicable
+const EMOTIONS = new Set(['neutral','happy','shy','intense-focus','sad-slightly','crying']);
+function inuzumiCandidates(emotion){
+  // Return an ordered list of exact .jpg files to try, matching the six assets
+  const e = (emotion||'neutral').toLowerCase();
+  // Map legacy/alias inputs into allowed set
+  let tok = e;
+  if (tok==='concentrated' || tok==='focused' || tok==='focus') tok = 'intense-focus';
+  if (tok==='sad' || tok==='sad-subtle' || tok==='sad-weak') tok = 'sad-slightly';
+  if (tok==='happy-strong' || tok==='amused') tok = 'happy';
+  if (!EMOTIONS.has(tok)) tok = 'neutral';
+
+  const f = [];
+  switch (tok){
+    case 'happy':
+      f.push(`${INUZUMI_BASE}/Inuzumi-happy.jpg`);
+      break;
+    case 'neutral':
+      f.push(`${INUZUMI_BASE}/Inuzumi-neutral.jpg`);
+      break;
+    case 'shy':
+      f.push(`${INUZUMI_BASE}/inuzumi-shy.jpg`);
+      break;
+    case 'intense-focus':
+      f.push(`${INUZUMI_BASE}/inuzumi-intense-focus.jpg`);
+      f.push(`${INUZUMI_BASE}/Inuzumi-intense-focus.jpg`);
+      break;
+    case 'sad-slightly':
+      f.push(`${INUZUMI_BASE}/inuzumi-sad-slightly.jpg`);
+      f.push(`${INUZUMI_BASE}/Inuzumi-sad-slightly.jpg`);
+      break;
+    case 'crying':
+      f.push(`${INUZUMI_BASE}/inuzumi-crying.jpg`);
+      f.push(`${INUZUMI_BASE}/Inuzumi-crying.jpg`);
+      break;
+  }
+  // Final default
+  f.push(`${INUZUMI_BASE}/Inuzumi-neutral.jpg`);
+  return f;
+}
 
 function setConn(s) {
   if (!connDot || !connText) return;
@@ -86,20 +125,40 @@ function showCode(content, relpath){
   codeViewEl.innerHTML = renderCode(content||'', relpath||'');
   try { codeViewEl.scrollTop = 0; } catch(_){ }
 }
-function setAvatar(name) {
+function setAvatarLegacy(name){
+  const emo = String(name||'neutral').toLowerCase();
+  let mapped = emo;
+  if (mapped==='concentrated' || mapped==='focused' || mapped==='focus') mapped = 'intense-focus';
+  if (mapped==='amused') mapped = 'happy';
+  setAvatarState({ emotion: mapped });
+}
+function setAvatarState({ emotion='neutral', intensity='subtle', look='center', holdMs=0 }={}){
   const img = document.getElementById('avatarImg');
   if (!img) return;
-  img.src = AVATARS[name] || AVATARS['normal'];
+  const candidates = inuzumiCandidates(emotion, intensity, look);
+  let idx = 0;
+  const tryNext = ()=>{
+    if (idx >= candidates.length){ try{ img.onerror = null; }catch(_){ } return; }
+    const src = candidates[idx++];
+    try{ img.onerror = tryNext; img.src = src; }catch(_){ tryNext(); }
+  };
+  tryNext();
+  // No emotion label under avatar
+  // Hold timer to revert to neutral-subtle unless refreshed
+  if (avatarHoldTimer){ try{ clearTimeout(avatarHoldTimer); }catch(_){ } avatarHoldTimer=null; }
+  if (holdMs && holdMs>0){
+    avatarHoldTimer = setTimeout(()=>{ setAvatarState({ emotion:'neutral', intensity:'subtle', look:'center' }); }, Math.min(holdMs, 15000));
+  }
 }
-function setPill(text) {
-  const p = document.getElementById('statePill');
-  if (p) p.textContent = text;
-}
+// No status pill under avatar anymore; keep a no-op for callers
+function setPill(_text) { /* intentionally empty */ }
 function classifyEmotion(text) {
   const t = (text||'').toLowerCase();
-  if (/haha|lol|fun|great|nice|cool|awesome|!/.test(t)) return 'amused';
-  if (/hmm|let me think|consider|analy|investig|focus/.test(t)) return 'concentrated';
-  if (/oops|sorry|embarrassed|shy/.test(t)) return 'shy';
+  if (/haha|lol|fun|great|nice|cool|awesome|!/.test(t)) return 'happy';
+  if (/(hmm+|let me think|consider|thinking|pause|processing|hold on)/.test(t)) return 'intense-focus';
+  if (/(focus|focused|investigating|analy[sz]|digging)/.test(t)) return 'intense-focus';
+  if (/(oops|sorry|embarrassed|shy)/.test(t)) return 'shy';
+  if (/(unfortunately|regret|sad|:\(|not good|bad news|cry)/.test(t)) return 'sad-slightly';
   return 'neutral';
 }
 
@@ -124,6 +183,13 @@ async function connect() {
       }
     }catch(_){ /* ignore */ }
   };
+  pc.oniceconnectionstatechange = ()=>{
+    const s = pc.iceConnectionState;
+    if (s==='failed' || s==='disconnected' || s==='closed'){
+      try{ const btn = document.getElementById('connectBtn'); if (btn) btn.disabled = false; }catch(_){ }
+      setConn(false);
+    }
+  };
   // Pre-create audio transceiver
   try { audioTransceiver = pc.addTransceiver('audio', { direction: 'sendrecv' }); } catch (_) {}
 
@@ -146,7 +212,7 @@ async function enableMic(){
   micStream = await navigator.mediaDevices.getUserMedia({audio:true});
   const t = micStream.getAudioTracks()[0];
   if (audioTransceiver && audioTransceiver.sender) { try{ await audioTransceiver.sender.replaceTrack(t);}catch(_){} }
-  setPill('Listening'); setAvatar('concentrated');
+  setPill('Listening'); setAvatarState({ emotion:'focused', intensity:'subtle' });
   // Toggle UI to allow disabling
   try{
     const micBtn = document.getElementById('micBtn');
@@ -170,7 +236,7 @@ async function disableMic(){
     }
   }finally{
     micStream = null;
-    setPill('Idle'); setAvatar('neutral');
+    setPill('Idle'); setAvatarState({ emotion:'neutral', intensity:'subtle' });
     try{
       const micBtn = document.getElementById('micBtn');
       if (micBtn){
@@ -187,13 +253,26 @@ async function sessionConfigure(){
     {
       type: 'function',
       name: 'set_emotion',
-      description: 'Set the current UI emotion without speaking it aloud.',
+      description: 'Deprecated: use set_avatar_state instead. Sets legacy UI emotion label.',
       parameters: {
         type: 'object',
         properties: {
           value: { type: 'string', enum: ['neutral','concentrated','amused','shy'] }
         },
         required: ['value']
+      }
+    },
+    {
+      type: 'function',
+      name: 'set_avatar_state',
+      description: 'Set Inuzumi avatar state (not spoken).',
+      parameters: {
+        type: 'object',
+        properties: {
+          emotion: { type:'string', enum: ['neutral','happy','shy','intense-focus','sad-slightly','crying'] },
+          holdMs: { type:'number', minimum: 0 }
+        },
+        required: ['emotion']
       }
     },
     {
@@ -225,9 +304,9 @@ async function sessionConfigure(){
   // Pull active project for persona
   let pid = '';
   try { const r = await fetch('/api/context'); const j = await r.json(); pid = (j && j.project_id) ? j.project_id : ''; } catch(_){}
-  const persona = `You are a junior security auditor (the Scout) assisting on the Hound audit for project: ${pid || '(unset)'}. Speak ONLY in first-person singular (“I”). Never use “we”, “we're”, “our”, or “us” — even when referring to the audit team; rephrase as “I”. Keep replies brief (1–2 short sentences), direct, and professional — no flattery or filler. Ground answers in the latest plan, investigations, session status, and the SystemOverview graph. Prefer calling functions to retrieve facts instead of guessing. When the user gives audit instructions (e.g., “investigate X”, “check Y next”, “remember Z”), immediately call enqueue_steering with the exact text, then acknowledge briefly. Answer progress questions flexibly (you may call human_status, but avoid numeric coverage). When asked for more about the current/most promising issue, call get_top_hypothesis (or get_hypothesis_details if an id is given), then display relevant files via get_artifact in the Artifact Viewer. When asked to show a function or contract (e.g., “startIntent” or “DaimoPay.sol”) and the file isn’t known yet, call search_repo to find it, then load it via get_artifact. IMPORTANT: Do NOT paste large code blocks in replies. When you load code, say “Loaded in Artifact Viewer” and summarize only the relevant lines.`;
+  const persona = `You are a junior security auditor (the Scout) assisting on the Hound audit for project: ${pid || '(unset)'}. Speak ONLY in first-person singular (“I”). Never use “we”, “we're”, “our”, or “us” — even when referring to the audit team; rephrase as “I”. Keep replies brief (1–2 short sentences), direct, and professional — no flattery or filler. Ground answers in the latest plan, investigations, session status, and the SystemOverview graph. Prefer calling functions to retrieve facts instead of guessing. When the user gives audit instructions (e.g., “investigate X”, “check Y next”, “remember Z”), immediately call enqueue_steering with the exact text, then acknowledge briefly. Answer progress questions flexibly (you may call human_status, but avoid numeric coverage). When asked for more about the current/most promising issue, call get_top_hypothesis (or get_hypothesis_details if an id is given), then display relevant files via get_artifact in the Artifact Viewer. IMPORTANT: Do NOT paste large code blocks in replies. When you load code, say “Loaded in Artifact Viewer” and summarize only the relevant lines.`;
   // Energetic but succinct delivery; emotion via function, never spoken
-  const meta = 'First, set an emotion by calling set_emotion({value}) and do not include any [EMO: ...] tags in your verbal response. Never say the emotion label aloud. Deliver answers in a clear, confident, brisk style (≈10–15% faster), staying concise and strictly on-topic.';
+  const meta = 'Before speaking, set the avatar with set_avatar_state({emotion}) choosing ONLY from: neutral, happy, shy, intense-focus, sad-slightly, crying. Do NOT include any [EMO: ...] tags in speech and never speak the emotion label aloud. Deliver answers in a clear, confident, brisk style (≈10–15% faster), concise and on-topic.';
   const voiceSelEl = document.getElementById('voiceSel');
   const v = voiceSelEl ? voiceSelEl.value : undefined;
   const sessionCfg = { tools, tool_choice: 'auto', instructions: persona + ' ' + meta };
@@ -242,13 +321,27 @@ async function renegotiate(){
   const model = 'gpt-4o-realtime-preview-2024-12-17';
   const voiceSel = document.getElementById('voiceSel');
   const voice = voiceSel ? (voiceSel.value || 'shimmer') : 'shimmer';
-  const resp = await fetch(`/webrtc/offer?model=${encodeURIComponent(model)}&voice=${encodeURIComponent(voice)}`,{ method:'POST', headers:{'Content-Type':'application/sdp'}, body: pc.localDescription.sdp });
-  const sdp = await resp.text();
-  if (!resp.ok || !sdp.startsWith('v=')) throw new Error('SDP negotiation failed');
+  // Add client-side timeout so we don't block the UI indefinitely
+  const ctrl = new AbortController();
+  const to = setTimeout(()=>{ try{ ctrl.abort(); }catch(_){ } }, 8000);
+  let resp, sdp;
+  try{
+    resp = await fetch(`/webrtc/offer?model=${encodeURIComponent(model)}&voice=${encodeURIComponent(voice)}`,
+      { method:'POST', headers:{'Content-Type':'application/sdp'}, body: pc.localDescription.sdp, signal: ctrl.signal });
+    sdp = await resp.text();
+  } finally { clearTimeout(to); }
+  if (!resp || !resp.ok || !sdp || !sdp.startsWith('v=')) throw new Error('SDP negotiation failed');
   await pc.setRemoteDescription({type:'answer', sdp});
 }
 
-function waitForIceGatheringComplete(pc){ if (pc.iceGatheringState==='complete') return Promise.resolve(); return new Promise(res=>{ function chk(){ if (pc.iceGatheringState==='complete'){ pc.removeEventListener('icegatheringstatechange', chk); res(); } } pc.addEventListener('icegatheringstatechange', chk); }); }
+function waitForIceGatheringComplete(pc, timeoutMs=4000){
+  if (pc.iceGatheringState==='complete') return Promise.resolve();
+  return new Promise(res=>{
+    function chk(){ if (pc.iceGatheringState==='complete'){ try{ pc.removeEventListener('icegatheringstatechange', chk); }catch(_){ } clearTimeout(to); res(); } }
+    const to = setTimeout(()=>{ try{ pc.removeEventListener('icegatheringstatechange', chk); }catch(_){ } res(); }, timeoutMs);
+    pc.addEventListener('icegatheringstatechange', chk);
+  });
+}
 
 // Handle Realtime events
 let emoCaptured = false;
@@ -281,10 +374,10 @@ function handleEvent(evt){
       // Attempt to capture [EMO: ...] at the start
       const bubbleText = (lastAssistantBubble ? lastAssistantBubble.textContent : '');
       const combined = (bubbleText + delta);
-      const m = combined.match(/^\s*\[\s*EMO:\s*(neutral|concentrated|amused|shy)\s*\]\s*(.*)$/i);
+      const m = combined.match(/^\s*\[\s*EMO:\s*([A-Za-z]+)\s*\]\s*(.*)$/i);
       if (m){
         const emo = m[1].toLowerCase();
-        setAvatar(emo);
+        setAvatarLegacy(emo);
         emoCaptured = true;
         // Replace content after removing tag
         if (lastAssistantBubble) lastAssistantBubble.textContent = '';
@@ -301,10 +394,10 @@ function handleEvent(evt){
     if (!emoCaptured && delta){
       const bubbleText = (lastAssistantBubble ? lastAssistantBubble.textContent : '');
       const combined = (bubbleText + delta);
-      const m = combined.match(/^\s*\[\s*EMO:\s*(neutral|concentrated|amused|shy)\s*\]\s*(.*)$/i);
+      const m = combined.match(/^\s*\[\s*EMO:\s*([A-Za-z]+)\s*\]\s*(.*)$/i);
       if (m){
         const emo = m[1].toLowerCase();
-        setAvatar(emo);
+        setAvatarLegacy(emo);
         emoCaptured = true;
         if (lastAssistantBubble) lastAssistantBubble.textContent = '';
         delta = m[2] || '';
@@ -313,7 +406,7 @@ function handleEvent(evt){
     if (delta) chatAppendDelta('assistant', delta);
   }
   if (t==='response.audio.start' || t==='response.output_audio.begin'){ setPill('Speaking'); lastAssistantBubble = chatAdd('assistant',''); assistantTranscript=''; }
-  if (t==='response.done' || t==='response.completed'){ if (!emoCaptured){ const emo = classifyEmotion(assistantTranscript); setAvatar(emo); } setPill('Idle'); lastAssistantBubble=null; assistantTranscript=''; emoCaptured=false; }
+  if (t==='response.done' || t==='response.completed'){ if (!emoCaptured){ const emo = classifyEmotion(assistantTranscript); setAvatarState({ emotion: emo }); } setPill('Idle'); lastAssistantBubble=null; assistantTranscript=''; emoCaptured=false; }
   // Function calling
   if (t==='response.function_call_arguments.delta'){ /* streaming args; wait for done */ }
   if (t==='response.done' && evt.response && evt.response.output && evt.response.output[0] && evt.response.output[0].type==='function_call'){
@@ -321,8 +414,15 @@ function handleEvent(evt){
     const name = item.name; const callId = item.call_id; let args={};
     try { args = JSON.parse(item.arguments||'{}'); } catch(_){ args={}; }
     // Handle set_emotion locally for immediate UI feedback
-    if (name === 'set_emotion' && args && args.value){ setAvatar(String(args.value)); }
-    invokeTool(name, args).then((out)=>{
+    if (name === 'set_emotion' && args && args.value){ setAvatarLegacy(String(args.value)); }
+    if (name === 'set_avatar_state'){
+      try{
+        setAvatarState({ emotion: String(args.emotion||'neutral'), intensity: String(args.intensity||'subtle'), look: String(args.look||'center'), holdMs: Number(args.holdMs||0) });
+      }catch(_){ /* ignore */ }
+    }
+    // Skip server roundtrip for local-only UI tools
+    const localOnly = (name === 'set_emotion' || name === 'set_avatar_state');
+    (localOnly ? Promise.resolve({ ok:true }) : invokeTool(name, args)).then((out)=>{
       try{
         if (name==='get_file_snippet' && out && out.snippet){ showCode(out.snippet, out.relpath||''); }
         if (name==='get_artifact' && out && Array.isArray(out.artifacts) && out.artifacts.length){ showCode(out.artifacts[0].content||'', out.artifacts[0].relpath||''); }
@@ -360,6 +460,15 @@ async function invokeTool(name, args){
 }
 
 window.addEventListener('DOMContentLoaded', ()=>{
+  // Ensure avatar has a graceful fallback if Inuzumi asset not present
+  try{
+    const img = document.getElementById('avatarImg');
+    if (img){
+      // Only JPGs: if initial fails, try common default
+      const onDefault = ()=>{ try{ img.onerror=null; img.src='/static/inuzumi/Inuzumi-neutral.jpg'; }catch(_){ } };
+      img.onerror = onDefault;
+    }
+  }catch(_){ }
   const connectBtn = document.getElementById('connectBtn');
   const micBtn = document.getElementById('micBtn');
   const pttBtn = document.getElementById('pttBtn');
@@ -383,6 +492,8 @@ window.addEventListener('DOMContentLoaded', ()=>{
   let isAttached = false;
   let attachedProjectId = '';
   let attachedInstanceId = '';
+  // Expose project id for detail helpers
+  try { window.attachedProjectId = attachedProjectId; } catch(_) {}
 
   // Populate instances into a datalist-like UX (basic)
   fetch('/api/instances').then(r=>r.json()).then(j=>{
@@ -424,7 +535,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
   micBtn.addEventListener('click', enableMic);
 
   // PTT: basic toggle (no VAD override here)
-  pttBtn.addEventListener('mousedown', ()=>{ setPill('Listening'); setAvatar('concentrated'); });
+  pttBtn.addEventListener('mousedown', ()=>{ setPill('Listening'); setAvatarState({ emotion:'intense-focus' }); });
   pttBtn.addEventListener('mouseup', ()=>{ setPill('Thinking'); sendEvent({ type:'response.create', response:{ modalities:['audio','text'] } }); const hint=document.getElementById('pttStatus'); if(hint){ hint.textContent='Sent'; hint.hidden=false; setTimeout(()=>hint.hidden=true, 800);} });
 
   textForm.addEventListener('submit', (ev)=>{
@@ -439,18 +550,18 @@ window.addEventListener('DOMContentLoaded', ()=>{
   actStartBtn.addEventListener('click', async ()=>{
     const raw = (projectInput.value||'').trim();
     if (!raw) { return; }
-    // Ensure realtime connection is established for chat/tools UX
-    try{
-      const already = (dc && dc.readyState==='open') || (pc && pc.connectionState==='connected');
-      if (!already){
-        setPill('Connecting');
-        await connect();
-        // Enable mic/PTT controls on successful connection and auto-activate mic
-        try{ micBtn.disabled=false; pttBtn.disabled=false; }catch(_){ }
-        try{ await enableMic(); }catch(_){ /* mic permission may be denied */ }
-        setPill('Idle');
-      }
-    }catch(_){ /* non-fatal: activity stream works without realtime */ }
+    // Do NOT block on realtime connect; try in background for chat, but start telemetry immediately
+    (async ()=>{
+      try{
+        const already = (dc && dc.readyState==='open') || (pc && pc.connectionState==='connected');
+        if (!already){
+          setPill('Connecting');
+          await connect();
+          try{ micBtn.disabled=false; pttBtn.disabled=false; }catch(_){ }
+          setPill('Idle');
+        }
+      }catch(_){ /* ignore; chat is optional for telemetry */ }
+    })();
     // Allow either "project_id | instance_id" or plain project id fallback
     let proj = raw; let instId = '';
     const m = raw.split('|');
@@ -465,11 +576,13 @@ window.addEventListener('DOMContentLoaded', ()=>{
     startActivity(proj, instId);
     // Mark UI as attached
     isAttached = true; attachedProjectId = proj; attachedInstanceId = instId;
+    try { window.attachedProjectId = attachedProjectId; } catch(_) {}
     actStartBtn.disabled = true; actStopBtn.disabled = false;
   });
   actStopBtn.addEventListener('click', ()=>{
     stopActivity();
     isAttached = false; attachedProjectId = ''; attachedInstanceId = '';
+    try { window.attachedProjectId = attachedProjectId; } catch(_) {}
     actStartBtn.disabled = false; actStopBtn.disabled = true;
   });
 
@@ -562,6 +675,8 @@ window.addEventListener('DOMContentLoaded', ()=>{
       renderHypotheses(j.hypotheses||[]);
     }catch(_){ hypoView.innerHTML = '<div class="hypo-item"><div class="hypo-body">Failed to load findings.</div></div>'; }
   }
+  // Expose for detail helpers
+  try { window.refreshHypotheses = refreshHypotheses; } catch(_) {}
   function renderHypotheses(items){
     if (!hypoView) return;
     if (!Array.isArray(items) || items.length===0){ hypoView.innerHTML = '<div class="hypo-item"><div class="hypo-body">No findings yet.</div></div>'; return; }
@@ -570,17 +685,18 @@ window.addEventListener('DOMContentLoaded', ()=>{
       const conf = (typeof h.confidence==='number') ? Math.round(h.confidence*100) : (h.confidence||0);
       const status = (h.status||'proposed');
       const title = esc(h.title||'(untitled)');
-      const descAttr = `title="${esc(h.description||'')}"`;
+      // Remove native title tooltips; use rich hover cards
       const rejectedCls = (String(status).toLowerCase()==='rejected') ? ' rejected' : '';
       html += `<div class="hypo-item${rejectedCls}">
         <div class="hypo-mark">${conf}%</div>
         <div class="hypo-body">
-          <div class="hypo-title" ${descAttr}>${title}</div>
+          <div class="hypo-title" data-hid="${esc(h.id||'')}" data-desc="${esc(h.description||'')}" data-type="${esc(h.vulnerability_type||'')}" data-status="${esc(status)}" data-conf="${String(conf)}">${title}</div>
           <div class="hypo-meta">${esc(status)}</div>
         </div>
         <div class="hypo-actions">
           <button class="confirm" data-hid="${esc(h.id||'')}" title="Mark confirmed (100%)">Confirm</button>
           <button class="reject" data-hid="${esc(h.id||'')}" title="Mark rejected (0%)">Reject</button>
+          <button class="details" data-hid="${esc(h.id||'')}">Details</button>
         </div>
       </div>`;
     }
@@ -600,6 +716,33 @@ window.addEventListener('DOMContentLoaded', ()=>{
         if (!hid) return;
         try{ await invokeTool('set_hypothesis_status', { id: hid, status: 'rejected', project_id: attachedProjectId }); }catch(_){ }
         refreshHypotheses();
+      });
+    }
+    for (const btn of hypoView.querySelectorAll('button.details')){
+      btn.addEventListener('click', async (ev)=>{
+        const hid = ev.currentTarget.getAttribute('data-hid')||'';
+        if (!hid) return;
+        await showHypoDetails(hid);
+      });
+    }
+    // Hover cards on titles
+    for (const t of hypoView.querySelectorAll('.hypo-title')){
+      t.addEventListener('mouseenter', (ev)=>{
+        const el = ev.currentTarget;
+        const info = {
+          title: el.textContent||'',
+          type: el.getAttribute('data-type')||'',
+          status: el.getAttribute('data-status')||'',
+          conf: el.getAttribute('data-conf')||'0',
+          desc: el.getAttribute('data-desc')||''
+        };
+        showHoverCard(el, info);
+      });
+      t.addEventListener('mouseleave', ()=>{ hideHoverCardSoon(); });
+      t.addEventListener('click', async (ev)=>{
+        const hid = ev.currentTarget.getAttribute('data-hid')||'';
+        if (!hid) return;
+        await showHypoDetails(hid);
       });
     }
   }
@@ -734,3 +877,138 @@ function _dedupeKey(j){ return `${j.type||''}|${j.action||''}|${j.iteration||''}
     if (j && j.project_id && !projectInput.value) projectInput.value = j.project_id;
   }).catch(()=>{});
 });
+
+// --- Finding detail/hover helpers ---
+function ensureHoverCard(){
+  if (hoverCardEl) return hoverCardEl;
+  const d = document.createElement('div');
+  d.className = 'hovercard';
+  d.style.display = 'none';
+  document.body.appendChild(d);
+  hoverCardEl = d;
+  return d;
+}
+let hoverHideTimer = null;
+function showHoverCard(anchorEl, info){
+  const d = ensureHoverCard();
+  if (hoverHideTimer){ clearTimeout(hoverHideTimer); hoverHideTimer=null; }
+  const conf = parseInt(info.conf||'0',10);
+  d.innerHTML = `
+    <div class="title">${esc(info.title||'')}</div>
+    <div class="meta">${esc(info.type||'')}${info.type?' • ':''}${esc(info.status||'')} • ${conf}%</div>
+    <div class="text">${esc((info.desc||'').slice(0,280))}${(info.desc||'').length>280?'…':''}</div>
+  `;
+  const r = anchorEl.getBoundingClientRect();
+  const pad = 8;
+  d.style.display = 'block';
+  const h = d.offsetHeight || 0;
+  const top = window.scrollY + r.top - h - pad;
+  const left = window.scrollX + r.left;
+  d.style.left = Math.max(12, left) + 'px';
+  d.style.top = Math.max(12, top) + 'px';
+}
+function hideHoverCardSoon(){
+  if (!hoverCardEl) return;
+  if (hoverHideTimer){ clearTimeout(hoverHideTimer); }
+  hoverHideTimer = setTimeout(()=>{ if (hoverCardEl) hoverCardEl.style.display='none'; }, 120);
+}
+
+async function showHypoDetails(hid){
+  if (!hypoDetailEl) hypoDetailEl = document.getElementById('hypoDetail');
+  if (!hypoDetailEl) return;
+  try{
+    const j = await invokeTool('get_hypothesis_details', { id: hid, project_id: window.attachedProjectId });
+    if (!j || !j.ok || !j.hypothesis){
+      hypoDetailEl.innerHTML = '<div class="section">Failed to load details.</div>';
+      hypoDetailEl.classList.remove('hidden');
+      return;
+    }
+    renderHypoDetail(j.hypothesis);
+  }catch(_){
+    hypoDetailEl.innerHTML = '<div class="section">Failed to load details.</div>';
+    hypoDetailEl.classList.remove('hidden');
+  }
+}
+
+function sevBadge(sev){
+  const s = String(sev||'').toLowerCase();
+  if (s.startsWith('h')) return '<span class="badge sev-high">High</span>';
+  if (s.startsWith('m')) return '<span class="badge sev-med">Medium</span>';
+  if (s.startsWith('l')) return '<span class="badge sev-low">Low</span>';
+  return '';
+}
+function statusBadge(st){
+  const s = String(st||'').toLowerCase();
+  if (s==='confirmed') return '<span class="badge status-confirmed">Confirmed</span>';
+  if (s==='rejected') return '<span class="badge status-rejected">Rejected</span>';
+  return '<span class="badge status-proposed">Proposed</span>';
+}
+
+function renderHypoDetail(h){
+  if (!hypoDetailEl) return;
+  const conf = Math.round((typeof h.confidence==='number'?h.confidence:parseFloat(h.confidence||'0'))*100) || (h.confidence||0);
+  const badges = [statusBadge(h.status), sevBadge(h.severity), h.vulnerability_type?`<span class="badge">${esc(h.vulnerability_type)}</span>`:''].filter(Boolean).join(' ');
+  const files = Array.isArray(h.files)?h.files:[];
+  const evid = Array.isArray(h.evidence)?h.evidence:[];
+  hypoDetailEl.innerHTML = `
+    <div class="hd-head">
+      <div>
+        <div class="hd-title">${esc(h.title||'(untitled finding)')}</div>
+        <div class="hd-meta">${badges}</div>
+      </div>
+      <button class="hd-close" title="Close">Close</button>
+    </div>
+    <div class="row" aria-hidden="true">
+      <div style="min-width:120px;">Confidence</div>
+      <div class="progress" style="flex:1"><div class="bar" style="width:${conf}%"></div></div>
+      <div style="min-width:40px; text-align:right;">${conf}%</div>
+    </div>
+    <div class="hd-body">
+      <div class="section">
+        <h4>Description</h4>
+        <div class="desc">${esc(h.description||'No description')}</div>
+      </div>
+      <div class="section">
+        <h4>Related Files</h4>
+        <div class="files">${files.length? files.map(r=>`<div><a href="#" data-rel="${esc(r)}">${esc(r)}</a></div>`).join('') : '<div>—</div>'}</div>
+        <div class="actions">
+          <button class="confirm" data-hid="${esc(h.id||'')}">Confirm</button>
+          <button class="reject" data-hid="${esc(h.id||'')}">Reject</button>
+        </div>
+      </div>
+      <div class="section" style="grid-column: 1 / span 2;">
+        <h4>Evidence</h4>
+        <div class="evidence">${evid.length? evid.map(e=>`• ${esc(e)}`).join('<br/>') : '—'}</div>
+      </div>
+    </div>
+  `;
+  hypoDetailEl.classList.remove('hidden');
+  // Wire close
+  const closeBtn = hypoDetailEl.querySelector('.hd-close');
+  if (closeBtn) closeBtn.addEventListener('click', ()=>{ hypoDetailEl.classList.add('hidden'); });
+  // Wire confirm/reject
+  const cBtn = hypoDetailEl.querySelector('button.confirm');
+  if (cBtn) cBtn.addEventListener('click', async ()=>{
+    try{ await invokeTool('set_hypothesis_status', { id: h.id, status: 'confirmed', project_id: window.attachedProjectId }); }catch(_){ }
+    try{ await window.refreshHypotheses(); }catch(_){ }
+  });
+  const rBtn = hypoDetailEl.querySelector('button.reject');
+  if (rBtn) rBtn.addEventListener('click', async ()=>{
+    try{ await invokeTool('set_hypothesis_status', { id: h.id, status: 'rejected', project_id: window.attachedProjectId }); }catch(_){ }
+    try{ await window.refreshHypotheses(); }catch(_){ }
+  });
+  // Wire file links: load first artifact into viewer
+  for (const a of hypoDetailEl.querySelectorAll('.files a[data-rel]')){
+    a.addEventListener('click', async (ev)=>{
+      ev.preventDefault();
+      const rel = ev.currentTarget.getAttribute('data-rel')||'';
+      if (!rel) return;
+      try{
+        const j = await invokeTool('get_artifact', { relpath: rel, max_bytes: 200000, project_id: window.attachedProjectId });
+        if (j && j.ok && j.artifacts && j.artifacts.length){
+          showCode(j.artifacts[0].content||'', j.artifacts[0].relpath||'');
+        }
+      }catch(_){ /* ignore */ }
+    });
+  }
+}

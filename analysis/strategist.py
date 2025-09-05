@@ -42,7 +42,7 @@ def _choose_profile(cfg: dict[str, Any]) -> str:
 class Strategist:
     """Senior planning agent."""
 
-    def __init__(self, config: dict[str, Any] | None = None, debug: bool = False, session_id: str | None = None, debug_logger=None):
+    def __init__(self, config: dict[str, Any] | None = None, debug: bool = False, session_id: str | None = None, debug_logger=None, mission: str | None = None):
         self.config = config or {}
         profile = _choose_profile(self.config)
         
@@ -54,6 +54,8 @@ class Strategist:
         
         self.profile = profile
         self.llm = UnifiedLLMClient(cfg=self.config, profile=profile, debug_logger=self.debug_logger)
+        # Overarching mission to keep in strategist context when available
+        self.mission = mission
         # Two-pass review toggle (off by default; enabled via config)
         try:
             self.two_pass_review = bool(self.config.get('strategist_two_pass_review', False))
@@ -225,7 +227,13 @@ class Strategist:
             "- Prefer fewer, higher-quality hypotheses over speculative ones.\n"
             "If you are highly confident there are no vulnerabilities in scope, say so.\n"
         )
+        # Prepend global mission if provided
+        mission_block = ""
+        if isinstance(self.mission, str) and self.mission.strip():
+            mission_block = f"GLOBAL MISSION: {self.mission.strip()}\n\n"
+
         user = (
+            mission_block +
             "CONTEXT (includes === INVESTIGATION GOAL === and compressed history):\n" + context + "\n\n"
             "OUTPUT INSTRUCTIONS:\n"
             "1) HYPOTHESES (max 5, one per line, exactly this pipe-separated format, avoid speculation):\n"

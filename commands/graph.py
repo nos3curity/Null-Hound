@@ -500,7 +500,7 @@ def custom(
     project_id: str,
     graph_spec_text: str,
     config_path: Path | None = None,
-    iterations: int = 2,
+    iterations: int = 3,
     file_filter: str | None = None,
     reuse_ingestion: bool = True,
     debug: bool = False,
@@ -626,6 +626,13 @@ def custom(
             kind = info.get('status', 'build')
             console.print(f"[dim]{kind}[/dim]: {msg}")
 
+    # Refine only the target graph name to avoid touching other graphs
+    _target_names = []
+    try:
+        _target_names = [forced[0]["name"]] if forced else []
+    except Exception:
+        _target_names = []
+
     results = builder.build(
         manifest_dir=manifest_dir,
         output_dir=graphs_dir,
@@ -633,7 +640,8 @@ def custom(
         focus_areas=None,
         max_graphs=1,
         force_graphs=forced,
-        refine_existing=True,
+        # Do not load/refine existing graphs for custom builds; build ONLY the forced graph
+        refine_existing=False,
         skip_discovery_if_existing=True,
         progress_callback=_cb,
     )
