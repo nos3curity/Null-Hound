@@ -350,7 +350,8 @@ def build(
                     forced = None
                     _spec = with_spec or graph_spec
                     if _spec:
-                        base = ''.join(ch for ch in _spec.split('\n',1)[0] if ch.isalnum() or ch in (' ','_','-'))
+                        base_line = _spec.split('\n', 1)[0]
+                        base = ''.join(ch for ch in base_line if ch.isalnum() or ch in (' ','_','-'))
                         nm = (base[:28].strip().replace(' ', '_') or 'CustomGraph')
                         forced = [{"name": nm, "focus": _spec}]
 
@@ -411,7 +412,8 @@ def build(
                 forced = None
                 _spec = with_spec or graph_spec
                 if _spec:
-                    base = ''.join(ch for ch in _spec.split('\n',1)[0] if ch.isalnum() or ch in (' ','_','-'))
+                    base_line = _spec.split('\n', 1)[0]
+                    base = ''.join(ch for ch in base_line if ch.isalnum() or ch in (' ','_','-'))
                     nm = (base[:28].strip().replace(' ', '_') or 'CustomGraph')
                     forced = [{"name": nm, "focus": _spec}]
 
