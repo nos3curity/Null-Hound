@@ -1866,6 +1866,9 @@ class AgentRunner:
                             
                             self._agent_log.append(f"Iter {it} result: {action}")
                             
+                        elif status == 'usage':
+                            console.print(f"[dim]Usage: {msg}[/dim]")
+                            self._agent_log.append(f"Iter {it} usage: {msg}")
                         elif status in {'analyzing', 'executing', 'hypothesis_formed'}:
                             console.print(f"[dim]{status.capitalize()}: {msg}[/dim]")
                             self._agent_log.append(f"Iter {it} {status}: {msg[:100]}")
@@ -1873,7 +1876,8 @@ class AgentRunner:
                     # Show an animated status while the agent thinks/acts for this investigation
                     replan_requested = False
                     try:
-                        with console.status("[cyan]Agent thinking deeply...[/cyan]", spinner="line", spinner_style="cyan"):
+                        # More accurate status: the Scout is exploring code, not just "thinking"
+                        with console.status("[cyan]Exploring codebase and analyzing nodes...[/cyan]", spinner="line", spinner_style="cyan"):
                             report = self.agent.investigate(inv.goal, max_iterations=max_iters, progress_callback=_cb)
                     except _TimeLimitReached:
                         console.print(f"\n[yellow]Time limit reached ({self.time_limit_minutes} minutes) — stopping audit[/yellow]")

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
+from llm.token_tracker import get_token_tracker
 
 try:
     # Pydantic v2 style config
@@ -120,6 +121,8 @@ class AutonomousAgent:
             profile=profile_to_use,
             debug_logger=self.debug_logger
         )
+        # Remember which profile the agent uses for context limit calculations
+        self.agent_profile = profile_to_use
         
         # Initialize strategist model for deep thinking
         try:
@@ -414,6 +417,18 @@ class AutonomousAgent:
                     except Exception:
                         pass
                 
+                # Emit context usage after each decision
+                try:
+                    if progress_callback:
+                        usage_msg = self._format_context_usage()
+                        progress_callback({
+                            'status': 'usage',
+                            'iteration': iterations,
+                            'message': usage_msg
+                        })
+                except Exception:
+                    pass
+                
                 # Log the decision
                 self.conversation_history.append({
                     'role': 'assistant',
@@ -477,6 +492,18 @@ class AutonomousAgent:
 
                 # Maybe compress history if near budget
                 self._maybe_compress_history()
+                
+                # Emit context usage after applying result and any compression
+                try:
+                    if progress_callback:
+                        usage_msg = self._format_context_usage()
+                        progress_callback({
+                            'status': 'usage',
+                            'iteration': iterations,
+                            'message': usage_msg
+                        })
+                except Exception:
+                    pass
                 
                 # Check if complete
                 if decision.action == 'complete':
@@ -809,6 +836,38 @@ class AutonomousAgent:
                 return max(1, len(text) // 4)
             except Exception:
                 return 0
+
+    def _context_limit(self) -> int:
+        """Return context token limit for the agent's model profile."""
+        try:
+            cfg = self.config or {}
+            models = cfg.get('models', {}) if isinstance(cfg, dict) else {}
+            prof = getattr(self, 'agent_profile', 'scout')
+            mcfg = models.get(prof, {}) if isinstance(models, dict) else {}
+            # Prefer model-specific max_context; fall back to global context.max_tokens
+            return int(mcfg.get('max_context') or cfg.get('context', {}).get('max_tokens', 256000))
+        except Exception:
+            return 256000
+
+    def _format_context_usage(self) -> str:
+        """Build a concise usage string with context percent and last LLM call usage."""
+        try:
+            limit = self._context_limit()
+            ctx = self._build_context()
+            used = self._count_tokens(ctx)
+            pct = min(100, int((used * 100) / max(1, limit)))
+        except Exception:
+            limit, used, pct = 0, 0, 0
+        # Last LLM call usage (if any)
+        try:
+            last = get_token_tracker().get_last_usage() or {}
+            prov = last.get('provider') or self.llm.provider_name
+            model = last.get('model') or self.llm.model
+            itok = int(last.get('input_tokens') or 0)
+            otok = int(last.get('output_tokens') or 0)
+            return f"Context {used}/{limit} tok ({pct}%) — Last call {prov}:{model} in={itok} out={otok}"
+        except Exception:
+            return f"Context {used}/{limit} tok ({pct}%)"
 
     def _maybe_compress_history(self):
         """Compress older conversation into memory notes when near context limit.

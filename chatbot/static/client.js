@@ -147,6 +147,38 @@ async function enableMic(){
   const t = micStream.getAudioTracks()[0];
   if (audioTransceiver && audioTransceiver.sender) { try{ await audioTransceiver.sender.replaceTrack(t);}catch(_){} }
   setPill('Listening'); setAvatar('concentrated');
+  // Toggle UI to allow disabling
+  try{
+    const micBtn = document.getElementById('micBtn');
+    if (micBtn){
+      micBtn.textContent = 'Disable Mic';
+      micBtn.onclick = disableMic;
+    }
+  }catch(_){ }
+}
+
+async function disableMic(){
+  try{
+    if (micStream){
+      for (const tr of micStream.getTracks()){
+        try{ tr.stop(); }catch(_){ }
+      }
+    }
+    // Stop sending microphone upstream
+    if (audioTransceiver && audioTransceiver.sender){
+      try{ await audioTransceiver.sender.replaceTrack(null); }catch(_){ }
+    }
+  }finally{
+    micStream = null;
+    setPill('Idle'); setAvatar('neutral');
+    try{
+      const micBtn = document.getElementById('micBtn');
+      if (micBtn){
+        micBtn.textContent = 'Enable Mic';
+        micBtn.onclick = enableMic;
+      }
+    }catch(_){ }
+  }
 }
 
 async function sessionConfigure(){
@@ -386,7 +418,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
   });
   const voiceSelect = document.getElementById('voiceSel');
   if (voiceSelect) voiceSelect.addEventListener('change', ()=>{ renegotiate().catch(()=>{}); });
-  // No style selector anymore
+  // No style selector anymore; default mic action is enable until toggled
   micBtn.addEventListener('click', enableMic);
 
   // PTT: basic toggle (no VAD override here)
@@ -411,8 +443,9 @@ window.addEventListener('DOMContentLoaded', ()=>{
       if (!already){
         setPill('Connecting');
         await connect();
-        // Enable mic/PTT controls on successful connection
+        // Enable mic/PTT controls on successful connection and auto-activate mic
         try{ micBtn.disabled=false; pttBtn.disabled=false; }catch(_){ }
+        try{ await enableMic(); }catch(_){ /* mic permission may be denied */ }
         setPill('Idle');
       }
     }catch(_){ /* non-fatal: activity stream works without realtime */ }
@@ -607,7 +640,7 @@ function _dedupeKey(j){ return `${j.type||''}|${j.action||''}|${j.iteration||''}
       const ts = j.ts ? new Date(j.ts*1000) : new Date();
       const tstr = ts.toTimeString().split(' ')[0];
       // Only show substantive agent events; drop heartbeats/status/steer noise
-      const showTypes = new Set(['decision','result','executing','analyzing','complete','generating_report','strategist']);
+      const showTypes = new Set(['decision','result','executing','analyzing','complete','generating_report','strategist','usage']);
       if (!showTypes.has(j.type)) return;
       // Dedupe initial replays
       const key = _dedupeKey(j);
