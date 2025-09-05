@@ -638,6 +638,18 @@ class AgentRunner:
             console.print(f"[red]Error:[/red] Graph file not found: {graph_path}")
             return False
         
+        # Require SystemArchitecture graph before starting an audit
+        try:
+            sys_graph = graphs_dir / 'graph_SystemArchitecture.json'
+            if not sys_graph.exists():
+                console.print("[red]Error: SystemArchitecture graph not found for this project.[/red]")
+                console.print("[yellow]Run one of:\n  ./hound.py graph build <project> --init --iterations 1\n  ./hound.py graph build <project> --auto --iterations 2[/yellow]")
+                return False
+        except Exception:
+            console.print("[red]Error while checking SystemArchitecture graph.[/red]")
+            console.print("[yellow]Rebuild graphs with '--init' or '--auto'.[/yellow]")
+            return False
+        
         # Load config properly using the standard method
         from utils.config_loader import load_config
         if self.config_path and self.config_path.exists():

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Hound - AI-powered security analysis system."""
 
-import os
 import sys
 from pathlib import Path
 
@@ -31,7 +30,6 @@ try:
 except Exception:
     pass
 
-from commands.graph import build  # noqa: E402
 from commands.project import ProjectManager  # noqa: E402
 
 app = typer.Typer(
@@ -91,6 +89,12 @@ def project_list():
     from commands.project import list_projects_cmd
     _invoke_click(list_projects_cmd, {'output_json': False})
 
+@project_app.command("ls")
+def project_ls():
+    """Alias for 'project list' (lists all projects)."""
+    from commands.project import list_projects_cmd
+    _invoke_click(list_projects_cmd, {'output_json': False})
+
 @project_app.command("info")
 def project_info(name: str = typer.Argument(..., help="Project name")):
     """Show project information."""
@@ -130,12 +134,30 @@ def project_delete(
     from commands.project import delete
     _invoke_click(delete, {'name': name, 'force': force})
 
+@project_app.command("rm")
+def project_rm(
+    name: str = typer.Argument(..., help="Project name"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force remove without confirmation")
+):
+    """Alias for 'project delete'."""
+    from commands.project import delete
+    _invoke_click(delete, {'name': name, 'force': force})
+
 @project_app.command("hypotheses")
 def project_hypotheses(
     name: str = typer.Argument(..., help="Project name"),
     details: bool = typer.Option(False, "--details", "-d", help="Show full descriptions without abbreviation")
 ):
     """List all hypotheses for a project with confidence ratings."""
+    from commands.project import hypotheses
+    _invoke_click(hypotheses, {'name': name, 'details': details})
+
+@project_app.command("ls-hypotheses")
+def project_ls_hypotheses(
+    name: str = typer.Argument(..., help="Project name"),
+    details: bool = typer.Option(False, "--details", "-d", help="Show full descriptions without abbreviation")
+):
+    """Alias for 'project hypotheses' (lists hypotheses)."""
     from commands.project import hypotheses
     _invoke_click(hypotheses, {'name': name, 'details': details})
 
@@ -177,6 +199,20 @@ def project_sessions(
         'project_name': project_name,
         'session_id': session_id,
         'list_sessions': list_sessions,
+        'output_json': output_json
+    })
+
+@project_app.command("ls-sessions")
+def project_ls_sessions(
+    project_name: str = typer.Argument(..., help="Project name"),
+    output_json: bool = typer.Option(False, "--json", help="Output as JSON")
+):
+    """List all sessions for a project (alias for 'project sessions --list')."""
+    from commands.project import sessions
+    _invoke_click(sessions, {
+        'project_name': project_name,
+        'session_id': None,
+        'list_sessions': True,
         'output_json': output_json
     })
 
@@ -360,13 +396,14 @@ def agent_investigate(
         proj_path = None
         if project_id:
             p = Path(project_id).expanduser().resolve()
-            if (p / 'manifest' / 'manifest.json').exists():
+            # Treat it as a project path if it looks like one
+            if (p / 'graphs').exists() or (p / 'manifest').exists() or (p / 'project.json').exists():
                 proj_path = p
         if proj_path:
             sys_graph = proj_path / 'graphs' / 'graph_SystemArchitecture.json'
             if not sys_graph.exists():
                 console.print("[red]Error: SystemArchitecture graph not found for this project.[/red]")
-                console.print("[yellow]Run: hound graph build <project> --init --iterations 1 [--files <whitelist>] first.[/yellow]")
+                console.print("[yellow]Run one of:\n  ./hound.py graph build <project> --init --iterations 1 [--files <whitelist>]\n  ./hound.py graph build <project> --auto --iterations 2[/yellow]")
                 raise typer.Exit(2)
     except Exception:
         pass
@@ -394,12 +431,13 @@ def graph_ls(
     json_out: bool = typer.Option(False, "--json", help="Output as JSON")
 ):
     """List graphs for a project with basic stats and last update time."""
-    from commands.project import ProjectManager as _PM
-    from rich.table import Table
-    from rich import box as _box
     import json as _json
     from datetime import datetime as _dt
-    import time as _time
+
+    from rich import box as _box
+    from rich.table import Table
+
+    from commands.project import ProjectManager as _PM
 
     manager = _PM()
     proj = manager.get_project(project)
@@ -416,7 +454,7 @@ def graph_ls(
     items = []
     for p in sorted(graphs_dir.glob('graph_*.json')):
         try:
-            with open(p, 'r') as f:
+            with open(p) as f:
                 data = _json.load(f)
             name = data.get('name') or data.get('internal_name') or p.stem.replace('graph_','')
             stats = data.get('stats') or {}
@@ -466,7 +504,7 @@ def graph_build(
     project: str = typer.Option(None, "--project", "-p", help="Use an existing project by name"),
     create_project: bool = typer.Option(False, "--create-project", help="Create a new project from the given source path"),
     iterations: int = typer.Option(3, "--iterations", "-i", help="Maximum iterations for graph refinement"),
-    graphs: int = typer.Option(2, "--graphs", "-g", help="Number of graphs to generate (ignored if --graph-spec is set)"),
+    graphs: int = typer.Option(5, "--graphs", "-g", help="Number of graphs to generate (ignored if --graph-spec is set)"),
     focus: str = typer.Option(None, "--focus", "-f", help="Comma-separated focus areas"),
     files: str = typer.Option(None, "--files", help="Comma-separated list of file paths to include"),
     graph_spec: str = typer.Option(None, "--graph-spec", help="Build a single graph described by this text (schema + refinement)"),
@@ -480,8 +518,6 @@ def graph_build(
     """Build system architecture graph from source code."""
     
     manager = ProjectManager()
-    source_path = None
-    output_dir = output
     resolved_project_name = None
     
     # Handle different input modes
@@ -492,8 +528,8 @@ def graph_build(
             console.print(f"[red]Project '{project}' not found.[/red]")
             raise typer.Exit(1)
         project_path = manager.get_project_path(project)
-        source_path = proj['source_path']
-        output_dir = str(project_path)  # Don't add /graphs here, graph.py will add it
+        proj['source_path']
+        str(project_path)  # Don't add /graphs here, graph.py will add it
         console.print(f"[cyan]Using project:[/cyan] {project}")
         resolved_project_name = project
     elif target:
@@ -502,28 +538,15 @@ def graph_build(
         if proj:
             # Target is a project name
             project_path = manager.get_project_path(target)
-            source_path = proj['source_path']
-            output_dir = str(project_path)  # Don't add /graphs here, graph.py will add it
+            proj['source_path']
+            str(project_path)  # Don't add /graphs here, graph.py will add it
             console.print(f"[cyan]Using project:[/cyan] {target}")
             resolved_project_name = target
         else:
-            # Target is a source path
-            source_path = target
-            if create_project:
-                # Create new project from this path
-                project_name = Path(target).name
-                proj_config = manager.create_project(
-                    project_name, target, 
-                    f"Graph analysis of {project_name}",
-                    auto_name=True
-                )
-                project_path = manager.get_project_path(proj_config['name'])
-                output_dir = str(project_path)  # Don't add /graphs here, graph.py will add it
-                console.print(f"[green]Created project:[/green] {proj_config['name']}")
-                resolved_project_name = proj_config['name']
-            else:
-                console.print("[red]Error: Source path provided but no project specified. Use --create-project to create one or --project to select an existing project.[/red]")
-                raise typer.Exit(1)
+            # Disallow direct source paths for graph build to keep the interface project-centric
+            console.print("[red]Error: Unknown project. Use --project <name> to select an existing project, or create one first:[/red]")
+            console.print("  ./hound.py project create <project_name> <source_path>")
+            raise typer.Exit(1)
     else:
         # No target or project specified
         console.print("[red]Error: Either specify a target path/project name or use --project option[/red]")
@@ -715,6 +738,80 @@ def graph_reset(
         "[white]Annotations cleared — the investigation begins anew.[/white]",
         "[white]Tabula rasa — your graphs are pristine.[/white]",
     ]))
+
+
+@graph_app.command("delete")
+def graph_delete(
+    project: str = typer.Argument(..., help="Project name"),
+    name: str = typer.Option(None, "--name", "-n", help="Graph name to delete (internal name, e.g., SystemArchitecture)"),
+    all: bool = typer.Option(False, "--all", help="Delete all graphs for the project")
+):
+    """Delete one or all graphs from a project (with confirmation)."""
+    from rich.prompt import Confirm
+    
+    manager = ProjectManager()
+    proj = manager.get_project(project)
+    if not proj:
+        console.print(f"[red]Project '{project}' not found.[/red]")
+        raise typer.Exit(1)
+    project_path = manager.get_project_path(project)
+    graphs_dir = project_path / 'graphs'
+    
+    if not graphs_dir.exists():
+        console.print(f"[yellow]No graphs directory found for project '{project}'.[/yellow]")
+        raise typer.Exit(0)
+    
+    if all and name:
+        console.print("[red]Error:[/red] Specify either --all or --name, not both.")
+        raise typer.Exit(2)
+    
+    targets = []
+    if all:
+        targets = sorted(graphs_dir.glob('graph_*.json'))
+        if not targets:
+            console.print("[yellow]No graph files to delete.[/yellow]")
+            raise typer.Exit(0)
+        if not Confirm.ask(f"[yellow]Delete ALL {len(targets)} graphs for '{project}'? This cannot be undone.[/yellow]", default=False):
+            console.print("[dim]Aborted by user.[/dim]")
+            raise typer.Exit(1)
+    else:
+        if not name:
+            console.print("[red]Error:[/red] Provide --name <GraphName> or use --all.")
+            raise typer.Exit(2)
+        file = graphs_dir / f"graph_{name}.json"
+        if not file.exists():
+            console.print(f"[yellow]Graph not found: {file.name}[/yellow]")
+            raise typer.Exit(1)
+        if not Confirm.ask(f"[yellow]Delete graph '{name}'?[/yellow]", default=False):
+            console.print("[dim]Aborted by user.[/dim]")
+            raise typer.Exit(1)
+        targets = [file]
+    
+    deleted = 0
+    for p in targets:
+        try:
+            p.unlink()
+            console.print(f"[green]✓[/green] Deleted {p.name}")
+            deleted += 1
+        except Exception as e:
+            console.print(f"[red]✗[/red] Failed to delete {p.name}: {e}")
+    console.print(f"[bright_green]Deleted {deleted}/{len(targets)} graph file(s).[/bright_green]")
+
+@graph_app.command("rm")
+def graph_rm(
+    project: str = typer.Argument(..., help="Project name"),
+    name: str = typer.Option(None, "--name", "-n", help="Graph name to remove (internal name, e.g., SystemArchitecture)"),
+    all: bool = typer.Option(False, "--all", help="Remove all graphs for the project")
+):
+    """Alias for 'graph delete'."""
+    # Reuse the delete implementation
+    ctx_params = {
+        'project': project,
+        'name': name,
+        'all': all,
+    }
+    # Call through the same function
+    graph_delete(**ctx_params)  # type: ignore[misc]
 
 
 @app.command()

@@ -364,7 +364,7 @@ def create(name: str, source_path: str, description: str | None, auto_name: bool
                 cli_cmd = f"python {cli_cmd}"
         
         console.print("\n[cyan]To analyze this project, run:[/cyan]")
-        console.print(f"  {cli_cmd} graph build --project {config['name']}")
+        console.print(f"  {cli_cmd} graph build --project {config['name']} --auto")
         console.print(f"  {cli_cmd} agent audit --project {config['name']}")
         
     except ValueError as e:

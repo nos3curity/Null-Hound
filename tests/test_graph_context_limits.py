@@ -175,8 +175,8 @@ class TestGraphContextLimits(unittest.TestCase):
     
     @patch('analysis.graph_builder.LLMClient')
     @patch('analysis.graph_builder.count_tokens')
-    def test_discovery_uses_strategist_context(self, mock_count_tokens, mock_llm_class):
-        """Test that discovery phase uses strategist model's context, not graph model's."""
+    def test_discovery_uses_graph_context(self, mock_count_tokens, mock_llm_class):
+        """In single-model mode, discovery uses the graph model's context."""
         from analysis.graph_builder import GraphBuilder
         
         # Mock token counting
@@ -194,11 +194,7 @@ class TestGraphContextLimits(unittest.TestCase):
                     "model": "gpt-4.1",
                     "max_context": 1000000  # Graph model has 1M
                 },
-                "strategist": {
-                    "provider": "openai",
-                    "model": "gpt-4"
-                    # No max_context, will use global
-                }
+                # Strategist profile is ignored in single-model mode
             },
             "context": {
                 "max_tokens": 256000  # Global/strategist limit is 256k
@@ -207,16 +203,9 @@ class TestGraphContextLimits(unittest.TestCase):
         
         builder = GraphBuilder(config, debug=False)
         
-        # Test discovery sampling
+        # Test discovery sampling (should use graph model's 1M context and take all cards)
         sampled_discovery = builder._sample_cards_for_discovery(self.cards)
-        
-        # Discovery should use 256k context (global), not 1M
-        # 256k - 50k reserved = 206k available (more conservative now)
-        # 70% of 206k = ~144k target tokens (more conservative)
-        # Each card is ~2.5k tokens
-        # Should fit ~57 cards
-        self.assertLess(len(sampled_discovery), 65, "Discovery should use smaller context")
-        self.assertGreater(len(sampled_discovery), 50, "Discovery should still sample reasonable amount")
+        self.assertEqual(len(sampled_discovery), 100, "Discovery should use full graph context")
         
         # Graph building should use 1M context
         sampled_graph = builder._sample_cards(self.cards)

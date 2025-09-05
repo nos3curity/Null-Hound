@@ -262,46 +262,20 @@ class GraphBuilder:
     """
     
     def __init__(self, config: dict, debug: bool = False, debug_logger=None):
-        # Use a local copy of config and hardcode provider/model per project request:
-        # - Discovery (strategist): Gemini 2.5 Pro WITH thinking
-        # - Building (graph): Gemini 2.5 Pro WITHOUT thinking
+        # Use a local copy of config and honor user-provided model settings.
+        # We now use a single model profile ('graph') for both discovery and build.
         import copy as _copy
         cfg = _copy.deepcopy(config) if isinstance(config, dict) else {}
-        models_cfg = cfg.setdefault("models", {})
-        # Force graph profile
-        graph_cfg = models_cfg.setdefault("graph", {})
-        graph_cfg["provider"] = "gemini"
-        graph_cfg["model"] = "gemini-2.5-pro"
-        graph_cfg["thinking_enabled"] = False
-        # Preserve existing thinking_budget if present; otherwise keep default
-        graph_cfg.setdefault("thinking_budget", -1)
-        # Ensure generous context to include all cards when possible
-        graph_cfg.setdefault("max_context", 1_000_000)
-        # Force strategist profile (discovery)
-        strat_cfg = models_cfg.setdefault("strategist", {})
-        strat_cfg["provider"] = "gemini"
-        strat_cfg["model"] = "gemini-2.5-pro"
-        strat_cfg["thinking_enabled"] = True
-        strat_cfg.setdefault("thinking_budget", -1)
-        # Match graph context to maximize chance of including all cards
-        strat_cfg.setdefault("max_context", graph_cfg.get("max_context", 1_000_000))
-        # Save effective config
         self.config = cfg
         self.debug = debug
         self.debug_logger = debug_logger
-        
-        # Initialize LLM clients - guidance for discovery, graph for building
-        # Graph model for building graphs
+
+        # Initialize LLM client for graph building (also used for discovery)
         self.llm = LLMClient(self.config, profile="graph", debug_logger=debug_logger)
+        self.llm_agent = self.llm  # single-model setup
         if debug:
             graph_model = self.config.get("models", {}).get("graph", {}).get("model", "unknown")
-            print(f"[*] Graph model: {graph_model}")
-        
-        # Strategist model for initial discovery (heavier reasoning)
-        self.llm_agent = LLMClient(self.config, profile="strategist", debug_logger=debug_logger)
-        if debug:
-            agent_model = self.config.get("models", {}).get("strategist", {}).get("model", "unknown")
-            print(f"[*] Agent model: {agent_model} (for discovery)")
+            print(f"[*] Graph model: {graph_model} (used for discovery and build)")
         
         # Knowledge graphs storage
         self.graphs: dict[str, KnowledgeGraph] = {}
@@ -468,12 +442,12 @@ class GraphBuilder:
         
         # Use adaptive sampling based on token count for discovery phase
         self._emit("discover", "Analyzing codebase for graph discovery...")
-        # Sample cards to stay within STRATEGIST model's context limits (not graph model's)
+        # Sample cards to stay within the active model's context limits
         code_samples = self._sample_cards_for_discovery(cards)
         if len(code_samples) != len(cards):
             msg = (
                 f"Discovery context limit reached — sampling active: using {len(code_samples)}/{len(cards)} cards. "
-                f"Consider restricting input files with --files (whitelist), and/or using a larger-context model or increasing models.strategist.max_context."
+                f"Consider restricting input files with --files (whitelist), and/or increasing models.graph.max_context."
             )
             self._emit("warn", msg)
             self._emit("sample", msg)
@@ -539,18 +513,20 @@ The FIRST must be the system/component/flow overview."""
         
         # Estimate token counts for the request
         user_prompt_str = json.dumps(user_prompt, indent=2)
-        system_tokens = count_tokens(system_prompt, "openai", self.config.get("llm_agent_model", "gpt-5-mini"))
-        user_tokens = count_tokens(user_prompt_str, "openai", self.config.get("llm_agent_model", "gpt-5-mini"))
+        # Use the graph model for token estimation in single-model mode
+        _graph_model_name = (self.config.get("models", {}).get("graph", {}) or {}).get("model", "gpt-4o-mini")
+        system_tokens = count_tokens(system_prompt, "openai", _graph_model_name)
+        user_tokens = count_tokens(user_prompt_str, "openai", _graph_model_name)
         total_tokens = system_tokens + user_tokens
         
         # Log token counts
         self._emit("debug", f"Initial graph design prompt tokens: system={system_tokens:,}, user={user_tokens:,}, total={total_tokens:,}")
         
-        # Check if we're approaching context limit for strategist/discovery model
-        strategist_model_config = self.config.get("models", {}).get("strategist", {})
-        strategist_max_context = strategist_model_config.get("max_context", 400000)  # Default 400k for discovery
-        if total_tokens > strategist_max_context * 0.9:
-            self._emit("warning", f"Token count ({total_tokens:,}) approaching context limit ({strategist_max_context:,})")
+        # Check if we're approaching context limit (use graph model's context in single-model mode)
+        graph_model_config = self.config.get("models", {}).get("graph", {})
+        graph_max_context = graph_model_config.get("max_context", self.config.get("context", {}).get("max_tokens", 256000))
+        if total_tokens > graph_max_context * 0.9:
+            self._emit("warning", f"Token count ({total_tokens:,}) approaching context limit ({graph_max_context:,})")
         
         # Use agent model for discovery (better reasoning)
         discovery = self.llm_agent.parse(
@@ -1004,29 +980,21 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
     def _sample_cards_for_discovery(self, cards: list[dict]) -> list[dict]:
         """
         Sample cards specifically for the discovery phase.
-        Uses strategist model's context limit or global default, NOT graph model's limit.
+        Single-model mode: use the graph model's context limit.
         """
-        # Get context limit for strategist/discovery model
-        strategist_model_config = self.config.get("models", {}).get("strategist", {})
-        strategist_max_context = strategist_model_config.get("max_context")
-        
-        if strategist_max_context:
-            max_context_tokens = strategist_max_context
-            if self.debug:
-                print(f"      Discovery: Using strategist model's max_context: {max_context_tokens:,} tokens")
-        else:
-            # Fall back to global context limit
-            max_context_tokens = self.config.get("context", {}).get("max_tokens", 256000)
-            if self.debug:
-                print(f"      Discovery: Using global max_context: {max_context_tokens:,} tokens")
+        # Get context limit from graph model or fall back to global default
+        graph_model_config = self.config.get("models", {}).get("graph", {})
+        max_context_tokens = graph_model_config.get("max_context") or self.config.get("context", {}).get("max_tokens", 256000)
+        if self.debug:
+            print(f"      Discovery: Using graph model's max_context: {max_context_tokens:,} tokens")
         
         # Reserve more tokens for discovery (system prompt is larger, needs more response space)
         reserved_tokens = 50000  # More conservative reservation for discovery
         available_tokens = max_context_tokens - reserved_tokens
         target_tokens = int(available_tokens * 0.7)  # More conservative: 70% instead of 80%
         
-        # Get the strategist model for token counting
-        model = strategist_model_config.get("model", "gpt-5")
+        # Use the graph model for token counting
+        model = graph_model_config.get("model", "gpt-4o-mini")
         
         # Count tokens for all cards
         total_tokens = 0
@@ -1332,7 +1300,7 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
             return
         for p in output_dir.glob("graph_*.json"):
             try:
-                with open(p, "r") as f:
+                with open(p) as f:
                     data = json.load(f)
                 name = data.get("internal_name") or data.get("name") or p.stem.replace("graph_", "")
                 focus = data.get("focus", "")

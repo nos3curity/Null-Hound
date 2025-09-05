@@ -12,6 +12,7 @@ from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
+from rich.prompt import Confirm
 from rich.table import Table
 
 # Add parent directory to path for imports
@@ -49,7 +50,7 @@ def build(
     project_id: str = typer.Argument(..., help="Hound project id (under ~/.hound/projects/<id>)"),
     config_path: Path | None = typer.Option(None, "--config", "-c", help="Path to config.yaml"),
     max_iterations: int = typer.Option(3, "--iterations", "-i", help="Maximum iterations"),
-    max_graphs: int = typer.Option(2, "--graphs", "-g", help="Number of graphs"),
+    max_graphs: int = typer.Option(5, "--graphs", "-g", help="Number of graphs"),
     focus_areas: str | None = typer.Option(None, "--focus", "-f", help="Focus areas"),
     file_filter: str | None = typer.Option(None, "--files", help="Comma-separated whitelist of files relative to repo root"),
     graph_spec: str | None = typer.Option(None, "--graph-spec", help="Build a single graph described by this text (skips general discovery for others)"),
@@ -67,27 +68,63 @@ def build(
     
     # Enforce project id usage and resolve project directories
     project_dir = Path.home() / '.hound' / 'projects' / project_id
-    if not project_dir.exists() or not (project_dir / 'manifest' / 'manifest.json').exists():
-        console.print(f"[red]Error: Project '{project_id}' not found under ~/.hound/projects/ or missing manifest[/red]")
+    if not project_dir.exists():
+        console.print(f"[red]Error: Project '{project_id}' not found under ~/.hound/projects/[/red]")
         raise typer.Exit(code=2)
-    # Load repo path from manifest
+    # Resolve repository path: prefer manifest.json, fall back to project.json
+    repo_path: Path | None = None
+    manifest_file = project_dir / 'manifest' / 'manifest.json'
     try:
-        with open(project_dir / 'manifest' / 'manifest.json') as f:
-            manifest_data = json.load(f)
-        repo_root = manifest_data.get('repo_path')
-        if not repo_root:
-            console.print(f"[red]Error: repo_path missing in manifest for project '{project_id}'[/red]")
+        if manifest_file.exists():
+            with open(manifest_file) as f:
+                manifest_data = json.load(f)
+            repo_root = manifest_data.get('repo_path') or manifest_data.get('source_path')
+            if repo_root:
+                repo_path = Path(repo_root).expanduser().resolve()
+    except Exception:
+        repo_path = None
+    if repo_path is None:
+        try:
+            with open(project_dir / 'project.json') as f:
+                proj_cfg = json.load(f)
+            src = proj_cfg.get('source_path')
+            if not src:
+                console.print(f"[red]Error: Could not determine source_path for project '{project_id}'.[/red]")
+                raise typer.Exit(code=2)
+            repo_path = Path(src).expanduser().resolve()
+        except Exception as e:
+            console.print(f"[red]Error: failed to load project configuration: {e}[/red]")
             raise typer.Exit(code=2)
-        repo_path = Path(repo_root).expanduser().resolve()
-    except Exception as e:
-        console.print(f"[red]Error: failed to load project manifest: {e}[/red]")
-        raise typer.Exit(code=2)
 
     repo_name = project_id
     output_dir = project_dir
     manifest_dir = output_dir / "manifest"
     graphs_dir = output_dir / "graphs"
     
+    # If --init is specified and SystemArchitecture already exists, skip work
+    if init:
+        sys_graph = graphs_dir / 'graph_SystemArchitecture.json'
+        if sys_graph.exists():
+            console.print("[yellow]SystemArchitecture graph already exists — skipping initialization.[/yellow]")
+            console.print("[dim]Use '--auto' to add other graphs, or delete the existing file to re-initialize.[/dim]")
+            raise typer.Exit(code=0)
+    
+    # If --auto is requested and graphs already exist, ask for confirmation
+    if auto:
+        try:
+            existing_graphs = list(graphs_dir.glob("graph_*.json"))
+        except Exception:
+            existing_graphs = []
+        if existing_graphs:
+            count = len(existing_graphs)
+            proceed = Confirm.ask(
+                f"[yellow]Found {count} existing graph file{'s' if count != 1 else ''}. Continue and update/overwrite (including SystemArchitecture)?[/yellow]",
+                default=False
+            )
+            if not proceed:
+                console.print("[dim]Aborted by user.[/dim]")
+                raise typer.Exit(code=1)
+
     # Set up token tracker
     token_tracker = get_token_tracker()
     token_tracker.reset()
@@ -162,7 +199,7 @@ def build(
                     progress_console.print(line)
 
             # Step 1: Ingestion (reused if manifest exists and reuse_ingestion=True)
-            reuse_ok = reuse_ingestion and (manifest_dir / 'manifest' / 'manifest.json').exists() and (manifest_dir / 'cards.jsonl').exists()
+            reuse_ok = reuse_ingestion and (manifest_dir / 'manifest.json').exists() and (manifest_dir / 'cards.jsonl').exists()
             if reuse_ok:
                 # Reuse existing manifest/cards
                 try:
@@ -173,6 +210,11 @@ def build(
                     reuse_ok = False
             if not reuse_ok:
                 log_line('ingest', 'Step 1: Repository Ingestion')
+                # Ensure manifest dir exists before saving
+                try:
+                    manifest_dir.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
                 manifest = RepositoryManifest(str(repo_path), config, file_filter=files_to_include)
                 cards, files = manifest.walk_repository()
                 manifest.save_manifest(manifest_dir)
@@ -296,15 +338,22 @@ def build(
                     elif auto:
                         effective_graphs = 5
 
+                    # Decide how many graphs to create in this run
+                    try:
+                        existing_count = len(list(graphs_dir.glob("graph_*.json"))) if refine_existing else 0
+                    except Exception:
+                        existing_count = 0
+                    to_create = effective_graphs if not refine_existing else max(0, effective_graphs - existing_count)
+
                     results = builder.build(
                         manifest_dir=manifest_dir,
                         output_dir=graphs_dir,
                         max_iterations=max_iterations,
                         focus_areas=focus_list,
-                        max_graphs=(1 if forced else effective_graphs),
+                        max_graphs=(1 if forced else to_create),
                         force_graphs=forced,
                         refine_existing=refine_existing,
-                        skip_discovery_if_existing=True,
+                        skip_discovery_if_existing=(False if (auto and to_create > 0) else True),
                         progress_callback=builder_callback
                     )
             else:
@@ -339,15 +388,21 @@ def build(
                 elif auto:
                     effective_graphs = 5
 
+                try:
+                    existing_count = len(list(graphs_dir.glob("graph_*.json"))) if refine_existing else 0
+                except Exception:
+                    existing_count = 0
+                to_create = effective_graphs if not refine_existing else max(0, effective_graphs - existing_count)
+
                 results = builder.build(
                     manifest_dir=manifest_dir,
                     output_dir=graphs_dir,
                     max_iterations=max_iterations,
                     focus_areas=focus_list,
-                    max_graphs=(1 if forced else effective_graphs),
+                    max_graphs=(1 if forced else to_create),
                     force_graphs=forced,
                     refine_existing=refine_existing,
-                    skip_discovery_if_existing=True,
+                    skip_discovery_if_existing=(False if (auto and to_create > 0) else True),
                     progress_callback=builder_callback
                 )
     

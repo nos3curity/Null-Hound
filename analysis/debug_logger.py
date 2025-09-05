@@ -3,6 +3,8 @@ Debug logger for agent LLM interactions.
 Captures all prompts and responses in a simple log format for easy debugging.
 """
 
+from __future__ import annotations
+
 import json
 from datetime import datetime
 from pathlib import Path

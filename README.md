@@ -108,7 +108,7 @@ Projects organize your audits and store all analysis data:
 ./hound.py project create myaudit /path/to/code
 
 # List all projects
-./hound.py project list
+./hound.py project ls
 
 # View project details and coverage
 ./hound.py project info myaudit
@@ -119,15 +119,33 @@ Projects organize your audits and store all analysis data:
 Hound analyzes your codebase and builds aspect-oriented knowledge graphs that serve as the foundation for all subsequent analysis:
 
 ```bash
-# Build graphs (uses scout model by default)
-./hound.py graph build myaudit
+# Initialize baseline SystemArchitecture graph (required before auditing)
+./hound.py graph build myaudit --init --iterations 1
 
-# Customize graph types and depth
-./hound.py graph build myaudit --graphs 5 --iterations 3
+# Or auto-generate a default set of graphs (5) and refine once
+./hound.py graph build myaudit --auto --iterations 2
+
+Note: `--auto` always includes the SystemArchitecture graph as the first graph. You do not need to run `--init` in addition to `--auto`.
+
+If `--init` is used and a `SystemArchitecture` graph already exists, initialization is skipped to avoid redundant work. Use `--auto` to add more graphs or delete the existing file to re-initialize.
+
+When running `--auto` and graphs already exist, Hound asks for confirmation before updating/overwriting graphs (including `SystemArchitecture`). If you want to clear graphs, use:
+
+```bash
+./hound.py graph delete myaudit --all   # delete all graphs
+./hound.py graph delete myaudit --name SystemArchitecture   # delete one graph
+```
+
+# Use a whitelist to constrain scope (comma-separated file paths)
+./hound.py graph build myaudit --init --iterations 1 --files "path/a.rs,path/b.rs"
 
 # View generated graphs
-./hound.py graph list myaudit
+./hound.py graph ls myaudit
 ```
+
+Notes:
+- The audit requires the SystemArchitecture graph. The build command will save graphs incrementally, and the agent will refuse to start if SystemArchitecture is missing (run `graph build <project> --init` or `graph build <project> --auto`).
+- For large repos, build with a whitelist via `--files` (comma‑separated). You can generate one with the whitelist builder and pass it directly.
 
 **What happens:** Hound inspects the codebase and creates specialized graphs for different aspects (e.g., access control, value flows, state management). Each graph contains:
 - **Nodes**: Key concepts, functions, and state variables
@@ -235,10 +253,10 @@ Check audit progress and findings at any time during the audit. If you started t
 
 ```bash
 # View current hypotheses (findings)
-./hound.py hypotheses list myaudit
+./hound.py project ls-hypotheses myaudit
 
 # See detailed hypothesis information
-./hound.py hypotheses list myaudit --verbose
+./hound.py project hypotheses myaudit --details
 
 # Filter by confidence level
 ./hound.py hypotheses list myaudit --min-confidence 0.8

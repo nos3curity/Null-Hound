@@ -94,8 +94,11 @@ class TestGeminiProviderTokenTracking(unittest.TestCase):
     """Test Gemini provider token tracking."""
     
     @patch.dict('os.environ', {'GOOGLE_API_KEY': 'test_key'})
+    @patch('llm.gemini_provider._USE_NEW_GENAI', False)
+    @patch('llm.gemini_provider._genai_new', None)
+    @patch('llm.gemini_provider._genai_legacy', None)
     @patch('llm.gemini_provider.genai')
-    def setUp(self, mock_genai):
+    def setUp(self, mock_genai, *_):
         """Set up test fixtures."""
         mock_genai.configure = Mock()
         self.mock_model = Mock()
