@@ -137,12 +137,13 @@ Alternative (manual guidance):
 ./hound.py graph build myaudit --init \
   --files "src/A.sol,src/B.sol,src/utils/Lib.sol"
 
-# 2) Add a specific graph with your own description
-./hound.py graph build myaudit \
-  --graph-spec "Call graph focusing on function call relationships across modules" \
+# 2) Add a specific graph with your own description (exactly one graph)
+./hound.py graph custom myaudit \
+  "Call graph focusing on function call relationships across modules" \
+  --iterations 2 \
   --files "src/A.sol,src/B.sol,src/utils/Lib.sol"
 
-# (Repeat --graph-spec for additional targeted graphs as needed)
+# (Repeat 'graph custom' for additional targeted graphs as needed)
 ```
 
 Operational notes:

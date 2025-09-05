@@ -515,7 +515,8 @@ def graph_build(
     graphs: int = typer.Option(5, "--graphs", "-g", help="Number of graphs to generate (ignored if --graph-spec is set)"),
     focus: str = typer.Option(None, "--focus", "-f", help="Comma-separated focus areas"),
     files: str = typer.Option(None, "--files", help="Comma-separated list of file paths to include"),
-    graph_spec: str = typer.Option(None, "--graph-spec", help="Build a single graph described by this text (schema + refinement)"),
+    with_spec: str = typer.Option(None, "--with-spec", help="Build exactly one graph described by this text (skips discovery for others)"),
+    graph_spec: str = typer.Option(None, "--graph-spec", help="[Deprecated] Same as --with-spec"),
     refine_existing: bool = typer.Option(True, "--refine-existing/--no-refine-existing", help="Load and refine existing graphs in the project directory"),
     init: bool = typer.Option(False, "--init", help="Initialize graphs by creating ONLY the SystemArchitecture graph"),
     auto: bool = typer.Option(False, "--auto", help="Auto-generate a default set of graphs (5)"),
@@ -566,6 +567,8 @@ def graph_build(
         raise typer.Exit(1)
 
     from commands.graph import build as graph_build_impl
+    # Prefer --with-spec over deprecated --graph-spec
+    _spec = with_spec or graph_spec
     graph_build_impl(
         project_id=resolved_project_name,
         config_path=Path(config) if config else None,
@@ -573,7 +576,8 @@ def graph_build(
         max_graphs=graphs,
         focus_areas=focus,
         file_filter=files,
-        graph_spec=graph_spec,
+        with_spec=_spec,
+        graph_spec=None,
         refine_existing=refine_existing,
         init=init,
         auto=auto,
@@ -582,6 +586,33 @@ def graph_build(
         visualize=True,
         debug=debug,
         quiet=quiet
+    )
+
+@graph_app.command("custom")
+def graph_custom(
+    project: str = typer.Argument(..., help="Project name"),
+    spec: str = typer.Argument(..., help="Natural language description of the desired graph"),
+    iterations: int = typer.Option(2, "--iterations", "-i", help="Refinement iterations"),
+    files: str = typer.Option(None, "--files", help="Comma-separated list of file paths to include"),
+    config: str = typer.Option(None, "--config", "-c", help="Configuration file"),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Reduce output"),
+    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug output"),
+):
+    """Build exactly one custom graph designed from the given spec.
+
+    Shows the designed schema on the CLI, then builds and refines the graph.
+    """
+    from commands.graph import custom as graph_custom_impl
+
+    graph_custom_impl(
+        project_id=project,
+        graph_spec_text=spec,
+        config_path=Path(config) if config else None,
+        iterations=iterations,
+        file_filter=files,
+        reuse_ingestion=True,
+        debug=debug,
+        quiet=quiet,
     )
 
 @graph_app.command("refine")
