@@ -268,9 +268,11 @@ function handleEvent(evt){
     return; // handled
   }
   if (t==='input_audio_transcription.completed' || t==='input_audio_transcript.completed'){
-    // Finalize the current user bubble
+    // Finalize the current user bubble and trigger a model turn automatically
     lastUserBubble = null;
     userTranscript = '';
+    // Auto-turn: request response after user finishes speaking
+    try{ sendEvent({ type:'response.create', response:{ modalities:['audio','text'] } }); }catch(_){ }
     return;
   }
   if (t==='response.text.delta'){

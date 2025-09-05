@@ -566,118 +566,61 @@ class AutonomousAgent:
         return self._generate_report(iterations)
     
     def _format_graph_for_display(self, graph_data: dict, graph_name: str) -> list[str]:
-        """Format a graph for compact display with observations/assumptions."""
-        lines = []
-        lines.append(f"\n--- Graph: {graph_name} ---")
-        
-        nodes = graph_data.get('nodes', [])
-        edges = graph_data.get('edges', [])
-        lines.append(f"Total: {len(nodes)} nodes, {len(edges)} edges")
-        lines.append("USE EXACT NODE IDS AS SHOWN BELOW - NO VARIATIONS!\n")
-        
-        # Show ALL nodes with top observations/assumptions
-        if nodes:
-            lines.append("AVAILABLE NODES (use these EXACT IDs with load_nodes):")
-            lines.append("📊 Code size indicator: [S]=small (1-2 cards), [M]=medium (3-5), [L]=large (6+)")
-            lines.append("PRIORITIZE [S] and [M] nodes! Only load [L] if absolutely necessary!\n")
-            
-            for node in nodes:
-                node_id = node.get('id', 'unknown')
-                node_label = node.get('label', node_id)
-                node_type = node.get('type', 'unknown')
-                
-                # Count source_refs to estimate code size
-                source_refs = node.get('source_refs', []) or []
-                card_count = len(source_refs)
-                
-                # Size indicator
-                if card_count == 0:
-                    size_indicator = "[∅]"  # No code
-                elif card_count <= 2:
-                    size_indicator = "[S]"  # Small
-                elif card_count <= 5:
-                    size_indicator = "[M]"  # Medium
+        """Compact representation of the FULL graph (nodes, edges, top annotations).
+
+        - Shows ALL nodes and ALL edges
+        - Node line: id|type|label|obs:a;b|asm:c;d (obs/asm optional, truncated)
+        - Edge line: src->dst:type|obs:a;b|asm:c   (obs/asm optional, truncated)
+        - Keeps lines short by limiting count and length of annotations
+        """
+        def _short_list(items, max_items=2, max_len=24):
+            out = []
+            for it in items[:max_items]:
+                s = ''
+                if isinstance(it, dict):
+                    s = str(it.get('description') or it.get('content') or it)
                 else:
-                    size_indicator = f"[L:{card_count}]"  # Large with count
-                
-                # Make node IDs stand out more
-                lines.append(f"  {size_indicator} [{node_id}] → {node_label} ({node_type})")
-                
-                # Show annotations inline for maximum compactness
-                observations = node.get('observations', [])
-                assumptions = node.get('assumptions', [])
-                
-                # Collect annotation strings
-                annots = []
-                if observations:
-                    sorted_obs = sorted(observations, 
-                                      key=lambda x: x.get('confidence', 1.0) if isinstance(x, dict) else 1.0, 
-                                      reverse=True)[:2]  # Reduced to 2 for compactness
-                    obs_strs = []
-                    for obs in sorted_obs:
-                        if isinstance(obs, dict):
-                            desc = obs.get('description', obs.get('content', str(obs)))
-                            obs_strs.append(desc)
-                        else:
-                            obs_strs.append(str(obs))
-                    if obs_strs:
-                        annots.append(f"obs:{'; '.join(obs_strs)}")
-                
-                if assumptions:
-                    sorted_assum = sorted(assumptions,
-                                        key=lambda x: x.get('confidence', 0.5) if isinstance(x, dict) else 0.5,
-                                        reverse=True)[:2]  # Reduced to 2 for compactness
-                    assum_strs = []
-                    for assum in sorted_assum:
-                        if isinstance(assum, dict):
-                            desc = assum.get('description', assum.get('content', str(assum)))
-                            assum_strs.append(desc)
-                        else:
-                            assum_strs.append(str(assum))
-                    if assum_strs:
-                        annots.append(f"asm:{'; '.join(assum_strs)}")
-                
-                # Add annotations inline if present
-                if annots:
-                    lines.append(f"    [{' | '.join(annots)}]")
-        
-        # Show edge summary
+                    s = str(it)
+                s = s.replace('\n', ' ').strip()
+                if len(s) > max_len:
+                    s = s[:max_len-1] + '…'
+                if s:
+                    out.append(s)
+            return out
+
+        lines: list[str] = []
+        lines.append(f"\n--- Graph: {graph_name} ---")
+        nodes = graph_data.get('nodes', []) or []
+        edges = graph_data.get('edges', []) or []
+        lines.append(f"Total: {len(nodes)} nodes, {len(edges)} edges")
+        if nodes:
+            lines.append("NODES (id|type|label[|obs:…][|asm:…]):")
+            for n in nodes:
+                nid = n.get('id', 'unknown')
+                ntype = n.get('type', '')
+                nlabel = n.get('label', '')
+                line = f"  {nid}|{ntype}|{nlabel}"
+                obs = _short_list(n.get('observations', []) or [], max_items=2, max_len=28)
+                if obs:
+                    line += f"|obs:{';'.join(obs)}"
+                asm = _short_list(n.get('assumptions', []) or [], max_items=2, max_len=28)
+                if asm:
+                    line += f"|asm:{';'.join(asm)}"
+                lines.append(line)
         if edges:
-            lines.append("\nEDGE TYPES:")
-            edge_types = {}
-            for edge in edges:
-                edge_type = edge.get('type', 'unknown')
-                edge_types[edge_type] = edge_types.get(edge_type, 0) + 1
-            for edge_type, count in edge_types.items():
-                lines.append(f"  • {edge_type}: {count} edges")
-            
-            # Show edges in compact form
-            lines.append("\nEDGES (compact):")
-            for edge in edges[:50]:  # Limit to first 50 edges for readability
-                src = edge.get('source_id') or edge.get('source') or edge.get('src')
-                dst = edge.get('target_id') or edge.get('target') or edge.get('dst')
-                etype = edge.get('type', 'rel')
-                # Build edge line with inline annotations
-                edge_line = f"  {etype} {src}->{dst}"
-                
-                # Show edge observations/assumptions inline for compactness
-                edge_obs = edge.get('observations', [])
-                edge_assum = edge.get('assumptions', [])
-                edge_annots = []
-                if edge_obs:
-                    obs_str = '; '.join(str(o) for o in edge_obs[:2])
-                    edge_annots.append(f"obs:{obs_str}")
-                if edge_assum:
-                    assum_str = '; '.join(str(a) for a in edge_assum[:2])
-                    edge_annots.append(f"asm:{assum_str}")
-                
-                if edge_annots:
-                    edge_line += f" [{' | '.join(edge_annots)}]"
-                lines.append(edge_line)
-            
-            if len(edges) > 50:
-                lines.append(f"  ... and {len(edges) - 50} more edges")
-        
+            lines.append("EDGES (src->dst:type[|obs:…][|asm:…]):")
+            for e in edges:
+                src = e.get('source_id') or e.get('source') or e.get('src') or ''
+                dst = e.get('target_id') or e.get('target') or e.get('dst') or ''
+                et = e.get('type', '')
+                line = f"  {src}->{dst}:{et}"
+                eobs = _short_list(e.get('observations', []) or [], max_items=1, max_len=28)
+                if eobs:
+                    line += f"|obs:{';'.join(eobs)}"
+                easm = _short_list(e.get('assumptions', []) or [], max_items=1, max_len=28)
+                if easm:
+                    line += f"|asm:{';'.join(easm)}"
+                lines.append(line)
         return lines
 
     def _build_context(self) -> str:
@@ -745,7 +688,7 @@ class AutonomousAgent:
                 context_parts.append(f"• {note}")
             context_parts.append("")
         
-        # System graph - ALWAYS VISIBLE with ALL NODES
+        # System graph - ALWAYS VISIBLE with ALL NODES/EDGES (compact)
         if self.loaded_data['system_graph']:
             context_parts.append("=== SYSTEM ARCHITECTURE (ALWAYS VISIBLE) ===")
             graph_name = self.loaded_data['system_graph']['name']
@@ -753,6 +696,28 @@ class AutonomousAgent:
             # Use unified formatting function
             context_parts.extend(self._format_graph_for_display(graph_data, graph_name))
         context_parts.append("")
+
+        # Include any additionally loaded graphs in compact full form
+        if self.loaded_data.get('graphs'):
+            for gname, gdata in self.loaded_data['graphs'].items():
+                context_parts.append(f"=== GRAPH LOADED: {gname} ===")
+                context_parts.extend(self._format_graph_for_display(gdata, gname))
+                context_parts.append("")
+
+        # List currently loaded nodes to prevent reloading
+        if self.loaded_data.get('nodes'):
+            context_parts.append("=== LOADED NODES (CACHE — DO NOT RELOAD) ===")
+            node_ids = list(self.loaded_data['nodes'].keys())
+            # Print compact lists in lines of ~10
+            line = []
+            for i, nid in enumerate(node_ids, 1):
+                line.append(nid)
+                if (i % 10) == 0:
+                    context_parts.append('  ' + ','.join(line))
+                    line = []
+            if line:
+                context_parts.append('  ' + ','.join(line))
+            context_parts.append("")
         
         # Actions performed (recent) - summary only since full data is in RECENT ACTIONS
         if self.action_log:
@@ -1083,6 +1048,11 @@ OPERATING CONSTRAINTS (IMPORTANT):
 - Hound cannot run code, connect to RPC, fork a chain, deploy contracts, or query on-chain state.
 - Do NOT propose or assume live on-chain probing (e.g., calling initialize on proxies, running fork-based tests, deploying mocks).
 - All actions here are CODE-ONLY: loading/reading nodes, updating observations, and calling deep_think for analysis. Keep guidance and reasoning aligned with this constraint.
+
+DEDUPLICATION (IMPORTANT):
+- Review the section "LOADED NODES (CACHE — DO NOT RELOAD)" in Current Context.
+- Do NOT request nodes that appear there; pick NEW nodes to expand coverage and avoid repeated loads.
+- If a node is already loaded, prefer loading closely-connected nodes instead (callers/callees/storage it reads/writes).
 
 CRITICAL RULES FOR NODE AND GRAPH NAMES:
 - ALWAYS use EXACT node IDs as shown in the graphs (in square brackets like [node_id])
@@ -1565,28 +1535,30 @@ DO NOT include any text before or after the JSON object."""
             # Debug logging removed
             
             ordered.sort(key=lambda x: (x.get('relpath') or '', x.get('char_start') or 0))
-            for c in ordered:
-                cid = c.get('id')
-                content = self._extract_card_content(c)
-                
-                # Debug logging removed
-                
-                node_cards.append({
-                    'card_id': cid,
-                    'type': c.get('type', 'code'),
-                    'content': content,
-                    'metadata': {
-                        k: c.get(k) for k in (
-                            'relpath','char_start','char_end','line_start','line_end'
-                        ) if k in c
-                    }
-                })
-                # Track card coverage
-                try:
-                    if self.coverage_index and cid:
-                        self.coverage_index.touch_card(str(cid))
-                except Exception:
-                    pass
+            # Reuse cached code blocks for this node if present
+            cached_cards = self.loaded_data.get('nodes', {}).get(chosen_id, {}).get('cards') if isinstance(self.loaded_data.get('nodes'), dict) else None
+            if cached_cards:
+                node_cards = cached_cards
+            else:
+                for c in ordered:
+                    cid = c.get('id')
+                    content = self._extract_card_content(c)
+                    node_cards.append({
+                        'card_id': cid,
+                        'type': c.get('type', 'code'),
+                        'content': content,
+                        'metadata': {
+                            k: c.get(k) for k in (
+                                'relpath','char_start','char_end','line_start','line_end'
+                            ) if k in c
+                        }
+                    })
+                    # Track card coverage
+                    try:
+                        if self.coverage_index and cid:
+                            self.coverage_index.touch_card(str(cid))
+                    except Exception:
+                        pass
 
             # NO FALLBACK - if node has no explicit source_refs, it has no code
             # This prevents loading entire files when agent requests non-existent nodes
@@ -1594,7 +1566,10 @@ DO NOT include any text before or after the JSON object."""
             node_copy = ndata.copy()
             if node_cards:
                 node_copy['cards'] = node_cards
-                self.loaded_data['code'][chosen_id] = '\n\n'.join(c['content'] for c in node_cards)
+                try:
+                    self.loaded_data['code'][chosen_id] = '\n\n'.join((c.get('content') or '') for c in node_cards if isinstance(c, dict))
+                except Exception:
+                    pass
             self.loaded_data['nodes'][chosen_id] = node_copy
             loaded_nodes.append(chosen_id)
             try:
