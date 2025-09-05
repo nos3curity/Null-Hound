@@ -24,9 +24,9 @@ from analysis.debug_logger import DebugLogger
 from analysis.graph_builder import GraphBuilder
 from ingest.bundles import AdaptiveBundler
 from ingest.manifest import RepositoryManifest
+from llm.client import LLMClient
 from llm.token_tracker import get_token_tracker
 from visualization.dynamic_graph_viz import generate_dynamic_visualization
-from llm.client import LLMClient
 
 console = Console()
 # Progress console writes to stderr; auto-detect TTY so interactive shells
@@ -551,8 +551,8 @@ def custom(
         except Exception:
             reuse_ok = False
     if not reuse_ok:
-        from ingest.manifest import RepositoryManifest
         from ingest.bundles import AdaptiveBundler
+        from ingest.manifest import RepositoryManifest
         # Load repo path from project.json
         try:
             with open(project_dir / 'project.json') as f:
