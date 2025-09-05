@@ -57,6 +57,7 @@ def build(
     refine_existing: bool = typer.Option(True, "--refine-existing/--no-refine-existing", help="Load and refine existing graphs in the project directory"),
     init: bool = typer.Option(False, "--init", help="Initialize graphs by creating ONLY the SystemArchitecture graph"),
     auto: bool = typer.Option(False, "--auto", help="Auto-generate a default set of graphs (5)"),
+    refine_only: str | None = typer.Option(None, "--refine-only", help="Refine only this graph name (internal/display)"),
     reuse_ingestion: bool = True,
     visualize: bool = typer.Option(True, "--visualize/--no-visualize", help="Generate HTML"),
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug output"),
@@ -201,11 +202,18 @@ def build(
             # Step 1: Ingestion (reused if manifest exists and reuse_ingestion=True)
             reuse_ok = reuse_ingestion and (manifest_dir / 'manifest.json').exists() and (manifest_dir / 'cards.jsonl').exists()
             if reuse_ok:
-                # Reuse existing manifest/cards
+                # Reuse existing manifest/cards; verify whitelist compatibility if provided
                 try:
                     from analysis.graph_builder import GraphBuilder as _GB
                     cards_loaded, manifest_loaded = _GB.load_cards_from_manifest(manifest_dir)
-                    log_line('ingest', f"Reusing existing manifest: {manifest_loaded.get('num_files','?')} files → {len(cards_loaded)} cards")
+                    mwl = set((manifest_loaded or {}).get('whitelist') or [])
+                    fwl = set(files_to_include or [])
+                    if files_to_include is not None and mwl and mwl != fwl:
+                        # Provided whitelist differs from stored one; rebuild ingestion
+                        reuse_ok = False
+                    else:
+                        wl_note = f" (whitelist: {len(mwl)} files)" if mwl else ""
+                        log_line('ingest', f"Reusing existing manifest: {manifest_loaded.get('num_files','?')} files → {len(cards_loaded)} cards{wl_note}")
                 except Exception:
                     reuse_ok = False
             if not reuse_ok:
@@ -345,6 +353,11 @@ def build(
                         existing_count = 0
                     to_create = effective_graphs if not refine_existing else max(0, effective_graphs - existing_count)
 
+                    # decide discovery skipping
+                    skip_disc = (False if (auto and to_create > 0) else True)
+                    if refine_only:
+                        skip_disc = True
+
                     results = builder.build(
                         manifest_dir=manifest_dir,
                         output_dir=graphs_dir,
@@ -353,8 +366,9 @@ def build(
                         max_graphs=(1 if forced else to_create),
                         force_graphs=forced,
                         refine_existing=refine_existing,
-                        skip_discovery_if_existing=(False if (auto and to_create > 0) else True),
-                        progress_callback=builder_callback
+                        skip_discovery_if_existing=skip_disc,
+                        progress_callback=builder_callback,
+                        refine_only=([refine_only] if refine_only else None)
                     )
             else:
                 # Quiet/non-TTY: simple logging, no progress bar
@@ -394,6 +408,10 @@ def build(
                     existing_count = 0
                 to_create = effective_graphs if not refine_existing else max(0, effective_graphs - existing_count)
 
+                skip_disc = (False if (auto and to_create > 0) else True)
+                if refine_only:
+                    skip_disc = True
+
                 results = builder.build(
                     manifest_dir=manifest_dir,
                     output_dir=graphs_dir,
@@ -402,8 +420,9 @@ def build(
                     max_graphs=(1 if forced else to_create),
                     force_graphs=forced,
                     refine_existing=refine_existing,
-                    skip_discovery_if_existing=(False if (auto and to_create > 0) else True),
-                    progress_callback=builder_callback
+                    skip_discovery_if_existing=skip_disc,
+                    progress_callback=builder_callback,
+                    refine_only=([refine_only] if refine_only else None)
                 )
     
             # Display results in a nice table

@@ -302,6 +302,12 @@ class RepositoryManifest:
             "num_cards": len(self.cards),
             "total_chars": sum(len(c.content) for c in self.cards)
         }
+        # Persist whitelist used for ingestion (if any)
+        if self.file_filter:
+            try:
+                manifest["whitelist"] = sorted(list(self.file_filter))
+            except Exception:
+                pass
         
         with open(output_dir / "manifest.json", "w") as f:
             json.dump(manifest, f, indent=2)

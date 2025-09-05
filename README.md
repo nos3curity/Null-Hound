@@ -181,6 +181,25 @@ python whitelist_builder.py \
   --files "$(tr '\n' ',' < whitelists/myaudit | sed 's/,$//')"
 ```
 
+- Refine existing graphs (resume building):
+
+You can resume/refine an existing graph without creating new ones using `graph refine`. This skips discovery and saves updates incrementally.
+
+```bash
+# Refine a single graph by name (internal or display)
+./hound.py graph refine myaudit SystemArchitecture \
+  --iterations 2 \
+  --files "src/A.sol,src/B.sol,src/utils/Lib.sol"
+
+# Refine all existing graphs
+./hound.py graph refine myaudit --all --iterations 2 \
+  --files "src/A.sol,src/B.sol,src/utils/Lib.sol"
+```
+
+Notes on refinement:
+- Argument order is `graph refine <project> [NAME]`. Example: `./hound.py graph refine fider AuthorizationMap`. If you put the name first, it will be treated as the project.
+- Refinement uses the stored whitelist from the initial ingestion by default. Passing a new `--files` list will rebuild ingestion for that run with the new whitelist.
+
 **What happens:** Hound inspects the codebase and creates specialized graphs for different aspects (e.g., access control, value flows, state management). Each graph contains:
 - **Nodes**: Key concepts, functions, and state variables
 - **Edges**: Relationships between components

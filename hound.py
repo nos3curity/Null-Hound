@@ -577,10 +577,54 @@ def graph_build(
         refine_existing=refine_existing,
         init=init,
         auto=auto,
+        refine_only=None,
         reuse_ingestion=reuse_ingestion,
         visualize=True,
         debug=debug,
         quiet=quiet
+    )
+
+@graph_app.command("refine")
+def graph_refine(
+    project: str = typer.Argument(..., help="Project name"),
+    name: str = typer.Argument(None, help="Graph name to refine (internal or display name)"),
+    all: bool = typer.Option(False, "--all", help="Refine all existing graphs"),
+    iterations: int = typer.Option(2, "--iterations", "-i", help="Maximum refinement iterations"),
+    files: str = typer.Option(None, "--files", help="Comma-separated list of file paths to include"),
+    config: str = typer.Option(None, "--config", "-c", help="Configuration file"),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Reduce output"),
+    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug output")
+):
+    """Refine existing graphs (incremental saves). Provide a name or use --all."""
+    from commands.graph import build as graph_build_impl
+    manager = ProjectManager()
+    proj = manager.get_project(project)
+    if not proj:
+        console.print(f"[red]Project '{project}' not found.[/red]")
+        raise typer.Exit(1)
+
+    if not all and not name:
+        console.print("[red]Error:[/red] Specify a graph NAME or use --all.")
+        raise typer.Exit(2)
+
+    refine_only = name if not all else None
+
+    graph_build_impl(
+        project_id=project,
+        config_path=Path(config) if config else None,
+        max_iterations=iterations,
+        max_graphs=1,
+        focus_areas=None,
+        file_filter=files,
+        graph_spec=None,
+        refine_existing=True,
+        init=False,
+        auto=False,
+        refine_only=refine_only,
+        reuse_ingestion=True,
+        visualize=True,
+        debug=debug,
+        quiet=quiet,
     )
 
 @graph_app.command("add-custom")

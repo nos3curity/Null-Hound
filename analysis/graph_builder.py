@@ -318,7 +318,8 @@ class GraphBuilder:
         force_graphs: list[dict[str, str]] | None = None,
         refine_existing: bool = True,
         skip_discovery_if_existing: bool = True,
-        progress_callback: Callable[[dict], None] | None = None
+        progress_callback: Callable[[dict], None] | None = None,
+        refine_only: list[str] | None = None,
     ) -> dict[str, Any]:
         """
         Main entry point for dynamic graph building.
@@ -371,11 +372,34 @@ class GraphBuilder:
             except Exception:
                 pass
 
+        # If refining only a specific subset, filter loaded graphs
+        if refine_existing and refine_only:
+            targets_norm = {str(n or '').strip().replace(' ', '_').lower() for n in refine_only}
+            if self.graphs:
+                filtered: dict[str, KnowledgeGraph] = {}
+                for name, g in self.graphs.items():
+                    disp = (g.metadata or {}).get('display_name') or name
+                    candidates = {
+                        name.strip().replace(' ', '_').lower(),
+                        disp.strip().replace(' ', '_').lower(),
+                        disp.strip().lower(),
+                    }
+                    if targets_norm & candidates:
+                        filtered[name] = g
+                if filtered:
+                    self.graphs = filtered
+                    self._emit('note', f"Refining only: {', '.join(filtered.keys())}")
+                else:
+                    self._emit('warn', 'Refine target not found among existing graphs; no graphs will be refined.')
+
         # Phase 1: Discovery - Let agent decide what to build (unless refining existing only)
         do_discovery = True
         if skip_discovery_if_existing and refine_existing and self.graphs and not force_graphs:
             do_discovery = False
             self._emit("note", "Skipping discovery (existing graphs present)")
+        # If refining only, never run discovery
+        if refine_existing and refine_only:
+            do_discovery = False
 
         if do_discovery:
             self._emit("phase", "Graph Discovery")
