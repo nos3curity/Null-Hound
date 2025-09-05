@@ -122,7 +122,9 @@ Recommended (one‑liner):
 
 ```bash
 # Auto-generate a default set of graphs (up to 5) and refine
-./hound.py graph build myaudit --auto
+# Strongly recommended: pass a whitelist of files (comma-separated)
+./hound.py graph build myaudit --auto \
+  --files "src/A.sol,src/B.sol,src/utils/Lib.sol"
 
 # View generated graphs
 ./hound.py graph ls myaudit
@@ -132,11 +134,13 @@ Alternative (manual guidance):
 
 ```bash
 # 1) Initialize the baseline SystemArchitecture graph
-./hound.py graph build myaudit --init
+./hound.py graph build myaudit --init \
+  --files "src/A.sol,src/B.sol,src/utils/Lib.sol"
 
 # 2) Add a specific graph with your own description
 ./hound.py graph build myaudit \
-  --graph-spec "Call graph focusing on function call relationships across modules"
+  --graph-spec "Call graph focusing on function call relationships across modules" \
+  --files "src/A.sol,src/B.sol,src/utils/Lib.sol"
 
 # (Repeat --graph-spec for additional targeted graphs as needed)
 ```
@@ -152,6 +156,30 @@ Operational notes:
 ```
 
 - For large repos, you can constrain scope with `--files` (comma‑separated whitelist) alongside either approach.
+
+Whitelists (strongly recommended):
+
+- Always pass a whitelist of input files via `--files`. For the best results, the selected files should fit in the model’s available context window; whitelisting keeps the graph builder focused and avoids token overflows.
+- If you do not pass `--files`, Hound will consider all files in the repository. On large codebases this triggers sampling and may degrade coverage/quality.
+- `--files` expects a comma‑separated list of paths relative to the repo root.
+
+Examples:
+
+```bash
+# Manual (small projects)
+./hound.py graph build myaudit --auto \
+  --files "src/A.sol,src/B.sol,src/utils/Lib.sol"
+
+# Generate a whitelist automatically (recommended for larger projects)
+python whitelist_builder.py \
+  --input /path/to/repo \
+  --limit-loc 20000 \
+  --output whitelists/myaudit
+
+# Use the generated list (newline-separated) as a comma list for --files
+./hound.py graph build myaudit --auto \
+  --files "$(tr '\n' ',' < whitelists/myaudit | sed 's/,$//')"
+```
 
 **What happens:** Hound inspects the codebase and creates specialized graphs for different aspects (e.g., access control, value flows, state management). Each graph contains:
 - **Nodes**: Key concepts, functions, and state variables
