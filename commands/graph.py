@@ -46,14 +46,17 @@ def load_config(config_path: Path | None = None) -> dict:
 
 
 def build(
-    repo_path: str = typer.Argument(..., help="Path to repository to analyze"),
-    repo_id: str | None = typer.Option(None, help="Repository ID"),
-    output_dir: str | None = typer.Option(None, "--output", "-o", help="Output directory"),
+    project_id: str = typer.Argument(..., help="Hound project id (under ~/.hound/projects/<id>)"),
     config_path: Path | None = typer.Option(None, "--config", "-c", help="Path to config.yaml"),
     max_iterations: int = typer.Option(3, "--iterations", "-i", help="Maximum iterations"),
     max_graphs: int = typer.Option(2, "--graphs", "-g", help="Number of graphs"),
     focus_areas: str | None = typer.Option(None, "--focus", "-f", help="Focus areas"),
-    file_filter: str | None = typer.Option(None, "--files", help="File filter"),
+    file_filter: str | None = typer.Option(None, "--files", help="Comma-separated whitelist of files relative to repo root"),
+    graph_spec: str | None = typer.Option(None, "--graph-spec", help="Build a single graph described by this text (skips general discovery for others)"),
+    refine_existing: bool = typer.Option(True, "--refine-existing/--no-refine-existing", help="Load and refine existing graphs in the project directory"),
+    init: bool = typer.Option(False, "--init", help="Initialize graphs by creating ONLY the SystemArchitecture graph"),
+    auto: bool = typer.Option(False, "--auto", help="Auto-generate a default set of graphs (5)"),
+    reuse_ingestion: bool = True,
     visualize: bool = typer.Option(True, "--visualize/--no-visualize", help="Generate HTML"),
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug output"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Reduce output and disable animations"),
@@ -62,9 +65,26 @@ def build(
     time.time()
     config = load_config(config_path)
     
-    repo_path = Path(repo_path).resolve()
-    repo_name = repo_id or repo_path.name
-    output_dir = Path(output_dir) if output_dir else Path(".hound_cache") / repo_name
+    # Enforce project id usage and resolve project directories
+    project_dir = Path.home() / '.hound' / 'projects' / project_id
+    if not project_dir.exists() or not (project_dir / 'manifest' / 'manifest.json').exists():
+        console.print(f"[red]Error: Project '{project_id}' not found under ~/.hound/projects/ or missing manifest[/red]")
+        raise typer.Exit(code=2)
+    # Load repo path from manifest
+    try:
+        with open(project_dir / 'manifest' / 'manifest.json') as f:
+            manifest_data = json.load(f)
+        repo_root = manifest_data.get('repo_path')
+        if not repo_root:
+            console.print(f"[red]Error: repo_path missing in manifest for project '{project_id}'[/red]")
+            raise typer.Exit(code=2)
+        repo_path = Path(repo_root).expanduser().resolve()
+    except Exception as e:
+        console.print(f"[red]Error: failed to load project manifest: {e}[/red]")
+        raise typer.Exit(code=2)
+
+    repo_name = project_id
+    output_dir = project_dir
     manifest_dir = output_dir / "manifest"
     graphs_dir = output_dir / "graphs"
     
@@ -75,7 +95,7 @@ def build(
     # Header
     console.print(Panel.fit(
         f"[bold bright_cyan]Building Knowledge Graphs[/bold bright_cyan]\n"
-        f"Repository: [white]{repo_path.name}[/white]\n"
+        f"Project: [white]{repo_name}[/white] (repo: {repo_path.name})\n"
         f"Graphs: [white]{max_graphs}[/white] | Iterations: [white]{max_iterations}[/white]",
         box=box.ROUNDED
     ))
@@ -93,7 +113,7 @@ def build(
     debug_logger = None
     if debug:
         try:
-            debug_out = (Path(output_dir) / "graphs" / ".hound_debug").resolve()
+            debug_out = (output_dir / "graphs" / ".hound_debug").resolve()
         except Exception:
             debug_out = None
         debug_logger = DebugLogger(session_id=f"graph_{repo_name}_{int(time.time())}", output_dir=debug_out)
@@ -141,17 +161,26 @@ def build(
                 elif not quiet:
                     progress_console.print(line)
 
-            # Step 1: Ingestion
-            log_line('ingest', 'Step 1: Repository Ingestion')
-            manifest = RepositoryManifest(str(repo_path), config, file_filter=files_to_include)
-            cards, files = manifest.walk_repository()
-            manifest.save_manifest(manifest_dir)
-            log_line('ingest', f"Ingested {len(files)} files → {len(cards)} cards")
-
-            bundler = AdaptiveBundler(cards, files, config)
-            bundles = bundler.create_bundles()
-            bundler.save_bundles(manifest_dir)
-            log_line('ingest', f"Created {len(bundles)} bundles")
+            # Step 1: Ingestion (reused if manifest exists and reuse_ingestion=True)
+            reuse_ok = reuse_ingestion and (manifest_dir / 'manifest' / 'manifest.json').exists() and (manifest_dir / 'cards.jsonl').exists()
+            if reuse_ok:
+                # Reuse existing manifest/cards
+                try:
+                    from analysis.graph_builder import GraphBuilder as _GB
+                    cards_loaded, manifest_loaded = _GB.load_cards_from_manifest(manifest_dir)
+                    log_line('ingest', f"Reusing existing manifest: {manifest_loaded.get('num_files','?')} files → {len(cards_loaded)} cards")
+                except Exception:
+                    reuse_ok = False
+            if not reuse_ok:
+                log_line('ingest', 'Step 1: Repository Ingestion')
+                manifest = RepositoryManifest(str(repo_path), config, file_filter=files_to_include)
+                cards, files = manifest.walk_repository()
+                manifest.save_manifest(manifest_dir)
+                log_line('ingest', f"Ingested {len(files)} files → {len(cards)} cards")
+                bundler = AdaptiveBundler(cards, files, config)
+                bundles = bundler.create_bundles()
+                bundler.save_bundles(manifest_dir)
+                log_line('ingest', f"Created {len(bundles)} bundles")
 
             # Step 2: Graph Building with detailed progress
             console.print("\n[bold]Step 2:[/bold] Graph Construction")
@@ -253,12 +282,29 @@ def build(
                             progress.update(task, description=_short(text, 80))
                             log_line('build', text)
 
+                    # Prepare forced graph spec if requested
+                    forced = None
+                    if graph_spec:
+                        base = ''.join(ch for ch in graph_spec.split('\n',1)[0] if ch.isalnum() or ch in (' ','_','-'))
+                        nm = (base[:28].strip().replace(' ', '_') or 'CustomGraph')
+                        forced = [{"name": nm, "focus": graph_spec}]
+
+                    # Handle --init and --auto shortcuts
+                    effective_graphs = max_graphs
+                    if init:
+                        effective_graphs = 1
+                    elif auto:
+                        effective_graphs = 5
+
                     results = builder.build(
                         manifest_dir=manifest_dir,
                         output_dir=graphs_dir,
                         max_iterations=max_iterations,
                         focus_areas=focus_list,
-                        max_graphs=max_graphs,
+                        max_graphs=(1 if forced else effective_graphs),
+                        force_graphs=forced,
+                        refine_existing=refine_existing,
+                        skip_discovery_if_existing=True,
                         progress_callback=builder_callback
                     )
             else:
@@ -280,12 +326,28 @@ def build(
                         if not quiet:
                             log_line('build', str(info))
 
+                # Prepare forced graph spec if requested
+                forced = None
+                if graph_spec:
+                    base = ''.join(ch for ch in graph_spec.split('\n',1)[0] if ch.isalnum() or ch in (' ','_','-'))
+                    nm = (base[:28].strip().replace(' ', '_') or 'CustomGraph')
+                    forced = [{"name": nm, "focus": graph_spec}]
+
+                effective_graphs = max_graphs
+                if init:
+                    effective_graphs = 1
+                elif auto:
+                    effective_graphs = 5
+
                 results = builder.build(
                     manifest_dir=manifest_dir,
                     output_dir=graphs_dir,
                     max_iterations=max_iterations,
                     focus_areas=focus_list,
-                    max_graphs=max_graphs,
+                    max_graphs=(1 if forced else effective_graphs),
+                    force_graphs=forced,
+                    refine_existing=refine_existing,
+                    skip_discovery_if_existing=True,
                     progress_callback=builder_callback
                 )
     

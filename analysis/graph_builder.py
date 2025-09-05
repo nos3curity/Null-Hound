@@ -111,6 +111,22 @@ class KnowledgeGraph:
                     neighbors.append(edge.source_id)
         return neighbors
 
+    def to_dict(self) -> dict:
+        return {
+            "name": self.metadata.get("display_name", self.name),
+            "internal_name": self.name,
+            "focus": self.focus,
+            "nodes": [asdict(n) for n in self.nodes.values()],
+            "edges": [asdict(e) for e in self.edges.values()],
+            "metadata": self.metadata,
+            "stats": {
+                "num_nodes": len(self.nodes),
+                "num_edges": len(self.edges),
+                "node_types": list(set(n.type for n in self.nodes.values())),
+                "edge_types": list(set(e.type for e in self.edges.values())),
+            },
+        }
+
 
 
 class GraphSpec(BaseModel):
@@ -326,6 +342,8 @@ class GraphBuilder:
         focus_areas: list[str] | None = None,
         max_graphs: int = 2,
         force_graphs: list[dict[str, str]] | None = None,
+        refine_existing: bool = True,
+        skip_discovery_if_existing: bool = True,
         progress_callback: Callable[[dict], None] | None = None
     ) -> dict[str, Any]:
         """
@@ -342,6 +360,12 @@ class GraphBuilder:
         start_time = time.time()
         self._progress_callback = progress_callback
         
+        # Remember output dir for incremental saves
+        try:
+            self._output_dir = output_dir
+        except Exception:
+            pass
+
         # Load code cards with full content
         manifest, cards = self._load_manifest(manifest_dir)
         
@@ -364,10 +388,25 @@ class GraphBuilder:
         self._emit("stats", f"Total chars: {total_chars:,}")
         self._emit("stats", f"Max iterations: {max_iterations}")
         
-        # Phase 1: Discovery - Let agent decide what to build
-        self._emit("phase", "Graph Discovery")
-        # Run discovery; emit a stern warning if sampling was required inside discovery
-        self._discover_graphs(manifest, cards, focus_areas, max_graphs, force_graphs)
+        # Load existing graphs if present (refinement)
+        if refine_existing:
+            try:
+                self._load_existing_graphs(output_dir)
+                if self.graphs:
+                    self._emit("note", f"Loaded {len(self.graphs)} existing graph(s) for refinement")
+            except Exception:
+                pass
+
+        # Phase 1: Discovery - Let agent decide what to build (unless refining existing only)
+        do_discovery = True
+        if skip_discovery_if_existing and refine_existing and self.graphs and not force_graphs:
+            do_discovery = False
+            self._emit("note", "Skipping discovery (existing graphs present)")
+
+        if do_discovery:
+            self._emit("phase", "Graph Discovery")
+            # Run discovery; emit a stern warning if sampling was required inside discovery
+            self._discover_graphs(manifest, cards, focus_areas, max_graphs, force_graphs)
         
         # Phase 2: Iterative Graph Building
         if self.debug:
@@ -413,12 +452,18 @@ class GraphBuilder:
             for graph_spec in force_graphs:
                 name = graph_spec["name"].replace(' ', '_').replace('/', '_')
                 focus = graph_spec["focus"]
-                self.graphs[name] = KnowledgeGraph(
-                    name=name,
-                    focus=focus,
-                    metadata={"created_at": time.time(), "display_name": graph_spec["name"]}
-                )
-                self._emit("graph", f"Created graph: {graph_spec['name']} (focus: {focus})")
+            self.graphs[name] = KnowledgeGraph(
+                name=name,
+                focus=focus,
+                metadata={"created_at": time.time(), "display_name": graph_spec["name"]}
+            )
+            self._emit("graph", f"Created graph: {graph_spec['name']} (focus: {focus})")
+            # Save initial empty graph immediately
+            try:
+                self._save_graph(output_dir=self._output_dir, graph=self.graphs[name])
+                self._emit("save", f"Saved schema for {name}")
+            except Exception:
+                pass
             return
         
         # Use adaptive sampling based on token count for discovery phase
@@ -540,6 +585,11 @@ The FIRST must be the system/component/flow overview."""
                 metadata={"created_at": time.time(), "display_name": raw_name}
             )
             self._emit("graph", f"Created graph: {raw_name} (focus: {focus})")
+            try:
+                self._save_graph(output_dir=self._output_dir, graph=self.graphs[name])
+                self._emit("save", f"Saved schema for {name}")
+            except Exception:
+                pass
         
         # Note custom types (agent can use these later)
         if discovery.suggested_node_types:
@@ -883,6 +933,12 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
                 for assum in node_update.new_assumptions:
                     node.assumptions.append(assum.model_dump())
         
+        # Save graph incrementally after applying this update
+        try:
+            self._save_graph(output_dir=self._output_dir, graph=graph)
+            self._emit("save", f"Saved {graph.name}: +{nodes_added}N/+{edges_added}E")
+        except Exception:
+            pass
         return nodes_added, edges_added
     
     
@@ -1218,25 +1274,8 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
         
         # Save each graph
         for name, graph in self.graphs.items():
-            graph_data = {
-                "name": graph.metadata.get("display_name", graph.name),
-                "internal_name": graph.name,
-                "focus": graph.focus,
-                "nodes": [asdict(n) for n in graph.nodes.values()],
-                "edges": [asdict(e) for e in graph.edges.values()],
-                "metadata": graph.metadata,
-                "stats": {
-                    "num_nodes": len(graph.nodes),
-                    "num_edges": len(graph.edges),
-                    "node_types": list(set(n.type for n in graph.nodes.values())),
-                    "edge_types": list(set(e.type for e in graph.edges.values()))
-                }
-            }
-            
-            # Save individual graph
-            graph_file = output_dir / f"graph_{name}.json"
-            with open(graph_file, "w") as f:
-                json.dump(graph_data, f, indent=2)
+            # Save individual graph using helper (atomic)
+            graph_file = self._save_graph(output_dir, graph)
             
             results["graphs"][name] = str(graph_file)
             results["total_nodes"] += len(graph.nodes)
@@ -1273,6 +1312,44 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
                 self._emit("warn", f"{name} has {len(orphans)} disconnected nodes ({pct}%)")
         
         return results
+
+    def _save_graph(self, output_dir: Path, graph: KnowledgeGraph) -> Path:
+        """Save a single graph JSON atomically and return its path."""
+        output_dir.mkdir(parents=True, exist_ok=True)
+        data = graph.to_dict()
+        graph_file = output_dir / f"graph_{graph.name}.json"
+        tmp = graph_file.with_suffix(".json.tmp")
+        with open(tmp, "w") as f:
+            json.dump(data, f, indent=2)
+        tmp.replace(graph_file)
+        # Remember output dir for incremental saves
+        return graph_file
+
+    def _load_existing_graphs(self, output_dir: Path) -> None:
+        """Load existing graph JSON files into self.graphs for refinement."""
+        self._output_dir = output_dir  # Store for incremental saves
+        if not output_dir.exists():
+            return
+        for p in output_dir.glob("graph_*.json"):
+            try:
+                with open(p, "r") as f:
+                    data = json.load(f)
+                name = data.get("internal_name") or data.get("name") or p.stem.replace("graph_", "")
+                focus = data.get("focus", "")
+                kg = KnowledgeGraph(name=name, focus=focus, metadata=data.get("metadata") or {})
+                for nd in data.get("nodes", []) or []:
+                    try:
+                        kg.nodes[nd.get("id") or "unknown"] = DynamicNode(**nd)
+                    except Exception:
+                        continue
+                for ed in data.get("edges", []) or []:
+                    try:
+                        kg.edges[ed.get("id") or f"e_{len(kg.edges)}"] = DynamicEdge(**ed)
+                    except Exception:
+                        continue
+                self.graphs[name] = kg
+            except Exception:
+                continue
     
     def _generate_id(self, prefix: str) -> str:
         """Generate unique ID"""
