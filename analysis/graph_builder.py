@@ -792,7 +792,8 @@ Return empty lists only if graph is TRULY complete and comprehensive."""
                     else:
                         # If very small, try 2 random subsets for diversity
                         import random as _rand
-                        a = cards_with_ids.copy(); _rand.shuffle(a)
+                        a = cards_with_ids.copy()
+                        _rand.shuffle(a)
                         chunks = [a[: max(1, len(a)//2)], a[max(1, len(a)//2):]]
                     agg = GraphUpdate(new_nodes=[], new_edges=[], node_updates=[])
                     combined = False

@@ -104,6 +104,13 @@ class TokenTracker:
                 'by_model': dict(self.usage_by_model),
                 'history': [u.to_dict() for u in self.usage_history]
             }
+
+    def get_last_usage(self) -> dict | None:
+        """Return the most recent usage entry as a dict, or None if empty."""
+        with self._lock:
+            if not self.usage_history:
+                return None
+            return self.usage_history[-1].to_dict()
     
     def reset(self):
         """Reset all tracking data."""

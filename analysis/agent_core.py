@@ -1573,6 +1573,10 @@ DO NOT include any text before or after the JSON object."""
         else:
             display_lines.append("")
         
+        # Track duplicate code blocks across this request to avoid re-printing
+        printed_card_ids: set[str] = set()
+        dedup_count = 0
+
         for node_id in current_request_nodes:
             node_data = self.loaded_data['nodes'][node_id]
             node_type = node_data.get('type', 'unknown')
@@ -1610,18 +1614,26 @@ DO NOT include any text before or after the JSON object."""
                 display_lines.append(f"  === CODE ({len(node_data['cards'])} blocks) ===")
                 for i, card in enumerate(node_data['cards']):
                     content = card.get('content', '')
+                    card_id = card.get('card_id') or (card.get('metadata') or {}).get('id')
                     if content:
                         card_type = card.get('type', 'code')
                         metadata = card.get('metadata', {})
                         relpath = metadata.get('relpath', 'unknown')
                         line_start = metadata.get('line_start', '?')
                         line_end = metadata.get('line_end', '?')
-                        
-                        display_lines.append(f"  --- Block {i+1} ({card_type}) from {relpath}:{line_start}-{line_end} ---")
-                        # Show FULL content - no truncation
-                        for line in content.split('\n'):
-                            display_lines.append(f"    {line}")
-                        display_lines.append("")  # Empty line between code blocks
+                        if card_id and card_id in printed_card_ids:
+                            dedup_count += 1
+                            display_lines.append(
+                                f"  --- Block {i+1} ({card_type}) from {relpath}:{line_start}-{line_end} — duplicate, omitted (card {card_id}) ---"
+                            )
+                        else:
+                            if card_id:
+                                printed_card_ids.add(card_id)
+                            display_lines.append(f"  --- Block {i+1} ({card_type}) from {relpath}:{line_start}-{line_end} ---")
+                            # Show FULL content - no truncation
+                            for line in content.split('\n'):
+                                display_lines.append(f"    {line}")
+                            display_lines.append("")  # Empty line between code blocks
             
             display_lines.append("")  # Empty line between nodes
         
@@ -1636,6 +1648,8 @@ DO NOT include any text before or after the JSON object."""
                 display_lines.append(f"  ... and {len(node_by_id) - 10} more")
             display_lines.append("\nUse EXACT node IDs as shown above. Do not guess or modify node names!")
         
+        if dedup_count > 0:
+            display_lines.insert(0, f"[dedup] Omitted {dedup_count} duplicate code block(s) already shown in this request.")
         nodes_display = '\n'.join(display_lines)
         
         # Aggregate card IDs across loaded nodes

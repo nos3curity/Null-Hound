@@ -32,16 +32,18 @@ except Exception:
         _genai_legacy = None
 
 # Runtime flags to control legacy fallback (easier debugging when disabled)
-import os as _os
-_REQUIRE_NEW = (_os.environ.get("HOUND_GEMINI_REQUIRE_NEW", "").lower() in {"1", "true", "yes", "on"})
-_NO_LEGACY = _REQUIRE_NEW or (_os.environ.get("HOUND_GEMINI_NO_LEGACY", "").lower() in {"1", "true", "yes", "on"})
+_REQUIRE_NEW = (os.environ.get("HOUND_GEMINI_REQUIRE_NEW", "").lower() in {"1", "true", "yes", "on"})
+_NO_LEGACY = _REQUIRE_NEW or (os.environ.get("HOUND_GEMINI_NO_LEGACY", "").lower() in {"1", "true", "yes", "on"})
 
 # Provide minimal enums/types shims for legacy path when available
 _HarmCategory = None
 _HarmBlockThreshold = None
 if _genai_legacy is not None:
     try:
-        from google.generativeai.types import HarmBlockThreshold as _HarmBlockThreshold, HarmCategory as _HarmCategory  # type: ignore
+        from google.generativeai.types import (  # type: ignore
+            HarmBlockThreshold as _HarmBlockThreshold,
+            HarmCategory as _HarmCategory,
+        )
     except Exception:
         _HarmBlockThreshold = None
         _HarmCategory = None
@@ -297,7 +299,7 @@ class GeminiProvider(BaseLLMProvider):
                     }
                     try:
                         response = self._client.models.generate_content(**kwargs)
-                    except TypeError as te:
+                    except TypeError:
                         # Retry without thinkingConfig if unsupported
                         try:
                             if isinstance(kwargs.get("generation_config"), dict) and "thinkingConfig" in kwargs["generation_config"]:

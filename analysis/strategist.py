@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from llm.token_tracker import get_token_tracker
+from llm.tokenization import count_tokens
 from llm.unified_client import UnifiedLLMClient
 
 
@@ -57,6 +59,40 @@ class Strategist:
             self.two_pass_review = bool(self.config.get('strategist_two_pass_review', False))
         except Exception:
             self.two_pass_review = False
+
+    def _context_limit(self) -> int:
+        try:
+            models = (self.config or {}).get('models', {})
+            mcfg = models.get(self.profile, {})
+            return int(mcfg.get('max_context') or (self.config or {}).get('context', {}).get('max_tokens', 256000))
+        except Exception:
+            return 256000
+
+    def _log_usage(self, step: str, system: str, user: str):
+        try:
+            tracker = get_token_tracker()
+            last = tracker.get_last_usage()
+            # Compute prompt tokens approximately if provider didn't report
+            input_tokens = (last or {}).get('input_tokens') or 0
+            provider = (last or {}).get('provider') or self.llm.provider_name
+            model = (last or {}).get('model') or self.llm.model
+            if not input_tokens:
+                try:
+                    input_tokens = count_tokens(system + "\n\n" + user, provider, model)
+                except Exception:
+                    input_tokens = 0
+            limit = self._context_limit()
+            pct = min(100, int((input_tokens * 100) / max(1, limit)))
+            msg = f"[{self.profile}] {step}: input={input_tokens} tok, limit={limit}, context={pct}% ({provider}:{model})"
+            if self.debug_logger and hasattr(self.debug_logger, 'log_event'):
+                try:
+                    self.debug_logger.log_event('LLM Token Usage', msg)
+                except Exception:
+                    pass
+            else:
+                print(msg)
+        except Exception:
+            pass
 
     def plan_next(self, *, graphs_summary: str, completed: list[str], n: int = 5, 
                   hypotheses_summary: str | None = None, coverage_summary: str | None = None, 
@@ -142,6 +178,8 @@ class Strategist:
         except Exception:
             plan_effort = None
         plan: PlanBatch = self.llm.parse(system=system, user=user, schema=PlanBatch, reasoning_effort=plan_effort)
+        # Log usage and context after call
+        self._log_usage('plan_next', system, user)
         items = []
         for it in plan.investigations[:n]:
             items.append({
@@ -258,6 +296,8 @@ class Strategist:
             except Exception:
                 hyp_effort = None
             resp = self.llm.raw(system=system, user=user, reasoning_effort=hyp_effort)
+            # Log usage and context after call
+            self._log_usage('deep_think', system, user)
             # Keep raw strategist output for downstream CLI display
             try:
                 self.last_raw = resp
@@ -363,6 +403,7 @@ class Strategist:
 
         try:
             reviewed = self.llm.parse(system=review_instr, user=review_user, schema=_ReviewBatch)
+            self._log_usage('deep_think_review', review_instr, review_user)
             accepted = [it.model_dump() for it in reviewed.items if it.accept]
             # Sort by severity and confidence, cap at 3
             def _sev_rank(s):
