@@ -954,6 +954,7 @@ def graphs_reset(
 def finalize(
     project: str = typer.Argument(..., help="Project name"),
     threshold: float = typer.Option(0.5, "--threshold", "-t", help="Confidence threshold for review"),
+    include_below_threshold: bool = typer.Option(False, "--include-below-threshold", help="Also review pending hypotheses below the threshold"),
     debug: bool = typer.Option(False, "--debug", help="Enable debug mode"),
     platform: str = typer.Option(None, "--platform", help="Override QA platform (e.g., openai, anthropic, mock)"),
     model: str = typer.Option(None, "--model", help="Override QA model (e.g., gpt-4o-mini)")
@@ -970,6 +971,7 @@ def finalize(
     ctx.params = {
         'project_name': project,
         'threshold': threshold,
+        'include_below_threshold': include_below_threshold,
         'debug': debug,
         'platform': platform,
         'model': model

@@ -86,9 +86,30 @@ class Finalizer(AutonomousAgent):
                     'message': f"{hypothesis.get('title', 'Unknown')[:50]}"
                 })
 
-            # Get source files from hypothesis properties
-            source_files = hypothesis.get('properties', {}).get('source_files', [])
+            # Get source files from hypothesis properties and heuristics
+            source_files = list(hypothesis.get('properties', {}).get('source_files', []) or [])
             hypothesis.get('properties', {}).get('affected_functions', [])
+
+            # Augment with file paths guessed from hypothesis text if available
+            try:
+                from .path_utils import guess_relpaths
+                extra_texts = [
+                    hypothesis.get('title', ''),
+                    hypothesis.get('description', ''),
+                    hypothesis.get('reasoning', ''),
+                ]
+                # Include evidence descriptions too
+                for ev in hypothesis.get('evidence', []) or []:
+                    if isinstance(ev, dict):
+                        extra_texts.append(ev.get('description', '') or '')
+                    elif isinstance(ev, str):
+                        extra_texts.append(ev)
+                guessed = guess_relpaths("\n".join([t for t in extra_texts if t]), self._repo_root)
+                for rel in guessed:
+                    if rel not in source_files:
+                        source_files.append(rel)
+            except Exception:
+                pass
 
             # Load source code directly if available
             source_code = {}

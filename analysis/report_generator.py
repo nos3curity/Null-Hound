@@ -2436,37 +2436,96 @@ The audit employed a comprehensive security assessment methodology including:
         return self._extract_code_via_llm_file_scan(finding)
 
     def _collect_files_from_cards(self, finding: dict) -> dict[str, str]:
-        """Return map of relpath -> full file content for files referenced by card evidence."""
+        """Return map of relpath -> full file content for files referenced by evidence.
+
+        Sources considered (in order):
+        - Graph node card refs → card.relpath
+        - Hypothesis properties.source_files (set by agent)
+        - Supporting evidence file hints (e.g., {'file': 'src/x.rs'})
+        """
         files: dict[str, str] = {}
         try:
-            if not self.card_store or not self.repo_root or not self.repo_root.exists():
+            # Need a repo root to load code
+            if not self.repo_root or not self.repo_root.exists():
                 return files
-            target_ids = set(str(x) for x in finding.get('affected', []) if x)
-            if not target_ids:
-                return files
+
             rels: list[str] = []
-            for graph in self.graphs.values():
-                for node in graph.get('nodes', []):
-                    nid = str(node.get('id') or '')
-                    nlabel = str(node.get('label') or '')
-                    if nid in target_ids or nlabel in target_ids:
-                        refs = node.get('source_refs') or node.get('refs') or []
-                        if isinstance(refs, list):
-                            for r in refs:
-                                c = self.card_store.get(str(r))
-                                if isinstance(c, dict) and c.get('relpath'):
-                                    rels.append(c['relpath'])
-            # Dedup and load files
-            for rel in [r for i, r in enumerate(rels) if r and r not in rels[:i]]:
-                fpath = self.repo_root / rel
-                try:
-                    content = fpath.read_text(encoding='utf-8', errors='ignore')
-                    files[rel] = content
-                except Exception:
+
+            # 1) From graph nodes referenced by the finding
+            target_ids = set(str(x) for x in finding.get('affected', []) if x)
+            if target_ids:
+                for graph in self.graphs.values():
+                    for node in graph.get('nodes', []):
+                        nid = str(node.get('id') or '')
+                        nlabel = str(node.get('label') or '')
+                        if nid in target_ids or nlabel in target_ids:
+                            refs = node.get('source_refs') or node.get('refs') or []
+                            if isinstance(refs, list):
+                                for r in refs:
+                                    c = self.card_store.get(str(r)) if self.card_store else None
+                                    if isinstance(c, dict) and c.get('relpath'):
+                                        rels.append(c['relpath'])
+
+            # 2) From hypothesis properties (source_files)
+            try:
+                for sf in (finding.get('properties') or {}).get('source_files', []) or []:
+                    if isinstance(sf, str) and sf:
+                        rels.append(sf)
+            except Exception:
+                pass
+
+            # 3) From supporting evidence structures
+            try:
+                for ev in finding.get('supporting_evidence', []) or []:
+                    if isinstance(ev, dict):
+                        for key in ('file', 'location'):
+                            val = ev.get(key)
+                            if isinstance(val, str) and val:
+                                rels.append(val)
+            except Exception:
+                pass
+
+            # Dedup preserving order
+            seen = set()
+            ordered_rels = []
+            for r in rels:
+                if not r:
                     continue
+                # Normalize path style a bit
+                rr = str(r).lstrip('/')
+                if rr not in seen:
+                    seen.add(rr)
+                    ordered_rels.append(rr)
+
+            # Load file contents
+            for rel in ordered_rels:
+                fpath = self.repo_root / rel
+                # Heuristics: also try 'src/<rel>' and drop 'src/' prefix
+                cand_paths = [fpath]
+                if not fpath.exists():
+                    if rel.startswith('src/'):
+                        cand_paths.append(self.repo_root / rel[4:])
+                    else:
+                        cand_paths.append(self.repo_root / 'src' / rel)
+                loaded = False
+                for cand in cand_paths:
+                    try:
+                        if cand.exists():
+                            content = cand.read_text(encoding='utf-8', errors='ignore')
+                            # Use the original rel key for stability
+                            files[rel] = content
+                            loaded = True
+                            break
+                    except Exception:
+                        continue
+                if not loaded:
+                    continue
+
             # Limit to 3 files for token control
             if len(files) > 3:
-                return {k: files[k] for k in list(files.keys())[:3]}
+                # Keep the first 3 in discovered order
+                keep = list(files.keys())[:3]
+                return {k: files[k] for k in keep}
             return files
         except Exception:
             return {}
@@ -2519,11 +2578,13 @@ The audit employed a comprehensive security assessment methodology including:
                     start = int(s.get('start_line', 0) or 0)
                     end = int(s.get('end_line', 0) or 0)
                     expl = str(s.get('explanation') or '').strip()
-                    if not fpath or fpath not in files_ctx:
+                    # Normalize path reported by the model
+                    norm = self._normalize_reported_path(str(fpath) if fpath else '', files_ctx)
+                    if not norm:
                         continue
                     if start <= 0 or end <= 0 or end < start:
                         continue
-                    lines = files_ctx[fpath].split('\n')
+                    lines = files_ctx[norm].split('\n')
                     start0 = max(0, start - 1)
                     end0 = min(len(lines), end)
                     # Enforce max 20 lines
@@ -2531,11 +2592,11 @@ The audit employed a comprehensive security assessment methodology including:
                         end0 = start0 + 20
                     code = '\n'.join(lines[start0:end0])
                     results.append({
-                        'file': fpath,
+                        'file': norm,
                         'start_line': start0 + 1,
                         'end_line': end0,
                         'code': code,
-                        'language': self._detect_language(fpath),
+                        'language': self._detect_language(norm),
                         'explanation': expl or 'Relevant to the vulnerability as selected by analysis.'
                     })
             # Validate against target functions; if mismatch and we have targets, use deterministic extraction
@@ -2585,21 +2646,56 @@ The audit employed a comprehensive security assessment methodology including:
         return names
 
     def _index_functions(self, files_ctx: dict[str, str]) -> dict[str, list[dict[str, int]]]:
-        """Build a coarse function index per Solidity file: name, start_line, end_line."""
+        """Build a coarse function index per file for several languages.
+
+        Supports: Solidity, Rust, Python, Go, JS/TS.
+        Uses simple regexes and defines function end as the next header or EOF.
+        """
         import re
         idx: dict[str, list[dict[str, int]]] = {}
+
+        # Regex patterns by extension
+        patterns = {
+            '.sol': [
+                (re.compile(r'\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\('), 'function'),
+                (re.compile(r'\bconstructor\s*\('), 'constructor')
+            ],
+            '.rs': [
+                (re.compile(r'^\s*(?:pub\s+)?(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\('), 'function')
+            ],
+            '.py': [
+                (re.compile(r'^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\('), 'function')
+            ],
+            '.go': [
+                (re.compile(r'^\s*func\s+(?:\([^)]+\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\('), 'function')
+            ],
+            '.js': [
+                (re.compile(r'^\s*function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\('), 'function'),
+                (re.compile(r'^\s*(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:async\s*)?function\s*\('), 'function'),
+                (re.compile(r'^\s*(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>'), 'function')
+            ],
+            '.ts': [
+                (re.compile(r'^\s*function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\('), 'function'),
+                (re.compile(r'^\s*(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:async\s*)?function\s*\('), 'function'),
+                (re.compile(r'^\s*(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>'), 'function')
+            ],
+        }
+
         for path, content in files_ctx.items():
+            ext = Path(path).suffix.lower()
+            pats = patterns.get(ext, [])
+            if not pats:
+                # Default: try common C-style function pattern as a very rough fallback
+                pats = [(re.compile(r'^\s*[A-Za-z_][A-Za-z0-9_\*\s]*\s+([A-Za-z_][A-Za-z0-9_]*)\s*\('), 'function')]
             lines = content.split('\n')
-            headers = []
+            headers: list[tuple[int, str, str]] = []
             for i, line in enumerate(lines, start=1):
-                # Match function headers and constructor
-                m = re.search(r'\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(', line)
-                c = re.search(r'\bconstructor\s*\(', line)
-                if m:
-                    headers.append((i, 'function', m.group(1)))
-                elif c:
-                    headers.append((i, 'constructor', 'constructor'))
-            # Determine end lines by next header or EOF
+                for rx, kind in pats:
+                    m = rx.search(line)
+                    if m:
+                        name = m.group(1) if m.groups() else 'constructor'
+                        headers.append((i, kind, name))
+                        break
             entries = []
             for j, (start, kind, name) in enumerate(headers):
                 end = len(lines)
@@ -2694,7 +2790,8 @@ The audit employed a comprehensive security assessment methodology including:
                 try:
                     text = fpath.read_text(encoding='utf-8', errors='ignore')
                 except Exception:
-                    continue
+                    # Fallback: try to stitch from stored card content if file unreadable
+                    text = None
                 # Merge overlapping/adjacent ranges
                 merged = []
                 for (cs, ce) in sorted(ranges):
@@ -2708,8 +2805,29 @@ The audit employed a comprehensive security assessment methodology including:
                             merged.append([cs, ce])
                 # Convert to snippets (limit per file)
                 for cs, ce in merged[:2]:
-                    start_line, end_line = self._char_range_to_lines(text, cs, ce)
-                    code = text[cs:ce]
+                    if text is not None:
+                        # Expand to whole line boundaries for readability and determinism
+                        line_start_idx = text.rfind('\n', 0, max(0, cs)) + 1
+                        line_end_idx = text.find('\n', min(len(text), max(cs, ce)))
+                        if line_end_idx == -1:
+                            line_end_idx = len(text)
+                        # Compute 1-based line numbers
+                        start_line = 1 + text.count('\n', 0, line_start_idx)
+                        end_line = 1 + text.count('\n', 0, line_end_idx)
+                        code = text[line_start_idx:line_end_idx]
+                    else:
+                        # Fall back to concatenating card contents that intersect this range
+                        parts = []
+                        for cid, card in self.card_store.items():
+                            if card.get('relpath') == rel:
+                                ccs = card.get('char_start')
+                                cce = card.get('char_end')
+                                if isinstance(ccs, int) and isinstance(cce, int):
+                                    if not (cce <= cs or ccs >= ce):
+                                        parts.append(card.get('content') or '')
+                        code = '\n'.join(p for p in parts if p).strip()
+                        # Unknown exact lines without file; mark as unknown bounds
+                        start_line, end_line = 1, max(1, code.count('\n') + 1)
                     samples.append({
                         'file': rel,
                         'start_line': start_line,
@@ -2737,6 +2855,41 @@ The audit employed a comprehensive security assessment methodology including:
         start_line = 1 + before.count('\n')
         end_line = start_line + within.count('\n')
         return start_line, end_line
+
+    def _normalize_reported_path(self, reported: str, files_ctx: dict[str, str]) -> str | None:
+        """Map an LLM-reported file path to a key in files_ctx.
+
+        Accepts exact match, suffix matches, and basename matches when unambiguous.
+        Returns the normalized key or None if no match.
+        """
+        if not reported:
+            return None
+        # Exact
+        if reported in files_ctx:
+            return reported
+        # Normalize leading slash
+        cand = reported.lstrip('/')
+        if cand in files_ctx:
+            return cand
+        # Try suffix match
+        best_key = None
+        best_len = -1
+        for key in files_ctx.keys():
+            if key.endswith(cand) or cand.endswith(key):
+                match_len = len(key) if cand.endswith(key) else len(cand)
+                if match_len > best_len:
+                    best_key = key
+                    best_len = match_len
+        if best_key:
+            return best_key
+        # Basename unique match
+        from pathlib import Path as _P
+        base = _P(cand).name
+        if base:
+            matches = [k for k in files_ctx.keys() if _P(k).name == base]
+            if len(matches) == 1:
+                return matches[0]
+        return None
 
     def _extract_code_via_llm_file_scan(self, finding: dict) -> list[dict]:
         """Fallback: scan likely files and ask LLM for relevant line ranges."""

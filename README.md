@@ -363,6 +363,8 @@ A reasoning model reviews all hypotheses and updates their status based on evide
 ```bash
 # Run finalization with quality review
 ./hound.py finalize myaudit
+# Re-run all pending (including below threshold)
+./hound.py finalize myaudit --include-below-threshold
 
 # Customize confidence threshold
 ./hound.py finalize myaudit -t 0.7 --model gpt-4o

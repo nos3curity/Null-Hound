@@ -23,10 +23,11 @@ console = Console()
 @click.command()
 @click.argument('project_name')
 @click.option('--threshold', '-t', default=0.5, help="Confidence threshold for hypothesis review (default: 0.5 or 50%)")
+@click.option('--include-below-threshold', is_flag=True, help="Also review pending hypotheses below the threshold (retries previously undecidable ones)")
 @click.option('--debug', is_flag=True, help="Enable debug mode")
 @click.option('--platform', default=None, help='Override QA platform (e.g., openai, anthropic, mock)')
 @click.option('--model', default=None, help='Override QA model (e.g., gpt-4o-mini)')
-def finalize(project_name: str, threshold: float, debug: bool, platform: str | None, model: str | None):
+def finalize(project_name: str, threshold: float, include_below_threshold: bool, debug: bool, platform: str | None, model: str | None):
     """
     Finalize hypotheses in a project by reviewing high-confidence findings.
     
@@ -82,21 +83,30 @@ def finalize(project_name: str, threshold: float, debug: bool, platform: str | N
         if model:
             config['models']['finalize']['model'] = model
     
+    # Pending = not already finalized
+    pending = {
+        hid: h for hid, h in all_hypotheses.items()
+        if h.get("status") not in ["confirmed", "rejected"]
+    }
+
     # Count hypotheses above threshold
     above_threshold = {
-        hid: h for hid, h in all_hypotheses.items() 
-        if h.get("confidence", 0) >= threshold and h.get("status") not in ["confirmed", "rejected"]
+        hid: h for hid, h in pending.items() 
+        if h.get("confidence", 0) >= threshold
     }
-    
-    # Get all candidates above threshold
-    candidates = [(hid, h) for hid, h in above_threshold.items()]
+
+    # Choose candidates
+    chosen = pending if include_below_threshold else above_threshold
+    candidates = [(hid, h) for hid, h in chosen.items()]
     
     # Display summary
     summary_panel = Panel(
         f"[bold]Hypothesis Finalization[/bold]\n\n"
         f"Project: {project_name}\n"
         f"Total hypotheses: {len(all_hypotheses)}\n"
+        f"Pending (not confirmed/rejected): {len(pending)}\n"
         f"Above threshold ({threshold:.0%}): {len(above_threshold)}\n"
+        + ("[dim]\nIncluding below-threshold pending items\n[/dim]" if include_below_threshold else "") +
         f"To review: [green]{len(candidates)} hypotheses[/green]",
         title="[bold bright_cyan]Finalization Summary[/bold bright_cyan]",
         expand=False
@@ -210,9 +220,28 @@ def finalize(project_name: str, threshold: float, debug: bool, platform: str | N
             task = progress.add_task(task_desc, total=1)
             
             try:
-                # Get source files from hypothesis
-                source_files = hypothesis.get('properties', {}).get('source_files', [])
+                # Get source files from hypothesis and augment heuristically
+                source_files = list(hypothesis.get('properties', {}).get('source_files', []) or [])
                 hypothesis.get('node_refs', [])
+                # Heuristic: guess file paths from title/description/reasoning/evidence text
+                try:
+                    from analysis.path_utils import guess_relpaths
+                    extra_texts = [
+                        hypothesis.get('title', ''),
+                        hypothesis.get('description', ''),
+                        hypothesis.get('reasoning', ''),
+                    ]
+                    for ev in hypothesis.get('evidence', []) or []:
+                        if isinstance(ev, dict):
+                            extra_texts.append(ev.get('description', '') or '')
+                        elif isinstance(ev, str):
+                            extra_texts.append(ev)
+                    guessed = guess_relpaths("\n".join([t for t in extra_texts if t]), repo_root)
+                    for rel in guessed:
+                        if rel not in source_files:
+                            source_files.append(rel)
+                except Exception:
+                    pass
                 
                 # Load source code
                 source_code = {}

@@ -1943,6 +1943,7 @@ DO NOT include any text before or after the JSON object."""
     def _form_hypothesis(self, params: dict) -> dict:
         """Form a new hypothesis."""
         from .concurrent_knowledge import Hypothesis
+        from .path_utils import guess_relpaths
         
         # Ensure we have at least one node ID
         node_ids = params.get('node_ids') or []
@@ -2012,6 +2013,20 @@ DO NOT include any text before or after the JSON object."""
                                 if 'relpath' in card:
                                     source_files.add(card['relpath'])
         
+        # Heuristically augment with file paths mentioned in strategist text
+        try:
+            extra_texts = [
+                params.get('details') or '',
+                params.get('description') or '',
+                params.get('reasoning') or '',
+            ]
+            guessed = guess_relpaths("\n".join([t for t in extra_texts if t]), self._repo_root)
+            for rel in guessed:
+                source_files.add(rel)
+        except Exception:
+            # Never block hypothesis formation on heuristics
+            pass
+
         # Store graph name and source files in properties (NOT shown to agent)
         hypothesis.properties = {
             'graph_name': graph_name,
