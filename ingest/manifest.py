@@ -188,8 +188,6 @@ class RepositoryManifest:
     def _split_into_chunks(self, content: str, file_path: Path) -> list:
         """Split content into chunks at natural boundaries."""
         if self.manual_chunking:
-            if file_path.suffix != '.sol':
-                raise ValueError(f"Manual chunking is currently only supported for Solidity (.sol) files, got {file_path.suffix} for {file_path}")
             return self._split_from_markers(content)
         else:
             chunks = []
@@ -224,38 +222,41 @@ class RepositoryManifest:
             return chunks
 
     def _split_from_markers(self, content: str) -> list[tuple[str, int, int]]:
-        """Split content into chunks based on manual markers '// >>>CHUNK_BREAK<<<' for .sol files, excluding markers.
+            """Split content into chunks based on manual markers '>>>CHUNK_BREAK<<<' generically, excluding markers.
 
-        Returns:
-            List of (chunk_content, char_start, char_end) tuples with non-empty chunks and original positions.
-        """
-        lines = content.splitlines(keepends=True)
-        chunks: list[tuple[str, int, int]] = []
-        current_chunk = ''
-        marker = '// >>>CHUNK_BREAK<<<'
-        marker_count = 0
-        char_pos = 0
-        chunk_start = 0
-        for line in lines:
-            line_len = len(line)
-            # Check if the line contains the marker (allowing for leading/trailing whitespace or comments)
-            if marker in line.strip():
-                if current_chunk.strip():  # Only append non-empty chunks
-                    chunks.append((current_chunk, chunk_start, char_pos))
-                current_chunk = ''
-                marker_count += 1
-                chunk_start = char_pos + line_len  # Start next chunk after this marker line
-            else:
-                if not current_chunk:  # Starting a new chunk
-                    chunk_start = char_pos
-                current_chunk += line
-            char_pos += line_len
-        if current_chunk.strip():  # Append the final non-empty chunk
-            chunks.append((current_chunk, chunk_start, char_pos))
-        if not chunks and content.strip():
-            # Fallback: if no chunks were created but content exists, return it as a single chunk
-            chunks = [(content, 0, len(content))]
-        return chunks
+            This works across any file type, detecting the marker substring in lines (after stripping whitespace),
+            regardless of surrounding comment syntax (e.g., '//', '#', etc.).
+
+            Returns:
+                List of (chunk_content, char_start, char_end) tuples with non-empty chunks and original positions.
+            """
+            lines = content.splitlines(keepends=True)
+            chunks: list[tuple[str, int, int]] = []
+            current_chunk = ''
+            marker = '>>>CHUNK_BREAK<<<'
+            marker_count = 0
+            char_pos = 0
+            chunk_start = 0
+            for line in lines:
+                line_len = len(line)
+                # Check if the line contains the marker (allowing for leading/trailing whitespace or comments)
+                if marker in line.strip():
+                    if current_chunk.strip():  # Only append non-empty chunks
+                        chunks.append((current_chunk, chunk_start, char_pos))
+                    current_chunk = ''
+                    marker_count += 1
+                    chunk_start = char_pos + line_len  # Start next chunk after this marker line
+                else:
+                    if not current_chunk:  # Starting a new chunk
+                        chunk_start = char_pos
+                    current_chunk += line
+                char_pos += line_len
+            if current_chunk.strip():  # Append the final non-empty chunk
+                chunks.append((current_chunk, chunk_start, char_pos))
+            if not chunks and content.strip():
+                # Fallback: if no chunks were created but content exists, return it as a single chunk
+                chunks = [(content, 0, len(content))]
+            return chunks
 
     def _generate_card_id(self, relpath: str, index: int, content: str) -> str:
         """Generate unique card ID."""
