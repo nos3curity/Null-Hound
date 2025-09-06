@@ -113,6 +113,7 @@ def project_info(name: str = typer.Argument(..., help="Project name")):
 def project_coverage(name: str = typer.Argument(..., help="Project name")):
     """Show coverage metrics for a project (nodes and cards)."""
     from analysis.coverage_index import CoverageIndex
+    import json as _json
     manager = ProjectManager()
     proj = manager.get_project(name)
     if not proj:
@@ -123,6 +124,47 @@ def project_coverage(name: str = typer.Argument(..., help="Project name")):
     manifest_dir = project_dir / 'manifest'
     cov = CoverageIndex(project_dir / 'coverage_index.json', agent_id='cli')
     stats = cov.compute_stats(graphs_dir, manifest_dir)
+
+    # Fallback: if nothing recorded yet, aggregate from session files
+    try:
+        if (stats['nodes']['visited'] == 0 and stats['cards']['visited'] == 0 and
+            (stats['nodes']['total'] > 0 or stats['cards']['total'] > 0)):
+            sessions_dir = project_dir / 'sessions'
+            visited_nodes: set[str] = set()
+            visited_cards: set[str] = set()
+            if sessions_dir.exists():
+                for sf in sessions_dir.glob('*.json'):
+                    try:
+                        data = _json.loads(sf.read_text())
+                        cov_d = data.get('coverage', {})
+                        visited_nodes.update([str(x) for x in cov_d.get('visited_node_ids', [])])
+                        visited_cards.update([str(x) for x in cov_d.get('visited_card_ids', [])])
+                    except Exception:
+                        continue
+            # Update the per-project coverage index for future queries
+            if visited_nodes or visited_cards:
+                from datetime import datetime as _dt
+                now = _dt.now().isoformat()
+                def _merge(data):
+                    nodes = data.setdefault('nodes', {})
+                    for nid in visited_nodes:
+                        rec = nodes.get(nid, {"last_seen": None, "seen_count": 0, "evidence_count": 0})
+                        rec['last_seen'] = now
+                        rec['seen_count'] = int(rec.get('seen_count', 0)) + 1
+                        nodes[nid] = rec
+                    cards = data.setdefault('cards', {})
+                    for cid in visited_cards:
+                        rec = cards.get(cid, {"last_seen": None, "seen_count": 0})
+                        rec['last_seen'] = now
+                        rec['seen_count'] = int(rec.get('seen_count', 0)) + 1
+                        cards[cid] = rec
+                    data.setdefault('metadata', {})['last_modified'] = now
+                    return data, True
+                cov.update_atomic(_merge)
+                # Recompute stats after merge
+                stats = cov.compute_stats(graphs_dir, manifest_dir)
+    except Exception:
+        pass
     console.print("[bold cyan]Coverage[/bold cyan]")
     console.print(f"Nodes: {stats['nodes']['visited']} / {stats['nodes']['total']} ({stats['nodes']['percent']}%)")
     console.print(f"Cards: {stats['cards']['visited']} / {stats['cards']['total']} ({stats['cards']['percent']}%)")

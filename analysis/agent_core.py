@@ -155,6 +155,14 @@ class AutonomousAgent:
             self.project_dir = Path.cwd()
         hypothesis_path = project_dir / "hypotheses.json"
         self.hypothesis_store = HypothesisStore(hypothesis_path, agent_id=agent_id)
+
+        # Initialize per-project coverage index for persistent coverage tracking
+        try:
+            from .coverage_index import CoverageIndex
+            self.coverage_index = CoverageIndex(project_dir / 'coverage_index.json', agent_id=agent_id)
+        except Exception:
+            # Keep attribute for conditional checks even if init fails
+            self.coverage_index = None
         
         # Agent's memory - what it has loaded and discovered
         self.loaded_data = {
@@ -1862,8 +1870,12 @@ DO NOT include any text before or after the JSON object."""
                     'graph_name': 'SystemArchitecture',
                     'guidance_model': guidance_model_info,
                 }
-                res = self._form_hypothesis(params)
-                if res.get('status') == 'success':
+                # Be defensive: guard against unexpected returns
+                try:
+                    res = self._form_hypothesis(params)
+                except Exception:
+                    res = {'status': 'error', 'error': 'hypothesis formation failed'}
+                if isinstance(res, dict) and res.get('status') == 'success':
                     added += 1
                     try:
                         titles.append(params.get('description', 'Hypothesis'))
@@ -1950,9 +1962,12 @@ DO NOT include any text before or after the JSON object."""
         if not node_ids:
             return {'status': 'error', 'error': 'Hypothesis must reference at least one node'}
         
-        # Determine which graph this hypothesis relates to
-        graph_name = params.get('graph_name', 
-                               self.loaded_data.get('system_graph', {}).get('name', 'unknown'))
+        # Determine which graph this hypothesis relates to.
+        # Use a safe fallback if system_graph key exists but value is None.
+        graph_name = params.get(
+            'graph_name',
+            (self.loaded_data.get('system_graph') or {}).get('name', 'unknown')
+        )
         
         # Get model information
         model_info = f"{self.llm.provider_name}:{self.llm.model}"
@@ -2004,6 +2019,8 @@ DO NOT include any text before or after the JSON object."""
             
             # Also check in loaded graphs
             for graph_data in self.loaded_data.get('graphs', {}).values():
+                if not isinstance(graph_data, dict):
+                    continue
                 for node in graph_data.get('nodes', []):
                     if node.get('id') == node_id:
                         for card_id in node.get('source_refs', []):

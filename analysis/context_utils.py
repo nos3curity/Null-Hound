@@ -144,7 +144,9 @@ def build_investigation_context(
     # Available graphs
     parts.append("=== AVAILABLE GRAPHS ===")
     parts.append("Use EXACT graph names as shown below:")
-    sys_g_name = loaded_data.get('system_graph', {}).get('name') if loaded_data else None
+    # Handle case where the key exists but value is None
+    sys_g_name = ((loaded_data.get('system_graph') or {}).get('name')
+                  if loaded_data else None)
     for name in available_graphs.keys():
         if sys_g_name and name == sys_g_name:
             parts.append(f"• {name} [SYSTEM - AUTO-LOADED, see nodes below]")
@@ -176,4 +178,3 @@ def build_investigation_context(
         parts.append("")
 
     return "\n".join(parts)
-

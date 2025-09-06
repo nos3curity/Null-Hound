@@ -45,6 +45,8 @@ class ReportGenerator:
         self.card_store: dict[str, dict[str, Any]] = {}
         self.repo_root: Path | None = None
         self._load_card_store_and_repo_root()
+        # Unique counter for code blocks in the rendered report
+        self._code_block_counter: int = 0
 
     def _load_card_store_and_repo_root(self) -> None:
         """Load card_store.json (graph evidence) and determine repo root.
@@ -1267,6 +1269,38 @@ External dependencies are limited and clearly defined."""
             color: #b3d4fc;
             font-style: italic;
         }}
+        /* Enhanced code layout: gutter + content + copy */
+        .code-grid {{
+            display: grid;
+            grid-template-columns: auto 1fr;
+            column-gap: 12px;
+        }}
+        .code-gutter {{
+            color: #6b7b94;
+            text-align: right;
+            user-select: none;
+            padding-right: 8px;
+            border-right: 1px solid #2a3f5f;
+        }}
+        .code-gutter pre {{ color: inherit; margin: 0; }}
+        .code-content {{ overflow-x: auto; }}
+        .code-content pre {{ white-space: pre; margin: 0; }}
+        .code-line {{ white-space: pre; }}
+        .code-header-controls {{
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }}
+        .copy-btn {{
+            background: rgba(100,181,246,0.12);
+            border: 1px solid rgba(100,181,246,0.35);
+            color: #b3d4fc;
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            cursor: pointer;
+        }}
+        .copy-btn:hover {{ background: rgba(100,181,246,0.2); }}
         
         .finding::before {{
             content: '';
@@ -1848,9 +1882,17 @@ External dependencies are limited and clearly defined."""
             if description:
                 html_parts.append(f'<p class="poc-description">{self._escape_html(description)}</p>')
             
-            # Format code with syntax highlighting
-            escaped_content = self._escape_html(content)
-            html_parts.append(f'<pre><code class="language-{lang}">{escaped_content}</code></pre>')
+            # Render using the same enhanced renderer as findings
+            lines_count = max(1, content.count('\n') + 1)
+            sample = {
+                'file': name,
+                'start_line': 1,
+                'end_line': lines_count,
+                'code': content,
+                'language': lang,
+                'explanation': ''
+            }
+            html_parts.append(self._render_code_sample(sample))
             html_parts.append('</div>')
         
         html_parts.append('</div>')
@@ -2083,16 +2125,7 @@ External dependencies are limited and clearly defined."""
             # Format code samples
             code_html = ''
             for sample in finding.get('code_samples', []):
-                code_html += f'''
-                <div class="code-sample">
-                    <div class="code-header">
-                        <span class="code-file">{sample['file']}</span>
-                        <span class="code-lines">Lines {sample['start_line']}-{sample['end_line']}</span>
-                    </div>
-                    <pre><code class="language-{sample['language']}">{self._escape_html(sample['code'])}</code></pre>
-                    {f'<div class="code-explanation">{sample["explanation"]}</div>' if sample.get('explanation') else ''}
-                </div>
-                '''
+                code_html += self._render_code_sample(sample)
             
             # Add QA comment if available
             qa_comment_html = ''
@@ -2304,6 +2337,61 @@ Rules:
             .replace('>', '&gt;')
             .replace('"', '&quot;')
             .replace("'", '&#39;'))
+
+    def _dedent_code(self, code: str) -> str:
+        """Remove common leading indentation from a code block while preserving relative indent."""
+        lines = code.split('\n')
+        indents: list[int] = []
+        for ln in lines:
+            if ln.strip() == '':
+                continue
+            expanded = ln.replace('\t', '    ')
+            indents.append(len(expanded) - len(expanded.lstrip(' ')))
+        if not indents:
+            return code
+        trim = min(indents)
+        if trim <= 0:
+            return code
+        out_lines: list[str] = []
+        for ln in lines:
+            expanded = ln.replace('\t', '    ')
+            out_lines.append(expanded[trim:] if len(expanded) >= trim else expanded.lstrip(' '))
+        return '\n'.join(out_lines)
+
+    def _render_code_sample(self, sample: dict) -> str:
+        """Render a single code sample with line numbers and copy button."""
+        try:
+            fpath = str(sample.get('file') or 'unknown')
+            start = int(sample.get('start_line') or 1)
+            end = int(sample.get('end_line') or start)
+            lang = str(sample.get('language') or self._detect_language(fpath))
+            raw_code = str(sample.get('code') or '')
+        except Exception:
+            fpath, start, end, lang, raw_code = 'unknown', 1, 1, 'plaintext', str(sample)
+        code = self._dedent_code(raw_code.rstrip('\n'))
+        lines = code.split('\n')
+        gutter_numbers = '\n'.join(str(start + i) for i in range(len(lines)))
+        self._code_block_counter += 1
+        code_id = f"code-block-{self._code_block_counter}"
+        explanation_html = ''
+        if sample.get('explanation'):
+            explanation_html = f'<div class="code-explanation">{self._escape_html(str(sample.get("explanation","")))}</div>'
+        return f'''
+        <div class="code-sample">
+            <div class="code-header">
+                <span class="code-file">{self._escape_html(fpath)}</span>
+                <div class="code-header-controls">
+                    <span class="code-lines">Lines {start}-{end}</span>
+                    <button class="copy-btn" onclick="(async()=>{{try{{await navigator.clipboard.writeText(document.getElementById('{code_id}').innerText);}}catch(e){{}}}})()">Copy</button>
+                </div>
+            </div>
+            <div class="code-grid">
+                <div class="code-gutter"><pre>{gutter_numbers}</pre></div>
+                <div class="code-content"><pre id="{code_id}"><code class="language-{lang}">{self._escape_html(code)}</code></pre></div>
+            </div>
+            {explanation_html}
+        </div>
+        '''
     
     def _format_test_coverage_html(self, hypotheses: list[dict]) -> str:
         """Format test coverage into HTML."""
