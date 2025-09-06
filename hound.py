@@ -831,7 +831,8 @@ def graph_export_cards(
     """Export full cards with content for a project."""
     import json
     from pathlib import Path
-    from analysis.cards import load_card_index, extract_card_content
+
+    from analysis.cards import extract_card_content, load_card_index
     manager = ProjectManager()
     proj = manager.get_project(project)
     if not proj:
