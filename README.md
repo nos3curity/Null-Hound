@@ -28,7 +28,7 @@
 
 ## Overview
 
-Hound is an AI framework for language-agnostic code security auditing that autonomously designs and refines adaptive knowledge graphs, enabling deep iterative reasoning.
+Hound is a Language-agnostic AI auditor that autonomously builds and refines adaptive knowledge graphs for deep, iterative code reasoning.
 
 ### Key Features
 
