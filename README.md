@@ -38,7 +38,7 @@ Hound is a Language-agnostic AI auditor that autonomously builds and refines ada
 - Dynamic model switching – Lightweight "scout" models handle exploration; heavyweight "strategist" models provide deep reasoning, mirroring expert workflows while keeping costs efficient.
 - Strategic audit planning - Balances broad code coverage with focused investigation of the most promising aspects, ensuring both depth and efficiency.
 
-**Codebase size considerations:** While Hound is language-agnostic and can analyze any codebase, it's optimized for small-to-medium sized projects like typical smart contract applications. Large enterprise codebases may exceed context limits and require selective analysis of specific subsystems.
+**Codebase size considerations:** While Hound can analyze any codebase, it's optimized for small-to-medium sized projects like typical smart contract applications. Large enterprise codebases may exceed context limits and require selective analysis of specific subsystems.
 
 ### Links
 
