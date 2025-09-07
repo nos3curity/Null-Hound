@@ -32,7 +32,7 @@ Hound is a Language-agnostic AI auditor that autonomously builds and refines ada
 
 ### Key Features
 
-- Graph-driven analysis – Flexible, agent-designed graphs that can model any aspect of a system (e.g. architecture, access control, value flows), always grounded in code snippets.
+- Graph-driven analysis – Flexible, agent-designed graphs that can model any aspect of a system (e.g. architecture, access control, value flows, math, etc.)
 - Relational graph views – High-level graphs support cross-aspect reasoning and precise retrieval of the code snippets that back each subsystem investigated.
 - Belief & hypothesis system – Observations, assumptions, and hypotheses evolve with confidence scores, enabling long-horizon reasoning and cumulative audits.
 - Dynamic model switching – Lightweight "scout" models handle exploration; heavyweight "strategist" models provide deep reasoning, mirroring expert workflows while keeping costs efficient.
