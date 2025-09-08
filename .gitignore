@@ -8,6 +8,7 @@ __pycache__
 graph_results
 config.yaml
 htmlcov/
+chatbot/.active_project 
 
 *.egg-info/
 *.egg
