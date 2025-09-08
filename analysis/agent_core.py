@@ -1848,7 +1848,15 @@ DO NOT include any text before or after the JSON object."""
                 debug_logger=getattr(self, 'debug_logger', None),
                 mission=getattr(self, 'mission', None)
             )
-            items = strategist.deep_think(context=context) or []
+            # Pass phase if available (from parent runner)
+            phase = getattr(self, 'current_phase', None)
+            if phase == 'Coverage':
+                items = strategist.deep_think(context=context, phase='Coverage') or []
+            elif phase == 'Saliency':
+                items = strategist.deep_think(context=context, phase='Saliency') or []
+            else:
+                # Auto-detect based on context or default
+                items = strategist.deep_think(context=context) or []
             added = 0
             dedup_skipped = 0
             titles: list[str] = []

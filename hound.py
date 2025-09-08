@@ -301,6 +301,7 @@ def agent_audit(
     time_limit: int = typer.Option(None, "--time-limit", help="Time limit in minutes"),
     config: str = typer.Option(None, "--config", help="Configuration file"),
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging"),
+    mode: str = typer.Option(None, "--mode", help="Analysis mode: 'sweep' (Phase 1 - broad coverage) or 'intuition' (Phase 2 - deep exploration)"),
     project: str = typer.Option(None, "--project", "-p", help="Use existing project"),
     platform: str = typer.Option(None, "--platform", help="Override scout platform (e.g., openai, anthropic, mock)"),
     model: str = typer.Option(None, "--model", help="Override scout model (e.g., gpt-5, gpt-4o-mini, mock)"),
@@ -390,7 +391,7 @@ def agent_audit(
         'plan_n': plan_n,
         'time_limit': time_limit,
         'config': config,
-        
+        'mode': mode,
         'debug': debug,
         'platform': platform,
         'model': model,

@@ -618,11 +618,12 @@ class AgentRunner:
     def __init__(self, project_id: str, config_path: Path | None = None, 
                  iterations: int | None = None, time_limit_minutes: int | None = None,
                  debug: bool = False, platform: str | None = None, model: str | None = None,
-                 session: str | None = None, new_session: bool = False):
+                 session: str | None = None, new_session: bool = False, mode: str | None = None):
         self.project_id = project_id
         self.config_path = config_path
         self.max_iterations = iterations
         self.time_limit_minutes = time_limit_minutes
+        self.mode = mode  # 'sweep', 'intuition', or None for auto
         self.debug = debug
         self.platform = platform
         self.model = model
@@ -969,8 +970,14 @@ class AgentRunner:
         investigations = session_data.get('investigations', [])
         
         results = []
+        seen_goals = set()  # Track goals to avoid duplicates
+        
         for inv in investigations:
             goal = inv.get('goal', '')
+            if goal in seen_goals:
+                continue
+            seen_goals.add(goal)
+            
             hypotheses = inv.get('hypotheses', {})
             total_hyp = hypotheses.get('total', 0)
             iterations = inv.get('iterations_completed', 0)
@@ -981,8 +988,9 @@ class AgentRunner:
         
         # Also add any completed investigations not yet in session
         for goal in self.completed_investigations:
-            if not any(goal in r for r in results):
+            if goal not in seen_goals:
                 results.append(goal)
+                seen_goals.add(goal)
         
         return results
     
@@ -1303,8 +1311,16 @@ class AgentRunner:
             out = [n for n in (sys_nodes or []) if is_high_level(n)]
             return out
 
-        # Determine phase (Coverage/Saliency) from coverage and component completion
+        # Determine phase (Coverage/Saliency) from mode flag or coverage
         def _determine_phase_two(cov: dict | None) -> str:
+            # If mode is explicitly set, use it
+            if self.mode:
+                if self.mode.lower() == 'sweep':
+                    return 'Coverage'
+                elif self.mode.lower() == 'intuition':
+                    return 'Saliency'
+            
+            # Otherwise, use automatic determination based on coverage
             # Defaults
             cfg_planner = (self.config or {}).get('planner', {}) if self.config else {}
             two_cfg = (cfg_planner.get('two_phase') or {}) if isinstance(cfg_planner, dict) else {}
@@ -1960,6 +1976,10 @@ class AgentRunner:
             if ' across ' in t or t.startswith('across '):
                 return True
             return False
+        # Track consecutive rounds with no new investigations to detect stuck state
+        consecutive_empty_rounds = 0
+        last_round_goals = set()
+        
         while True:
             # Time limit check
             if self.time_limit_minutes:
@@ -1974,10 +1994,17 @@ class AgentRunner:
                 console.print(f"\n[bold cyan]═══ Planning Batch {planned_round} ═══[/bold cyan]")
                 # Two-phase: Coverage vs Saliency
                 phase = getattr(self, '_current_phase', None)
-                if not phase and self.session_tracker:
-                    cov_tmp = self.session_tracker.get_coverage_stats()
-                    nodes_pct = float(((cov_tmp or {}).get('nodes') or {}).get('percent') or 0.0)
-                    phase = 'Coverage' if nodes_pct < 90.0 else 'Saliency'
+                if not phase:
+                    # Check if mode is explicitly set
+                    if self.mode:
+                        if self.mode.lower() == 'sweep':
+                            phase = 'Coverage'
+                        elif self.mode.lower() == 'intuition':
+                            phase = 'Saliency'
+                    elif self.session_tracker:
+                        cov_tmp = self.session_tracker.get_coverage_stats()
+                        nodes_pct = float(((cov_tmp or {}).get('nodes') or {}).get('percent') or 0.0)
+                        phase = 'Coverage' if nodes_pct < 90.0 else 'Saliency'
                 if phase:
                     if phase == 'Coverage':
                         console.print(f"\n[bold yellow]═══ PHASE 1: COVERAGE ═══[/bold yellow]")
@@ -2030,6 +2057,47 @@ class AgentRunner:
             if not items:
                 console.print("[yellow]No further promising investigations suggested — audit complete[/yellow]")
                 break
+            
+            # Check if we're getting the same items repeatedly (stuck in a loop)
+            current_round_goals = set(it.goal for it in items)
+            if current_round_goals == last_round_goals:
+                consecutive_empty_rounds += 1
+                if consecutive_empty_rounds >= 2:
+                    console.print("[yellow]\nDetected planning loop - no new components to analyze[/yellow]")
+                    if self.mode == 'sweep':
+                        console.print("[green]Sweep mode complete![/green]")
+                    else:
+                        console.print("[yellow]Consider switching to intuition mode for deeper analysis[/yellow]")
+                    break
+            else:
+                consecutive_empty_rounds = 0
+                last_round_goals = current_round_goals
+            
+            # In sweep mode, check if we've analyzed all reachable components
+            if self.mode == 'sweep' and planned_round > 1:
+                # Get all completed component names from investigations
+                completed_components = set()
+                for goal in self.completed_investigations:
+                    # Extract component names from goals like "Vulnerability analysis of X"
+                    import re
+                    match = re.search(r'(?:of|for|in)\s+([A-Za-z0-9_]+)', goal)
+                    if match:
+                        completed_components.add(match.group(1).lower())
+                
+                # Check if any new items target components we haven't analyzed
+                has_new_targets = False
+                for it in items:
+                    match = re.search(r'(?:of|for|in)\s+([A-Za-z0-9_]+)', it.goal)
+                    if match:
+                        comp = match.group(1).lower()
+                        if comp not in completed_components:
+                            has_new_targets = True
+                            break
+                
+                if not has_new_targets and len(self.completed_investigations) > 0:
+                    console.print("[yellow]\nAll accessible components have been analyzed[/yellow]")
+                    console.print("[green]Sweep mode complete![/green]")
+                    break
             
             # Log previously completed investigations
             if self.completed_investigations:
@@ -2362,6 +2430,8 @@ class AgentRunner:
                     # Show an animated status while the agent thinks/acts for this investigation
                     replan_requested = False
                     try:
+                        # Set the current phase on the agent for deep_think
+                        self.agent.current_phase = self._current_phase
                         # More accurate status: the Scout is exploring code, not just "thinking"
                         with console.status("[cyan]Exploring codebase and analyzing nodes...[/cyan]", spinner="line", spinner_style="cyan"):
                             report = self.agent.investigate(inv.goal, max_iterations=max_iters, progress_callback=_cb)
@@ -2555,6 +2625,7 @@ class AgentRunner:
 @click.option('--time-limit', type=int, help='Time limit in minutes')
 @click.option('--config', type=click.Path(exists=True), help='Configuration file')
 @click.option('--debug', is_flag=True, help='Enable debug logging of prompts and responses')
+@click.option('--mode', type=click.Choice(['sweep', 'intuition'], case_sensitive=False), default=None, help='Analysis mode: sweep (Phase 1) or intuition (Phase 2)')
 @click.option('--platform', default=None, help='Override scout platform (e.g., openai, anthropic, mock)')
 @click.option('--model', default=None, help='Override scout model (e.g., gpt-5, gpt-4o-mini, mock)')
 @click.option('--strategist-platform', default=None, help='Override strategist platform (e.g., openai, anthropic, mock)')
@@ -2566,7 +2637,7 @@ class AgentRunner:
 @click.option('--strategist-two-pass', is_flag=True, help='Enable strategist two-pass self-critique to reduce false positives')
 @click.option('--mission', default=None, help='Overarching mission for the audit (always visible to the Strategist)')
 def agent(project_id: str, iterations: int | None, plan_n: int, time_limit: int | None, 
-          config: str | None, debug: bool, platform: str | None, model: str | None,
+          config: str | None, debug: bool, mode: str | None, platform: str | None, model: str | None,
           strategist_platform: str | None, strategist_model: str | None,
           session: str | None, new_session: bool, session_private_hypotheses: bool,
           telemetry: bool, strategist_two_pass: bool, mission: str | None):
@@ -2574,7 +2645,7 @@ def agent(project_id: str, iterations: int | None, plan_n: int, time_limit: int 
     
     config_path = Path(config) if config else None
     
-    runner = AgentRunner(project_id, config_path, iterations, time_limit, debug, platform, model, session=session, new_session=new_session)
+    runner = AgentRunner(project_id, config_path, iterations, time_limit, debug, platform, model, session=session, new_session=new_session, mode=mode)
     try:
         runner.mission = mission
     except Exception:

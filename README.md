@@ -192,23 +192,42 @@ These graphs enable Hound to reason about high-level patterns while maintaining 
 The audit phase uses the **senior/junior pattern** with planning and investigation:
 
 ```bash
-# Run a full audit with strategic planning (new session)
-./hound.py agent audit myaudit
+# 1. Sweep all components for shallow bugs, build code understanding
+./hound.py agent audit myaudit --sweep
 
-# Set time limit (in minutes)
-./hound.py agent audit myaudit --time-limit 30
+# 2. Intuition-guided search to find complex bugs
+./hound.py agent audit myaudit --intuition --time-limit 300
 
 # Start with telemetry (connect the Chatbot UI to steer)
-./hound.py agent audit myaudit --telemetry --time-limit 30
-
-# Enable debug logging (captures all prompts/responses)
-./hound.py agent audit myaudit --debug
+./hound.py agent audit myaudit --intuition --time-limit 30 --telemetry 
 
 # Attach to an existing session and continue where you left off
-./hound.py agent audit myaudit --session <session_id>
+./hound.py agent audit myaudit --intuition --session <session_id>
 ```
 
 Tip: When started with `--telemetry`, you can connect the Chatbot UI and steer the audit interactively (see Chatbot section above).
+
+**Audit Modes:**
+
+Hound supports two distinct audit modes that mirror expert security workflows:
+
+- **Sweep Mode (`--mode sweep`)**: Phase 1 - Systematic component analysis
+  - Performs a broad, systematic analysis of every major component
+  - Examines each contract, module, and class for vulnerabilities
+  - Builds comprehensive graph annotations for later analysis
+  - Terminates when all accessible components have been analyzed
+  - Best for: Initial vulnerability discovery and building code understanding
+
+- **Intuition Mode (`--mode intuition`)**: Phase 2 - Deep, targeted exploration
+  - Uses intuition-guided search to find high-impact vulnerabilities
+  - Prioritizes monetary flows, value transfers, and theft opportunities
+  - Investigates contradictions between assumptions and observations
+  - Focuses on authentication bypasses and state corruption
+  - Best for: Finding complex, cross-component vulnerabilities
+
+- **Auto Mode (default)**: Runs both phases automatically
+  - Starts with sweep mode for broad coverage
+  - Automatically transitions to intuition mode at ~90% coverage
 
 **Key parameters:**
 - **--time-limit**: Stop after N minutes (useful for incremental audits)
@@ -216,64 +235,9 @@ Tip: When started with `--telemetry`, you can connect the Chatbot UI and steer t
 - **--session**: Resume a specific session (continues coverage/planning)
 - **--debug**: Save all LLM interactions to `.hound_debug/`
 
-**Audit duration and depth:**
-Hound is designed to deliver increasingly complete results with longer audits. The analyze step can range from:
-- **Quick scan**: 1 hour with fast models (gpt-4o-mini) for initial findings
-- **Standard audit**: 4-8 hours with balanced models for comprehensive coverage
-- **Deep audit**: Multiple days with advanced models (GPT-5) for exhaustive analysis
-
 The quality and duration depend heavily on the models used. Faster models provide quick results but may miss subtle issues, while advanced reasoning models find deeper vulnerabilities but require more time.
 
 **What happens during an audit:**
-
-The audit is a **dynamic, iterative process** with continuous interaction between Strategist and Scout:
-
-1. **Initial Planning** (Strategist)
-   - Reviews all knowledge graphs and annotations
-   - Identifies contradictions between assumptions and observations
-   - Creates a batch of prioritized investigations (default: 5)
-   - Focus areas: access control violations, value transfer risks, state inconsistencies
-
-2. **Investigation Loop** (Scout + Strategist collaboration)
-   
-   For each investigation in the batch:
-   - **Scout explores**: Loads relevant graph nodes, analyzes code
-   - **Scout escalates**: When deep analysis needed, calls Strategist via `deep_think`
-   - **Strategist analyzes**: Reviews Scout's collected context, forms vulnerability hypotheses
-   - **Hypotheses form**: Findings are added to global store
-   - **Coverage updates**: Tracks visited nodes and analyzed code
-
-3. **Adaptive Replanning**
-   
-   After completing a batch:
-   - Strategist reviews new findings and updated coverage
-   - Reorganizes priorities based on discoveries
-   - If vulnerability found, searches for related issues
-   - Plans next batch of investigations
-   - Continues until coverage goals met or no promising leads remain
-
-4. **Session Management**
-   - Unique session ID tracks the entire audit lifecycle
-   - Coverage metrics show exploration progress
-   - All findings accumulate in hypothesis store
-   - Token usage tracked per model and investigation
-
-**Example output:**
-```
-Planning Next Investigations...
-1. [P10] Investigate role management bypass vulnerabilities
-2. [P9] Check for reentrancy in value transfer functions
-3. [P8] Analyze emergency function privilege escalation
-
-Coverage Statistics:
-  Nodes visited: 23/45 (51.1%)
-  Cards analyzed: 12/30 (40.0%)
-
-Hypotheses Status:
-  Total: 15
-  High confidence: 8
-  Confirmed: 3
-```
 
 ### Step 4: Monitor Progress
 
