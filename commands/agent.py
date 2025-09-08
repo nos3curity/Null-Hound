@@ -641,6 +641,8 @@ class AgentRunner:
         # Cache of graph node IDs to avoid re-reading files repeatedly
         self._known_node_ids_cache: set[str] | None = None
         self._node_to_graph_map_cache: dict[str, str] | None = None
+        # Track current audit phase (Early/Mid/Late) for display and planning hints
+        self._current_phase: str | None = None
         
     def initialize(self):
         """Initialize the agent."""
@@ -1161,6 +1163,7 @@ class AgentRunner:
         hypotheses_summary = self._get_hypotheses_summary()
         investigation_results = self._get_investigation_results_summary()
         coverage_summary = None
+        cov_stats = None
         if self.session_tracker:
             cov_stats = self.session_tracker.get_coverage_stats()
             coverage_summary = (
@@ -1190,6 +1193,23 @@ class AgentRunner:
             except Exception:
                 pass
 
+        # Determine phase (Early/Mid/Late) from coverage and planning iteration estimate
+        def _determine_phase(cov: dict | None, completed: int, batch_size: int) -> str:
+            try:
+                nodes_pct = float(((cov or {}).get('nodes') or {}).get('percent') or 0.0)
+            except Exception:
+                nodes_pct = 0.0
+            # Rough planning iteration estimate
+            iters = (completed // max(1, batch_size)) + 1
+            # Heuristics: prioritize coverage, then iteration as a fallback hint
+            if nodes_pct < 30.0 or iters <= 2:
+                return 'Early'
+            if nodes_pct < 70.0 or iters <= 5:
+                return 'Mid'
+            return 'Late'
+
+        self._current_phase = _determine_phase(cov_stats, len(investigation_results or []), max(1, n))
+
         strategist = Strategist(config=self.config, debug=self.debug, session_id=self.session_id)
         need = max(0, n - len(prepared))
         planned = strategist.plan_next(
@@ -1197,7 +1217,8 @@ class AgentRunner:
             completed=investigation_results,
             hypotheses_summary=hypotheses_summary,
             coverage_summary=coverage_summary,
-            n=need if need > 0 else 0
+            n=need if need > 0 else 0,
+            phase_hint=self._current_phase
         ) if need > 0 else []
 
         if self.session_tracker and planned:
@@ -1664,6 +1685,18 @@ class AgentRunner:
             self._agent_log.append(f"Planning batch {planned_round} (top {plan_n})")
             # Log planning status at start of batch
             console.print(f"\n[bold cyan]═══ Planning Batch {planned_round} ═══[/bold cyan]")
+            # Show current phase (Early/Mid/Late) for clarity
+            try:
+                phase = getattr(self, '_current_phase', None)
+                if not phase and self.session_tracker:
+                    # Fallback compute if not set
+                    cov = self.session_tracker.get_coverage_stats()
+                    nodes_pct = float(((cov or {}).get('nodes') or {}).get('percent') or 0.0)
+                    phase = 'Early' if nodes_pct < 30.0 else ('Mid' if nodes_pct < 70.0 else 'Late')
+                if phase:
+                    console.print(f"[dim]Audit Phase:[/dim] [bold]{phase}[/bold]")
+            except Exception:
+                pass
             # Show current coverage stats and a sample of unvisited nodes
             try:
                 if self.session_tracker:
