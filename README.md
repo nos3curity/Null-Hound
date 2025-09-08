@@ -180,16 +180,16 @@ The audit phase uses the **senior/junior pattern** with planning and investigati
 
 ```bash
 # 1. Sweep all components for shallow bugs, build code understanding
-./hound.py agent audit myaudit --sweep
+./hound.py agent audit myaudit --mode sweep
 
 # 2. Intuition-guided search to find complex bugs
-./hound.py agent audit myaudit --intuition --time-limit 300
+./hound.py agent audit myaudit --mode intuition --time-limit 300
 
 # Start with telemetry (connect the Chatbot UI to steer)
-./hound.py agent audit myaudit --intuition --time-limit 30 --telemetry 
+./hound.py agent audit myaudit --mode intuition --time-limit 30 --telemetry 
 
 # Attach to an existing session and continue where you left off
-./hound.py agent audit myaudit --intuition --session <session_id>
+./hound.py agent audit myaudit --mode intuition --session <session_id>
 ```
 
 Tip: When started with `--telemetry`, you can connect the Chatbot UI and steer the audit interactively (see Chatbot section above).
