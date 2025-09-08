@@ -230,6 +230,28 @@ class HypothesisStore(ConcurrentFileStore):
             return data, (True, hypothesis.id)
         
         return self.update_atomic(update)
+
+    def list_all(self) -> list[dict]:
+        """Return all hypotheses as a list (non-mutating)."""
+        lock = self._acquire_lock()
+        try:
+            data = self._load_data()
+            hyps = data.get("hypotheses", {}) or {}
+            # Ensure each has an id field populated (older data safety)
+            out: list[dict] = []
+            for h in hyps.values():
+                if "id" not in h:
+                    try:
+                        # Best-effort backfill; mirrors Hypothesis.__post_init__
+                        content = f"{h.get('title','')}{h.get('vulnerability_type','')}{''.join(h.get('node_refs') or [])}"
+                        import hashlib as _hashlib
+                        h["id"] = f"hyp_{_hashlib.md5(content.encode()).hexdigest()[:12]}"
+                    except Exception:
+                        pass
+                out.append(h)
+            return out
+        finally:
+            self._release_lock(lock)
     
     def add_evidence(self, hypothesis_id: str, evidence: Evidence) -> bool:
         """Add evidence to a hypothesis."""

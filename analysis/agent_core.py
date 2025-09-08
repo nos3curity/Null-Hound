@@ -1850,6 +1850,7 @@ DO NOT include any text before or after the JSON object."""
             )
             items = strategist.deep_think(context=context) or []
             added = 0
+            dedup_skipped = 0
             titles: list[str] = []
             hyp_info: list[dict] = []
             guidance_model_info = None
@@ -1858,6 +1859,11 @@ DO NOT include any text before or after the JSON object."""
                     guidance_model_info = f"{self.guidance_client.provider_name}:{self.guidance_client.model}"
                 except Exception:
                     guidance_model_info = None
+            # Prepare existing hypotheses for LLM-based dedup in batches
+            try:
+                existing_hyps = self.hypothesis_store.list_all()
+            except Exception:
+                existing_hyps = []
             for it in items:
                 params = {
                     'description': it.get('description', 'Hypothesis'),
@@ -1870,6 +1876,37 @@ DO NOT include any text before or after the JSON object."""
                     'graph_name': 'SystemArchitecture',
                     'guidance_model': guidance_model_info,
                 }
+                # LLM-assisted deduplication against existing hypotheses in batches of 20
+                try:
+                    from .hypothesis_dedup import check_duplicates_llm
+                    # Build compact candidate for dedup model
+                    new_candidate = {
+                        'id': 'new_candidate',
+                        'title': params.get('description', ''),
+                        'description': params.get('details') or params.get('description', ''),
+                        'vulnerability_type': params.get('vulnerability_type', 'security_issue'),
+                        'node_refs': params.get('node_ids') or [],
+                    }
+                    is_dup = False
+                    batch_size = 20
+                    for i in range(0, len(existing_hyps), batch_size):
+                        batch = existing_hyps[i:i+batch_size]
+                        dup_ids = check_duplicates_llm(
+                            cfg=self.config or {},
+                            new_hypothesis=new_candidate,
+                            existing_batch=batch,
+                            debug_logger=getattr(self, 'debug_logger', None),
+                        )
+                        if dup_ids:
+                            is_dup = True
+                            break
+                    if is_dup:
+                        dedup_skipped += 1
+                        # Skip forming duplicate
+                        continue
+                except Exception:
+                    # Never fail deep_think on dedup errors
+                    pass
                 # Be defensive: guard against unexpected returns
                 try:
                     res = self._form_hypothesis(params)
@@ -1877,6 +1914,18 @@ DO NOT include any text before or after the JSON object."""
                     res = {'status': 'error', 'error': 'hypothesis formation failed'}
                 if isinstance(res, dict) and res.get('status') == 'success':
                     added += 1
+                    # Append to existing list so subsequent items can see it for dedup
+                    try:
+                        hid = res.get('hypothesis_id') or ''
+                        existing_hyps.append({
+                            'id': hid,
+                            'title': params.get('description', ''),
+                            'description': params.get('details') or params.get('description', ''),
+                            'vulnerability_type': params.get('vulnerability_type', 'security_issue'),
+                            'node_refs': params.get('node_ids') or [],
+                        })
+                    except Exception:
+                        pass
                     try:
                         titles.append(params.get('description', 'Hypothesis'))
                         hyp_info.append({
@@ -1925,7 +1974,7 @@ DO NOT include any text before or after the JSON object."""
                 guidance_bullets = []
             return {
                 'status': 'success',
-                'summary': f'Deep analysis added {added} hypotheses',
+                'summary': f'Deep analysis added {added} hypotheses' + (f", skipped {dedup_skipped} duplicates" if dedup_skipped else ''),
                 'hypotheses_formed': added,
                 'hypothesis_titles': titles,
                 'hypotheses_info': hyp_info,

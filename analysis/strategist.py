@@ -226,6 +226,10 @@ class Strategist:
             "- Verify that required preconditions are plausible given the code; check for guards/require/reentrancy/permissions that would mitigate the issue.\n"
             "- If evidence is weak or ambiguous, lower confidence to low or omit the hypothesis entirely.\n"
             "- Prefer fewer, higher-quality hypotheses over speculative ones.\n"
+            "DEDUPLICATION:\n"
+            "- The context lists EXISTING HYPOTHESES. Do NOT propose duplicates.\n"
+            "- Treat items as duplicates if they share the same root cause and substantially the same affected code path(s)/function(s), even if phrased differently.\n"
+            "- If you would repeat an existing hypothesis, skip it and focus on novel issues.\n"
             "If you are highly confident there are no vulnerabilities in scope, say so.\n"
         )
         # Prepend global mission if provided

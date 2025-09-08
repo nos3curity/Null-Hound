@@ -24,6 +24,49 @@ from analysis.strategist import Strategist
 from llm.token_tracker import get_token_tracker
 
 
+def _format_model_sig(models_cfg: dict, key: str, fallbacks: list[str] | None = None) -> str:
+    """Return provider/model for a model profile key or its fallbacks."""
+    fallbacks = fallbacks or []
+    if key in models_cfg:
+        mc = models_cfg.get(key) or {}
+        return f"{mc.get('provider','unknown')}/{mc.get('model','unknown')}"
+    for alt in fallbacks:
+        if alt in models_cfg:
+            mc = models_cfg.get(alt) or {}
+            return f"{mc.get('provider','unknown')}/{mc.get('model','unknown')}"
+    return "unknown/unknown"
+
+
+def _validate_required_models(config: dict | None, console: Console) -> bool:
+    """Ensure required models are configured: scout, strategist, lightweight.
+
+    Prints a concise error and guidance when anything is missing.
+    """
+    if not config or 'models' not in config or not isinstance(config['models'], dict):
+        console.print("[red]Error:[/red] No model configuration found. Edit hound/config.yaml and set models.scout, models.strategist, and models.lightweight.")
+        return False
+    models = config['models']
+    missing: list[str] = []
+    for key in ('scout', 'strategist', 'lightweight'):
+        if key not in models or not isinstance(models[key], dict) or not models[key].get('model'):
+            missing.append(key)
+    if missing:
+        console.print("[red]Missing required model configuration:[/red] " + ", ".join(missing))
+        # Show current configured models for quick debugging
+        try:
+            scout_sig = _format_model_sig(models, 'scout', fallbacks=['agent'])
+            strat_sig = _format_model_sig(models, 'strategist', fallbacks=['guidance'])
+            lite_sig = _format_model_sig(models, 'lightweight', fallbacks=[])
+            console.print(f"Configured → Scout: [magenta]{scout_sig}[/magenta], Strategist: [cyan]{strat_sig}[/cyan], Lightweight: [green]{lite_sig}[/green]")
+        except Exception:
+            pass
+        console.print("Edit [bold]hound/config.yaml[/bold] under 'models' to define these profiles.")
+        console.print("- scout: provider + model (exploration)\n- strategist: provider + model (deep analysis)\n- lightweight: provider + model (utilities like dedup)")
+        console.print("You can override scout with --platform/--model and strategist with --strategist-platform/--strategist-model.")
+        return False
+    return True
+
+
 def get_project_dir(project_id: str) -> Path:
     """Get project directory path."""
     return Path.home() / ".hound" / "projects" / project_id
@@ -69,6 +112,10 @@ def run_investigation(project_path: str, prompt: str, iterations: int | None = N
             config['models']['agent']['model'] = model
             console.print(f"[cyan]Overriding agent model: {model}[/cyan]")
     
+    # Validate required models early
+    if not _validate_required_models(config, console):
+        return
+
     # Resolve project path
     if '/' in project_path or Path(project_path).exists():
         project_dir = Path(project_path).resolve()
@@ -99,6 +146,18 @@ def run_investigation(project_path: str, prompt: str, iterations: int | None = N
     
     # Initialize agent
     console.print("[bright_cyan]Initializing agent...[/bright_cyan]")
+    # Show model triplet
+    try:
+        models_cfg = (config or {}).get('models', {})
+        scout_sig = _format_model_sig(models_cfg, 'scout', fallbacks=['agent'])
+        strat_sig = _format_model_sig(models_cfg, 'strategist', fallbacks=['guidance'])
+        lite_sig = _format_model_sig(models_cfg, 'lightweight', fallbacks=[])
+        console.print(Panel.fit(
+            f"Scout: [magenta]{scout_sig}[/magenta]\nStrategist: [cyan]{strat_sig}[/cyan]\nLightweight: [green]{lite_sig}[/green]",
+            border_style="cyan"
+        ))
+    except Exception:
+        pass
     from random import choice as _choice
     console.print(_choice([
         "[white]Normal people ask questions, but YOU issue royal decrees to logic itself.[/white]",
@@ -121,7 +180,6 @@ def run_investigation(project_path: str, prompt: str, iterations: int | None = N
     from rich.live import Live
 
     # Create a live display with rolling event log
-    from rich.panel import Panel
     
     event_log = []  # list of strings (renderables)
     
@@ -687,6 +745,10 @@ class AgentRunner:
         # Remember project_dir for plan storage
         self.project_dir = project_dir
         
+        # Validate required models before creating the agent
+        if not _validate_required_models(self.config, console):
+            return False
+
         # Create agent with knowledge graphs metadata
         self.agent = Scout(
             graphs_metadata_path=knowledge_graphs_path,
@@ -1385,6 +1447,7 @@ class AgentRunner:
         # Get the actual models being used from the agent's LLM clients
         agent_model_info = "unknown/unknown"
         guidance_model_info = "unknown/unknown"
+        lightweight_model_info = _format_model_sig(self.config.get('models', {}), 'lightweight') if self.config else 'unknown/unknown'
         
         # Get Scout model info from the actual LLM client
         if hasattr(self.agent, 'llm') and self.agent.llm:
@@ -1439,6 +1502,7 @@ class AgentRunner:
             f"Project: [yellow]{self.project_id}[/yellow]\n"
             f"Scout: [magenta]{agent_model_info}[/magenta]\n"
             f"Strategist: [cyan]{guidance_model_info}[/cyan]\n"
+            f"Lightweight: [green]{lightweight_model_info}[/green]\n"
             f"Context Limit: [blue]{max_tokens:,} tokens[/blue] (compress at {int(compression_threshold*100)}%)"
         )
         if self.time_limit_minutes:

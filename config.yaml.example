@@ -44,6 +44,12 @@ models:
     plan_reasoning_effort: medium
     hypothesize_reasoning_effort: high
   
+  # Lightweight utility model for quick, low-cost tasks (e.g., dedup)
+  lightweight:
+    provider: openai
+    model: gpt-4o-mini
+    # No large context or special reasoning required
+  
   # QA model
   finalize:
     provider: openai
