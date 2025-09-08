@@ -124,44 +124,31 @@ class Strategist:
             "2. Look for CONTRADICTIONS between assumptions and observations - these often reveal bugs\n"
             "3. Focus on areas where security controls intersect\n"
             "4. Reorganize priorities based on new findings - what seemed low-priority may become critical\n\n"
-            "TWO‑PHASE POLICY (Coverage → Saliency):\n"
-            "- PHASE 1 — COVERAGE (comprehensive module-level analysis + annotation):\n"
-            "  • PRIMARY GOAL: Discover security vulnerabilities by examining each module/contract — essentially asking \"what security issues exist in this component?\"\n"
-            "  • SECONDARY GOAL: Annotate the graph with invariants, assumptions, and key behaviors discovered during exploration.\n"
-            "  • APPROACH: This phase replicates submitting each file/contract to an LLM and asking for bugs — systematic module-by-module analysis.\n"
-            "  • OUTPUT: Produce ONLY ASPECT items (no SUSPICION items). Focus on breadth, not depth.\n"
-            "  • COMPREHENSIVE ANALYSIS: Don't limit to specific types — any vulnerability should be found.\n"
-            "  • ALWAYS include ≥1 coverage sweep targeting UNVISITED nodes (from COVERAGE STATUS).\n"
-            "  • DIVERSITY CONSTRAINTS per batch: (a) ≤1 item per primary contract/module, (b) ≤2 items sharing the same aspect label, (c) spread across distinct graphs.\n"
-            "    (Primary contract/module = first component in focus_areas, e.g., Function:Whitelist.setPool → Whitelist.)\n"
-            "  • ITEM GRANULARITY: Choose ONLY major architectural components:\n"
-            "    - Classes/Contracts/Components (main architectural units)\n"
-            "    - Modules/Subsystems/Packages (logical groupings of functionality)\n"
-            "    - Services/Managers/Controllers (orchestration components)\n"
-            "    - Files representing cohesive functionality\n"
-            "    - DO NOT pick specific rules, individual functions/methods, or configuration items\n"
-            "  • If COVERAGE STATUS contains 'CANDIDATE COMPONENTS', filter for actual modules/contracts, NOT specific rules or configs.\n"
-            "  • TIME EXPECTATION: This phase should be efficient — systematic analysis of each component for vulnerabilities.\n"
-            "- PHASE 2 — SALIENCY (graph-level reasoning & deep analysis):\n"
-            "  • PRIMARY GOAL: Leverage GRAPH-LEVEL INSIGHTS to find high-impact, complex vulnerabilities that require understanding interactions and contradictions.\n"
-            "  • KEY FOCUS AREAS:\n"
-            "    1. CONTRADICTIONS in graph annotations — conflicting assumptions/observations across components\n"
-            "    2. CROSS-CONTRACT INTERACTIONS — issues that emerge from component interactions\n"
-            "    3. INVARIANT VIOLATIONS — where actual behavior contradicts stated/assumed invariants\n"
-            "    4. HIGH-CONFIDENCE HYPOTHESES — deep-dive to confirm/refute promising vulnerabilities from Phase 1\n"
-            "    5. COMPLEX ATTACK PATHS — multi-step exploits requiring graph-level understanding\n"
-            "  • Use the annotated graph from Phase 1 to identify the most promising investigation areas.\n"
-            "  • Prioritize investigations based on IMPACT and LIKELIHOOD of finding critical issues.\n"
-            "  • Maintain diversity (avoid allocating the entire batch to a single contract/aspect).\n"
-            "  • ITEM GRANULARITY: Can be specific (zooming into particular functions) OR broad (investigating cross-cutting concerns).\n\n"
-            "INVESTIGATION STRATEGY:\n"
-            "- PHASE 1 (Coverage): Systematic vulnerability discovery in each component + graph annotation\n"
-            "  → Goal: Find vulnerabilities + build annotated knowledge graph\n"
-            "  → Time: Efficient analysis — \"what vulnerabilities exist in this component?\"\n"
-            "- PHASE 2 (Saliency): Graph-level reasoning to find complex, high-impact issues\n"
-            "  → Goal: Find critical vulnerabilities through contradictions, interactions, invariant violations\n"
-            "  → Time: Can be thorough — leverage Phase 1 annotations for targeted deep-dives\n"
-            "- Transition trigger: Move to Phase 2 when coverage reaches ~90% OR all obvious components reviewed\n\n"
+            "TWO‑PHASE STRATEGY:\n"
+            "- PHASE 1 — COVERAGE (Wide, breadth-first exploration):\n"
+            "  • GOAL: Analyze each medium-sized logical unit (contract/module/class) for vulnerabilities\n"
+            "  • APPROACH: Wide sweep — visit every component and find bugs\n"
+            "  • GRANULARITY: Medium-sized units ONLY:\n"
+            "    - Contracts (e.g., Timelock, SafeProxy)\n"
+            "    - Modules/Classes (e.g., RecoverySpell, Guard)\n"
+            "    - Services/Managers (e.g., InstanceDeployer)\n"
+            "    - NOT individual functions or broad cross-cutting concerns\n"
+            "  • OUTPUT: ASPECT items only — one per component\n"
+            "  • DIVERSITY: Maximum 1 item per component, spread across different modules\n"
+            "- PHASE 2 — SALIENCY (Narrow, deep intuition-guided exploration):\n"
+            "  • GOAL: Deep-dive into the most promising, impactful areas\n"
+            "  • APPROACH: Narrow focus — follow intuition to high-impact vulnerabilities\n"
+            "  • TARGETS:\n"
+            "    - Contradictions in graph annotations (conflicting assumptions/observations)\n"
+            "    - Suspicious cross-component interactions\n"
+            "    - Invariant violations\n"
+            "    - High-confidence vulnerability hypotheses\n"
+            "  • OUTPUT: Mix of SUSPICION items (specific vulnerabilities) and targeted ASPECT items\n"
+            "  • GRANULARITY: Flexible — can zoom into specific functions or investigate broad patterns\n\n"
+            "PHASE TRANSITION:\n"
+            "- Start with Phase 1 to build broad coverage\n"
+            "- Switch to Phase 2 when ~90% nodes visited OR all major components analyzed\n"
+            "- Phase 2 uses the annotated graph from Phase 1 to guide deep exploration\n\n"
             "INVESTIGATION GUIDELINES:\n"
             "- Review ALL graph annotations (observations and assumptions) for contradictions or inconsistencies.\n"
             "- Prioritize based on potential impact: critical > high > medium > low.\n"
@@ -202,31 +189,22 @@ class Strategist:
             f"- Planning iteration: {planning_iteration}\n"
             f"- Investigations completed: {len(completed)}\n\n"
             f"PHASE: {phase_hint or 'auto'}\n\n"
-            f"Plan the top {n} NEW investigations. Apply TWO‑PHASE POLICY strictly:\n"
-            f"- If PHASE is 'Coverage':\n"
-            f"    • Produce ONLY ASPECT items (no SUSPICION items). CATEGORY must be 'aspect' for every item.\n"
-            f"    • For EACH item, pick ONLY major architectural components (contracts, modules, subsystems, services).\n"
-            f"    • AVOID specific rules, individual functions, or configuration items — we want MODULE-LEVEL discovery.\n"
-            f"    • EXCLUDE non-application code: interfaces (names starting with 'I'), tests, mocks, demos/examples, scripts, vendor/external libraries.\n"
-            f"      Skip items like IWhitelist, IOracle, MockToken/Mock*, *Test, and anything under test/, tests/, mock/, mocks/, script/, lib/, vendor/.\n"
-            f"    • If CANDIDATE COMPONENTS lists specific rules like 'ConfigurationRule_X', SKIP them — find actual modules instead.\n"
-            f"    • Set focus_areas to the main module/contract node id (or 1–3 tightly related module-level ids).\n"
-            f"    • Phrase goals as: \"Vulnerability analysis of [Component]\" or \"Security analysis of [Component]\"\n"
-            f"    • DO NOT mention specific vulnerability types — keep it broad and open-ended\n"
-            f"    • DO NOT prefix with \"Initial sweep:\" or similar — just state the goal directly\n"
-            f"    • Focus on comprehensive security analysis — ask \"what are the vulnerabilities in this component?\"\n"
-            f"    • Also capture invariants/assumptions/behaviors for graph annotation during discovery.\n"
-            f"    • Ensure distinct components across items (breadth‑first).\n"
-            f"- If PHASE is 'Saliency':\n"
-            f"    • Focus on GRAPH-LEVEL REASONING: Look for contradictions, invariant violations, and cross-contract issues.\n"
-            f"    • Prioritize investigations that leverage ANNOTATIONS from Phase 1 to find deeper issues.\n"
-            f"    • Examples of good Saliency goal patterns:\n"
-            f"      - \"Investigate contradiction between [assumption X] and [observation Y] in [component]\"\n"
-            f"      - \"Trace value flow discrepancy between [calculation] and [distribution]\"\n"
-            f"      - \"Analyze interaction vulnerability through cross-contract calls between [A] and [B]\"\n"
-            f"      - \"Confirm hypothesis: [specific vulnerability] in [component]\"\n"
-            f"    • Mix SUSPICION items (specific vulnerability hypotheses) with targeted ASPECT items (deep-dives on complex areas).\n"
-            f"    • For EACH item, set focus_areas based on the investigation needs (can be specific functions OR broader components).\n\n"
+            f"Plan the top {n} NEW investigations.\n\n"
+            f"If PHASE is 'Coverage' (Phase 1 - Wide exploration):\n"
+            f"  • Pick medium-sized components: contracts, modules, classes (NOT individual functions)\n"
+            f"  • Goal format: \"Vulnerability analysis of [Component]\"\n"
+            f"  • Category: 'aspect' (always)\n"
+            f"  • One investigation per component, spread across different modules\n"
+            f"  • Exclude: interfaces, tests, mocks, vendor libraries\n\n"
+            f"If PHASE is 'Saliency' (Phase 2 - Deep exploration):\n"
+            f"  • Target high-impact areas based on graph annotations\n"
+            f"  • Look for: contradictions, suspicious interactions, invariant violations\n"
+            f"  • Goal examples:\n"
+            f"    - \"Investigate contradiction between [X] and [Y]\"\n"
+            f"    - \"Analyze suspicious interaction in [component]\"\n"
+            f"    - \"Confirm vulnerability: [specific issue]\"\n"
+            f"  • Category: Mix 'suspicion' (specific bugs) and 'aspect' (deep dives)\n"
+            f"  • Granularity: Flexible (can be specific or broad)\n\n"
             f"PRIORITIZATION CRITERIA (in order):\n"
             f"1. Contradictions between assumptions and observations in the graphs\n"
             f"2. High-risk areas not yet covered\n"
@@ -261,8 +239,12 @@ class Strategist:
     def revise_after(self, last_result: dict[str, Any]) -> None:
         return None
 
-    def deep_think(self, *, context: str) -> list[dict[str, Any]]:
+    def deep_think(self, *, context: str, phase: str = None) -> list[dict[str, Any]]:
         """Perform senior deep analysis on the prepared context and emit hypothesis items.
+
+        Args:
+            context: The prepared investigation context
+            phase: 'Coverage' or 'Saliency' (if not provided, defaults to Saliency)
 
         Returns a list of dicts with keys:
           description, details, vulnerability_type, severity, confidence, node_ids, reasoning
@@ -272,16 +254,8 @@ class Strategist:
         node_id_pattern = r'\[([a-zA-Z0-9_]+)\]'
         valid_node_ids = set(re.findall(node_id_pattern, context))
         
-        # Check if this is a Phase 1 (Coverage) investigation
-        is_phase1 = False
-        if "=== INVESTIGATION GOAL ===" in context:
-            # Extract the goal text
-            goal_start = context.find("=== INVESTIGATION GOAL ===")
-            goal_text = context[goal_start:goal_start+500].lower()
-            # Phase 1 goals typically have these patterns
-            if any(phrase in goal_text for phrase in ["examine ", "analyze security", "for security vulnerabilities", "for vulnerabilities"]):
-                is_phase1 = True
-        # Use simpler prompt for Phase 1 (Coverage)
+        # Use phase parameter if provided, otherwise default to Phase 2 (Saliency)
+        is_phase1 = (phase == 'Coverage')
         if is_phase1:
             system = (
                 "You are a security auditor analyzing code components for vulnerabilities.\n"

@@ -1981,7 +1981,7 @@ class AgentRunner:
                 if phase:
                     if phase == 'Coverage':
                         console.print(f"\n[bold yellow]═══ PHASE 1: COVERAGE ═══[/bold yellow]")
-                        console.print("[dim]This phase systematically analyzes each component for vulnerabilities.[/dim]")
+                        console.print("[dim]Wide sweep for shallow bugs at medium granularity[/dim]")
                         console.print("[dim]Approach: Examine each module/class for all security issues.[/dim]")
                         console.print("[dim]Also captures invariants and assumptions to build the knowledge graph.[/dim]\n")
                     else:
