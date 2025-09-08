@@ -678,6 +678,16 @@ class AgentRunner:
                     # Use the first available graph
                     graph_name = list(graphs_dict.keys())[0]
                     graph_path = Path(graphs_dict[graph_name])
+                # Guard against stale absolute paths pointing to another project dir
+                try:
+                    graphs_dir = project_dir / 'graphs'
+                    if graph_path.is_absolute() and graphs_dir.exists():
+                        if graph_path.parent != graphs_dir:
+                            candidate = graphs_dir / graph_path.name
+                            if candidate.exists():
+                                graph_path = candidate
+                except Exception:
+                    pass
                 console.print(f"[green]Using graph: {graph_path.name}[/green]")
             else:
                 console.print("[red]Error:[/red] No graphs found in knowledge_graphs.json")
@@ -1011,15 +1021,13 @@ class AgentRunner:
         except Exception:
             return {'nodes': {'total': 0, 'visited': 0, 'percent': 0.0}, 'cards': {'total': 0, 'visited': 0, 'percent': 0.0}}
 
-    
     def _graph_summary(self) -> str:
         """Create a comprehensive summary of ALL graphs loaded by the Scout."""
         try:
             parts = []
-            
             # Get all loaded graphs from the agent
             loaded_data = self.agent.loaded_data if self.agent else {}
-            
+
             # Process system graph first
             if loaded_data.get('system_graph'):
                 graph_data = loaded_data['system_graph']
@@ -1027,73 +1035,81 @@ class AgentRunner:
                 g = graph_data.get('data', {})
                 nodes = g.get('nodes', [])
                 edges = g.get('edges', [])
-                
                 parts.append(f"\n=== {graph_name.upper()} GRAPH ===")
                 parts.append(f"{len(nodes)} nodes, {len(edges)} edges")
-                
-                # List all nodes compactly with inline annotations and explicit IDs
+                # List nodes
                 for n in nodes:
+                    # Filter non-application nodes
+                    try:
+                        nid0 = str(n.get('id','') or '')
+                        lbl0 = str(n.get('label','') or '')
+                        ty0 = str(n.get('type','') or '').lower()
+                        if nid0.startswith('contract_I') or lbl0.startswith('I'):
+                            continue
+                        if 'test' in lbl0.lower() or 'mock' in lbl0.lower():
+                            continue
+                        if any(k in ty0 for k in ('test','mock')):
+                            continue
+                    except Exception:
+                        pass
                     nid = n.get('id', '')
                     lbl = n.get('label') or nid
-                    typ = n.get('type', '')[:4]  # Abbreviate type
+                    typ = n.get('type', '')[:4]
                     observations = n.get('observations', [])
                     assumptions = n.get('assumptions', [])
-                    
-                    # Build compact line with node id visible
                     line = f"• [{nid}] {lbl} ({typ})"
-                    
-                    # Add inline annotations
                     annotations = []
                     if observations:
-                        obs_str = '; '.join(observations[:3])  # Limit to 3
+                        obs_str = '; '.join(observations[:3])
                         annotations.append(f"obs:{obs_str}")
                     if assumptions:
-                        assum_str = '; '.join(assumptions[:3])  # Limit to 3
+                        assum_str = '; '.join(assumptions[:3])
                         annotations.append(f"asm:{assum_str}")
-                    
                     if annotations:
                         line += f" [{' | '.join(annotations)}]"
-                        
                     parts.append(line)
-            
-            # Process additional graphs loaded by the Scout
+
+            # Process additional graphs
             additional_graphs = loaded_data.get('graphs', {})
             for graph_name, graph_data in additional_graphs.items():
                 if not isinstance(graph_data, dict) or 'data' not in graph_data:
                     continue
-                    
                 g = graph_data.get('data', {})
                 nodes = g.get('nodes', [])
                 edges = g.get('edges', [])
-                
                 parts.append(f"\n=== {graph_name.upper()} GRAPH ===")
                 parts.append(f"{len(nodes)} nodes, {len(edges)} edges")
-                
-                # List all nodes compactly with inline annotations and explicit IDs
                 for n in nodes:
+                    # Filter non-application nodes
+                    try:
+                        nid0 = str(n.get('id','') or '')
+                        lbl0 = str(n.get('label','') or '')
+                        ty0 = str(n.get('type','') or '').lower()
+                        if nid0.startswith('contract_I') or lbl0.startswith('I'):
+                            continue
+                        if 'test' in lbl0.lower() or 'mock' in lbl0.lower():
+                            continue
+                        if any(k in ty0 for k in ('test','mock')):
+                            continue
+                    except Exception:
+                        pass
                     nid = n.get('id', '')
                     lbl = n.get('label') or nid
-                    typ = n.get('type', '')[:4]  # Abbreviate type
+                    typ = n.get('type', '')[:4]
                     observations = n.get('observations', [])
                     assumptions = n.get('assumptions', [])
-                    
-                    # Build compact line with node id visible
                     line = f"• [{nid}] {lbl} ({typ})"
-                    
-                    # Add inline annotations
                     annotations = []
                     if observations:
-                        obs_str = '; '.join(observations[:3])  # Limit to 3
+                        obs_str = '; '.join(observations[:3])
                         annotations.append(f"obs:{obs_str}")
                     if assumptions:
-                        assum_str = '; '.join(assumptions[:3])  # Limit to 3
+                        assum_str = '; '.join(assumptions[:3])
                         annotations.append(f"asm:{assum_str}")
-                    
                     if annotations:
                         line += f" [{' | '.join(annotations)}]"
-                        
                     parts.append(line)
-                    
+
             return "\n".join(parts) if parts else "(no graphs available)"
         except Exception as e:
             return f"(error summarizing graphs: {str(e)})"
@@ -1190,46 +1206,313 @@ class AgentRunner:
                     except Exception:
                         sample_str = ', '.join(unvisited_sample[:10])
                     coverage_summary += f"\nUnvisited nodes: {unvisited_count} (sample: {sample_str}{'' if len(unvisited_sample) <= 10 else ', ...'})"
+                # Also show unvisited high-level components (contracts/modules/services/files)
+                try:
+                    sys_graph = (self.agent.loaded_data or {}).get('system_graph') or {}
+                    gdata = sys_graph.get('data') or {}
+                    nodes = gdata.get('nodes') or []
+                    edges = gdata.get('edges') or []
+                    comp_nodes = _high_level_nodes(nodes, edges)
+                    visited_ids = set(cov_stats.get('visited_node_ids') or [])
+                    unv_comp = [n for n in comp_nodes if str(n.get('id') or '') not in visited_ids]
+                    if unv_comp:
+                        samp = [f"{(n.get('id') or '')}@SystemArchitecture" for n in unv_comp[:10] if n.get('id')]
+                        coverage_summary += f"\nUnvisited components: {len(unv_comp)} (sample: {', '.join(samp)}{'' if len(unv_comp) <= 10 else ', ...'})"
+                        # Add a structured candidate list to guide planner selection
+                        lines = []
+                        for n in unv_comp[:10]:
+                            nid = str(n.get('id') or '')
+                            lbl = str(n.get('label') or nid)
+                            if nid:
+                                lines.append(f"- {lbl} ({nid})")
+                        if lines:
+                            coverage_summary += "\nCANDIDATE COMPONENTS (unvisited):\n" + "\n".join(lines)
+                except Exception:
+                    pass
             except Exception:
                 pass
 
-        # Determine phase (Early/Mid/Late) from coverage and planning iteration estimate
-        def _determine_phase(cov: dict | None, completed: int, batch_size: int) -> str:
+        # Heuristics: identify "high-level" SystemArchitecture nodes (contracts/modules/services/files)
+        def _high_level_nodes(sys_nodes: list[dict], sys_edges: list[dict]) -> list[dict]:
+            try:
+                # Build quick degree map
+                deg: dict[str, int] = {}
+                for e in sys_edges or []:
+                    sid = str(e.get('source_id') or e.get('source') or '')
+                    tid = str(e.get('target_id') or e.get('target') or '')
+                    if sid:
+                        deg[sid] = deg.get(sid, 0) + 1
+                    if tid:
+                        deg[tid] = deg.get(tid, 0) + 1
+            except Exception:
+                deg = {}
+
+            hi_type_keywords = {
+                'contract','component','module','service','subsystem','interface','controller','file','package','system','graph','library'
+            }
+            low_type_keywords = {
+                'function','method','variable','state','field','param','event','modifier','mapping','struct','enum',
+                'rule','configuration','config','setting','property','constraint','check','validation'
+            }
+            low_id_prefixes = ('func_', 'method_', 'state_', 'var_', 'evt_', 'event_', 'mod_', 'mapping_', 'param_',
+                              'rule_', 'config_', 'ConfigurationRule_', 'ValidationRule_', 'Check_')
+
+            def is_low_level(n: dict) -> bool:
+                t = str(n.get('type','') or '').lower()
+                i = str(n.get('id','') or '')
+                lbl = str(n.get('label','') or '')
+                if any(k in t for k in low_type_keywords):
+                    return True
+                # Check if ID starts with any low-level prefix
+                if any(i.startswith(prefix) for prefix in low_id_prefixes):
+                    return True
+                # Also check if ID contains Rule, Config, Check, Validation patterns
+                if any(pattern in i for pattern in ['Rule', 'Config', 'Check', 'Validation']):
+                    return True
+                # Looks like a function signature (foo(...))
+                if '(' in lbl and ')' in lbl and ' ' not in lbl.split('(')[0]:
+                    return True
+                return False
+
+            def is_high_level(n: dict) -> bool:
+                if is_low_level(n):
+                    return False
+                t = str(n.get('type','') or '').lower()
+                i = str(n.get('id','') or '')
+                lbl = str(n.get('label','') or '')
+                # Treat solidity interfaces as low-level targets for coverage planning
+                # Conventionally encoded as contract_I<Name>
+                try:
+                    if i.startswith('contract_I') or lbl.startswith('I'):
+                        return False
+                except Exception:
+                    pass
+                if any(k in t for k in hi_type_keywords):
+                    return True
+                if i.startswith(('contract_', 'module_', 'service_', 'component_')):
+                    return True
+                # File-like labels (e.g., Foo.sol)
+                if any(lbl.endswith(ext) for ext in ('.sol','.rs','.go','.py','.ts','.js','.tsx','.jsx')):
+                    return True
+                # Fallback: nodes with higher connectivity are likely architectural
+                did = str(n.get('id','') or '')
+                if deg.get(did, 0) >= 3:
+                    return True
+                return False
+
+            out = [n for n in (sys_nodes or []) if is_high_level(n)]
+            return out
+
+        # Determine phase (Coverage/Saliency) from coverage and component completion
+        def _determine_phase_two(cov: dict | None) -> str:
+            # Defaults
+            cfg_planner = (self.config or {}).get('planner', {}) if self.config else {}
+            two_cfg = (cfg_planner.get('two_phase') or {}) if isinstance(cfg_planner, dict) else {}
+            start_cfg = (two_cfg.get('phase2_start') or {}) if isinstance(two_cfg, dict) else {}
+            try:
+                nodes_threshold = float(start_cfg.get('coverage_nodes_pct', 0.9)) * 100.0 if start_cfg.get('coverage_nodes_pct') <= 1 else float(start_cfg.get('coverage_nodes_pct'))
+            except Exception:
+                nodes_threshold = 90.0
             try:
                 nodes_pct = float(((cov or {}).get('nodes') or {}).get('percent') or 0.0)
             except Exception:
                 nodes_pct = 0.0
-            # Rough planning iteration estimate
-            iters = (completed // max(1, batch_size)) + 1
-            # Heuristics: prioritize coverage, then iteration as a fallback hint
-            if nodes_pct < 30.0 or iters <= 2:
-                return 'Early'
-            if nodes_pct < 70.0 or iters <= 5:
-                return 'Mid'
-            return 'Late'
 
-        self._current_phase = _determine_phase(cov_stats, len(investigation_results or []), max(1, n))
+            # Compute component coverage on SystemArchitecture (contract/component/module)
+            try:
+                sys_graph = (self.agent.loaded_data or {}).get('system_graph') or {}
+                gdata = sys_graph.get('data') or {}
+                nodes = gdata.get('nodes') or []
+                edges = gdata.get('edges') or []
+                comps = _high_level_nodes(nodes, edges)
+                visited_ids = set(((cov_stats or {}).get('visited_node_ids') or [])) if 'cov_stats' in locals() else set()
+                visited_comp = [n for n in comps if str(n.get('id') or '') in visited_ids]
+                comp_complete = (len(comps) > 0 and len(visited_comp) >= len(comps))
+            except Exception:
+                comp_complete = False
+
+            if comp_complete or nodes_pct >= nodes_threshold:
+                return 'Saliency'
+            return 'Coverage'
+
+        self._current_phase = _determine_phase_two(cov_stats)
 
         strategist = Strategist(config=self.config, debug=self.debug, session_id=self.session_id)
         need = max(0, n - len(prepared))
-        planned = strategist.plan_next(
-            graphs_summary=graphs_summary,
-            completed=investigation_results,
-            hypotheses_summary=hypotheses_summary,
-            coverage_summary=coverage_summary,
-            n=need if need > 0 else 0,
-            phase_hint=self._current_phase
-        ) if need > 0 else []
+        planned: list[dict] = []
+        # Strict coverage pre-planning in Early phase: iterate SystemArchitecture components
+        try:
+            strict_cfg = ((self.config or {}).get('planner', {}) or {}).get('strict_coverage', {})
+            strict_enabled = bool(strict_cfg.get('enabled', True))
+            strict_phase_only = str(strict_cfg.get('phase', 'Coverage'))
+            strict_mode = str(strict_cfg.get('mode', 'guide'))  # 'guide' (default) or 'inject'
+        except Exception:
+            strict_enabled = True
+            strict_phase_only = 'Coverage'
+            strict_mode = 'guide'
+
+        if need > 0 and strict_enabled and strict_mode == 'inject' and (self._current_phase or 'Coverage') == strict_phase_only:
+            try:
+                sys_graph = (self.agent.loaded_data or {}).get('system_graph') or {}
+                gdata = sys_graph.get('data') or {}
+                nodes = gdata.get('nodes') or []
+                edges = gdata.get('edges') or []
+                # Use visited set from coverage stats
+                visited_ids = set(((cov_stats or {}).get('visited_node_ids') or [])) if 'cov_stats' in locals() else set()
+                comp_nodes = _high_level_nodes(nodes, edges)
+                unvisited = [n for n in comp_nodes if str(n.get('id') or '') not in visited_ids]
+                for nnode in unvisited[:need]:
+                    nid = str(nnode.get('id') or '')
+                    lbl = str(nnode.get('label') or nid)
+                    planned.append({
+                        'goal': f"System component review: {lbl} ({nid})",
+                        'focus_areas': [f"{nid}@SystemArchitecture"],
+                        'priority': 7,
+                        'reasoning': 'Strict coverage: map entrypoints, auth, and value/state flows; annotate nodes; avoid deep dives.',
+                        'category': 'aspect',
+                        'expected_impact': 'medium',
+                    })
+            except Exception:
+                pass
+
+        rem = max(0, need - len(planned))
+        if rem > 0:
+            extra = strategist.plan_next(
+                graphs_summary=graphs_summary,
+                completed=investigation_results,
+                hypotheses_summary=hypotheses_summary,
+                coverage_summary=coverage_summary,
+                n=rem,
+                phase_hint=self._current_phase
+            ) or []
+            # Enforce Coverage-phase constraint: keep only aspect items
+            if (self._current_phase or 'Coverage') == 'Coverage':
+                extra = [d for d in extra if str(d.get('category','aspect')).lower() == 'aspect']
+            planned.extend(extra)
+
+        # Final enforcement: in Coverage, ensure all planned items are aspects; if empty, fallback to component injection
+        if (self._current_phase or 'Coverage') == 'Coverage':
+            planned = [d for d in planned if str(d.get('category','aspect')).lower() == 'aspect']
+            if not planned and strict_enabled and strict_phase_only == 'Coverage':
+                try:
+                    sys_graph = (self.agent.loaded_data or {}).get('system_graph') or {}
+                    gdata = sys_graph.get('data') or {}
+                    nodes = gdata.get('nodes') or []
+                    edges = gdata.get('edges') or []
+                    visited_ids = set(((cov_stats or {}).get('visited_node_ids') or [])) if 'cov_stats' in locals() else set()
+                    comp_nodes = _high_level_nodes(nodes, edges)
+                    unvisited = [n for n in comp_nodes if str(n.get('id') or '') not in visited_ids]
+                    for nnode in unvisited[:need]:
+                        nid = str(nnode.get('id') or '')
+                        lbl = str(nnode.get('label') or nid)
+                        planned.append({
+                            'goal': f"System component review: {lbl} ({nid})",
+                            'focus_areas': [f"{nid}@SystemArchitecture"],
+                            'priority': 7,
+                            'reasoning': 'Coverage-phase fallback: map entrypoints, auth, and value/state flows; annotate nodes; avoid deep dives.',
+                            'category': 'aspect',
+                            'expected_impact': 'medium',
+                        })
+                except Exception:
+                    pass
+
+        # Normalize Coverage goals to 'Vulnerability analysis of <Component>' when possible
+        if (self._current_phase or 'Coverage') == 'Coverage':
+            try:
+                sys_graph = (self.agent.loaded_data or {}).get('system_graph') or {}
+                gdata = sys_graph.get('data') or {}
+                node_by_id = {str(n.get('id') or ''): str(n.get('label') or n.get('id') or '') for n in (gdata.get('nodes') or [])}
+                def _norm_goal(item):
+                    g = str(item.get('goal') or '')
+                    bad = ('map entrypoint', "map entrypoints", "enumerate", "list ", "inventory", "map constructor")
+                    low = g.lower()
+                    if any(b in low for b in bad):
+                        # Try to derive component from focus_areas
+                        fas = item.get('focus_areas') or []
+                        comp = None
+                        if fas:
+                            first = str(fas[0])
+                            nid = first.split('@')[0].strip()
+                            comp = node_by_id.get(nid) or nid
+                        if comp:
+                            item['goal'] = f"Vulnerability analysis of {comp}"
+                        else:
+                            item['goal'] = "Vulnerability analysis of selected component"
+                for it in planned:
+                    _norm_goal(it)
+            except Exception:
+                pass
 
         if self.session_tracker and planned:
             self.session_tracker.add_planning(planned)
 
         # 3) Add new items, skipping duplicates and already-done/in-progress
+        # Round-level duplicate filter: avoid multiple goals targeting the same focus areas
+        seen_focus_keys: set[tuple[str, ...]] = set()
+        def _is_interface_focus(fas: list[str]) -> bool:
+            try:
+                for fa in fas or []:
+                    node_id = (fa.split('@')[0] if isinstance(fa, str) else '')
+                    if str(node_id).startswith('contract_I'):
+                        return True
+            except Exception:
+                return False
+            return False
+
+        # Normalize goal text to identify duplicates and non-application targets
+        def _normalize_goal_text(text: str) -> str:
+            s = (text or '').lower()
+            # Remove phase prefixes and context suffixes
+            s = s.replace('initial sweep: ', '').replace('system component review: ', '')
+            for token in (' within the ', ' within ', ' (', ')'):
+                s = s.replace(token, ' ')
+            # Normalize common verbs
+            s = s.replace('discover vulnerabilities in ', 'target ').replace('identify bugs in ', 'target ')
+            s = ' '.join(s.split())
+            return s
+
+        def _non_app_goal(text: str) -> bool:
+            t = (text or '')
+            tl = t.lower()
+            if ' interface ' in tl or tl.startswith('interface '):
+                return True
+            # If a capitalized token looks like an interface name e.g., IWhitelist
+            try:
+                import re
+                if re.search(r'\bI[A-Z][A-Za-z0-9_]+', t):
+                    return True
+            except Exception:
+                pass
+            bad_words = ('mock', ' test', 'tests', 'example', 'demo', 'script', 'forge-std', 'openzeppelin', 'vendor')
+            return any(w in tl for w in bad_words)
+
+        seen_focus_keys: set[tuple[str, ...]] = set()
+        seen_goal_keys: set[str] = set()
+
         for d in planned:
             if len(prepared) >= n:
                 break
             frame_id = None
             skip = False
+            # Skip explicit interface-only targets
+            if _is_interface_focus(d.get('focus_areas') or []):
+                continue
+            # Skip duplicate focus sets within this planning round (regardless of goal wording)
+            try:
+                key = tuple(sorted(d.get('focus_areas') or []))
+                if key in seen_focus_keys:
+                    continue
+                seen_focus_keys.add(key)
+            except Exception:
+                pass
+            # Skip non-application targets based on goal text heuristics
+            if _non_app_goal(d.get('goal', '')):
+                continue
+            # Skip near-duplicate goals by normalized text
+            gkey = _normalize_goal_text(d.get('goal', ''))
+            if gkey in seen_goal_keys:
+                continue
+            seen_goal_keys.add(gkey)
             if ps is not None:
                 try:
                     ok, fid = ps.propose(
@@ -1349,7 +1632,10 @@ class AgentRunner:
                 meta += f", {imp}"
             if cat:
                 meta += f", {cat}"
-            console.print(f"  {mark} {it.goal}  ({meta})")
+            goal = getattr(it, 'goal', '')
+            # Phase 1 investigations are already properly formatted
+            phase = getattr(self, '_current_phase', None)
+            console.print(f"  {mark} {goal}  ({meta})")
 
     def _log_planning_status(self, items: list[object], current_index: int = -1):
         """Log beautiful planning status and coverage information."""
@@ -1398,6 +1684,7 @@ class AgentRunner:
             table = Table(show_header=True, header_style="bold magenta", box=ROUNDED)
             table.add_column("#", style="dim", width=3)
             table.add_column("Status", width=10)
+            table.add_column("Phase", width=12)
             table.add_column("Goal", overflow="fold")
             table.add_column("Priority", width=8)
             table.add_column("Impact", width=8)
@@ -1413,11 +1700,17 @@ class AgentRunner:
                     status = "[dim]PENDING[/dim]"
                 
                 goal = getattr(it, 'goal', '')
+                # Determine phase based on category and current phase
+                current_phase = getattr(self, '_current_phase', None)
+                category = getattr(it, 'category', '-')
+                if current_phase == 'Coverage' or category == 'aspect':
+                    phase_label = "[cyan]1 - Coverage[/cyan]"
+                else:
+                    phase_label = "[magenta]2 - Saliency[/magenta]"
                 priority = str(getattr(it, 'priority', '-'))
                 impact = getattr(it, 'expected_impact', '-')
-                category = getattr(it, 'category', '-')
                 
-                table.add_row(num, status, goal, priority, impact, category)
+                table.add_row(num, status, phase_label, goal, priority, impact, category)
             
             console.print(table)
         
@@ -1676,6 +1969,38 @@ class AgentRunner:
                     break
 
             planned_round += 1
+            # Announce planning batch and current phase before spinner (print once)
+            try:
+                console.print(f"\n[bold cyan]═══ Planning Batch {planned_round} ═══[/bold cyan]")
+                # Two-phase: Coverage vs Saliency
+                phase = getattr(self, '_current_phase', None)
+                if not phase and self.session_tracker:
+                    cov_tmp = self.session_tracker.get_coverage_stats()
+                    nodes_pct = float(((cov_tmp or {}).get('nodes') or {}).get('percent') or 0.0)
+                    phase = 'Coverage' if nodes_pct < 90.0 else 'Saliency'
+                if phase:
+                    if phase == 'Coverage':
+                        console.print(f"\n[bold yellow]═══ PHASE 1: COVERAGE ═══[/bold yellow]")
+                        console.print("[dim]This phase systematically analyzes each component for vulnerabilities.[/dim]")
+                        console.print("[dim]Approach: Examine each module/class for all security issues.[/dim]")
+                        console.print("[dim]Also captures invariants and assumptions to build the knowledge graph.[/dim]\n")
+                    else:
+                        console.print(f"\n[bold magenta]═══ PHASE 2: DEEP ANALYSIS ═══[/bold magenta]")
+                        console.print("[dim]This phase uses graph-level reasoning to find complex, high-impact vulnerabilities.[/dim]")
+                        console.print("[dim]Focus: Contradictions, invariant violations, cross-component interactions.[/dim]")
+                        console.print("[dim]Leveraging annotations from Phase 1 to guide targeted investigation.[/dim]\n")
+                # Show compact coverage line pre-planning for context
+                if self.session_tracker:
+                    cov = self.session_tracker.get_coverage_stats()
+                    console.print(
+                        f"Coverage: Nodes {cov['nodes']['visited']}/{cov['nodes']['total']} "
+                        f"({cov['nodes']['percent']:.1f}%) | "
+                        f"Cards {cov['cards']['visited']}/{cov['cards']['total']} "
+                        f"({cov['cards']['percent']:.1f}%)"
+                    )
+            except Exception:
+                pass
+
             # Show an animated status while strategist plans the next batch
             try:
                 with console.status("[cyan]Strategist planning next steps...[/cyan]", spinner="dots", spinner_style="cyan"):
@@ -1683,20 +2008,7 @@ class AgentRunner:
             except Exception:
                 items = self._plan_investigations(max(1, plan_n))
             self._agent_log.append(f"Planning batch {planned_round} (top {plan_n})")
-            # Log planning status at start of batch
-            console.print(f"\n[bold cyan]═══ Planning Batch {planned_round} ═══[/bold cyan]")
-            # Show current phase (Early/Mid/Late) for clarity
-            try:
-                phase = getattr(self, '_current_phase', None)
-                if not phase and self.session_tracker:
-                    # Fallback compute if not set
-                    cov = self.session_tracker.get_coverage_stats()
-                    nodes_pct = float(((cov or {}).get('nodes') or {}).get('percent') or 0.0)
-                    phase = 'Early' if nodes_pct < 30.0 else ('Mid' if nodes_pct < 70.0 else 'Late')
-                if phase:
-                    console.print(f"[dim]Audit Phase:[/dim] [bold]{phase}[/bold]")
-            except Exception:
-                pass
+            # Log planning status and show planned items (phase banner already printed)
             # Show current coverage stats and a sample of unvisited nodes
             try:
                 if self.session_tracker:
@@ -2178,7 +2490,10 @@ class AgentRunner:
                 fid = getattr(inv, 'frame_id', '') or ''
                 iters = (rep or {}).get('iterations_completed', 0)
                 hyps = (rep or {}).get('hypotheses', {}).get('total', 0)
-                exec_table.add_row(str(rown), str(fid), getattr(inv, 'goal',''), str(planned_round), str(rown), str(iters), str(hyps))
+                goal = getattr(inv, 'goal', '')
+                # Phase 1 investigations are already properly formatted
+                phase = getattr(self, '_current_phase', None)
+                exec_table.add_row(str(rown), str(fid), goal, str(planned_round), str(rown), str(iters), str(hyps))
             console.print("\n[bold cyan]Plan Execution Summary[/bold cyan]")
             console.print(exec_table)
         except Exception:
@@ -2266,7 +2581,8 @@ def agent(project_id: str, iterations: int | None, plan_n: int, time_limit: int 
         pass
     
     if not runner.initialize():
-        return
+        # Ensure CLI signals failure to callers (e.g., benchmark runner)
+        raise click.Exit(1)
     
     # Optional telemetry: local-only HTTP SSE/control + instance registry
     tele = None
