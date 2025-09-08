@@ -174,19 +174,6 @@ You can resume/refine an existing graph without creating new ones using `graph r
   --files "src/A.sol,src/B.sol,src/utils/Lib.sol"
 ```
 
-Notes on refinement:
-- Argument order is `graph refine <project> [NAME]`. Example: `./hound.py graph refine fider AuthorizationMap`. If you put the name first, it will be treated as the project.
-- Refinement uses the stored whitelist from the initial ingestion by default. Passing a new `--files` list will rebuild ingestion for that run with the new whitelist.
-- Refinement prioritizes connecting and improving existing structure. It minimizes new node creation and, when refining a single graph, only accepts new nodes that immediately connect to existing nodes (kept to a small number). For broader expansion, prefer `graph build --auto`.
-
-**What happens:** Hound inspects the codebase and creates specialized graphs for different aspects (e.g., access control, value flows, state management). Each graph contains:
-- **Nodes**: Key concepts, functions, and state variables
-- **Edges**: Relationships between components
-- **Annotations**: Observations and assumptions tied to specific code locations
-- **Code cards**: Extracted code snippets linked to graph elements
-
-These graphs enable Hound to reason about high-level patterns while maintaining precise code grounding.
-
 ### Step 3: Run the Audit
 
 The audit phase uses the **senior/junior pattern** with planning and investigation:
@@ -209,7 +196,7 @@ Tip: When started with `--telemetry`, you can connect the Chatbot UI and steer t
 
 **Audit Modes:**
 
-Hound supports two distinct audit modes that mirror expert security workflows:
+Hound supports two distinct audit modes:
 
 - **Sweep Mode (`--mode sweep`)**: Phase 1 - Systematic component analysis
   - Performs a broad, systematic analysis of every major component
@@ -225,19 +212,13 @@ Hound supports two distinct audit modes that mirror expert security workflows:
   - Focuses on authentication bypasses and state corruption
   - Best for: Finding complex, cross-component vulnerabilities
 
-- **Auto Mode (default)**: Runs both phases automatically
-  - Starts with sweep mode for broad coverage
-  - Automatically transitions to intuition mode at ~90% coverage
-
 **Key parameters:**
 - **--time-limit**: Stop after N minutes (useful for incremental audits)
 - **--plan-n**: Number of investigations per planning batch
 - **--session**: Resume a specific session (continues coverage/planning)
 - **--debug**: Save all LLM interactions to `.hound_debug/`
 
-The quality and duration depend heavily on the models used. Faster models provide quick results but may miss subtle issues, while advanced reasoning models find deeper vulnerabilities but require more time.
-
-**What happens during an audit:**
+Normally, you want to run sweep mode first followed by intuition mode. The quality and duration depend heavily on the models used. Faster models provide quick results but may miss subtle issues, while advanced reasoning models find deeper vulnerabilities but require more time.
 
 ### Step 4: Monitor Progress
 
