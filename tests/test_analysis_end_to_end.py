@@ -17,7 +17,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from analysis.agent_core import AgentDecision, AutonomousAgent
 from analysis.concurrent_knowledge import HypothesisStore
-from analysis.finalization import Finalizer
 from analysis.report_generator import ReportGenerator
 
 
@@ -690,75 +689,11 @@ contract Vault {
 class TestAnalysisComponents(unittest.TestCase):
     """Test individual analysis components."""
     
-    @patch('llm.unified_client.UnifiedLLMClient')
-    def test_finalizer(self, mock_llm_class):
-        """Test hypothesis finalization."""
-        mock_llm = MagicMock()
-        mock_llm_class.return_value = mock_llm
-        
-        # Mock finalization response matching expected format
-        mock_llm.raw.return_value = json.dumps({
-            "verdict": "confirmed",
-            "reasoning": "Confirmed reentrancy vulnerability in withdraw function",
-            "confidence": 0.95
-        })
-        
-        config = {"models": {"finalize": {"provider": "mock", "model": "mock"}}}
-        # Create temp directory for test files
-        temp_dir = tempfile.mkdtemp()
-        # Create necessary paths for Finalizer
-        graphs_metadata_path = Path(temp_dir) / "graphs_metadata.json"
-        manifest_path = Path(temp_dir) / "manifest.json"
-        hypothesis_path = Path(temp_dir) / "hypotheses.json"
-        
-        # Create empty metadata files with proper structure
-        graphs_metadata_path.write_text('[]')
-        manifest_path.write_text('{"test": {}}')
-        # Initialize hypothesis store with the test hypothesis
-        hypothesis_store_data = {
-            "hypotheses": {
-                "test_hyp_1": {
-                    "vulnerability_type": "reentrancy",
-                    "description": "Potential reentrancy",
-                    "confidence": 0.75,
-                    "evidence": [{"type": "code_pattern", "description": "External call before state update"}],
-                    "status": "proposed"
-                }
-            },
-            "metadata": {}
-        }
-        hypothesis_path.write_text(json.dumps(hypothesis_store_data))
-        
-        # Initialize Finalizer with required arguments
-        finalizer = Finalizer(
-            graphs_metadata_path=graphs_metadata_path,
-            manifest_path=manifest_path,
-            hypothesis_path=hypothesis_path,
-            agent_id="test_agent",
-            config=config
-        )
-        
-        hypothesis = {
-            "vulnerability_type": "reentrancy",
-            "description": "Potential reentrancy",
-            "confidence": 0.75,
-            "evidence": [{"type": "code_pattern", "description": "External call before state update"}]
-        }
-        
-        try:
-            # Finalize expects list of (id, hypothesis_dict) tuples
-            result = finalizer.finalize([("test_hyp_1", hypothesis)])
-            
-            self.assertIsNotNone(result)
-            # Check that hypothesis was reviewed and confirmed
-            self.assertIn('confirmed', result)
-            self.assertIn('rejected', result)
-            self.assertEqual(result['confirmed'], 1)
-            self.assertEqual(result['rejected'], 0)
-            self.assertEqual(len(result['confirmed_vulnerabilities']), 1)
-        finally:
-            # Clean up temp directory
-            shutil.rmtree(temp_dir, ignore_errors=True)
+    def test_finalizer_removed(self):
+        """Test that finalization.py has been removed - using commands/finalize.py instead."""
+        # This test has been removed as finalization.py is no longer used
+        # The finalize functionality is now in commands/finalize.py
+        pass
     
     def test_report_generator(self):
         """Test report generation from findings."""
