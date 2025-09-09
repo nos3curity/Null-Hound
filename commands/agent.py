@@ -1182,64 +1182,6 @@ class AgentRunner:
         if len(prepared) >= n:
             return prepared[:n]
 
-        # 2) Ask Strategist for more to top-up to n
-        graphs_summary = self._graph_summary()
-        hypotheses_summary = self._get_hypotheses_summary()
-        investigation_results = self._get_investigation_results_summary()
-        coverage_summary = None
-        cov_stats = None
-        if self.session_tracker:
-            cov_stats = self.session_tracker.get_coverage_stats()
-            coverage_summary = (
-                f"Nodes visited: {cov_stats['nodes']['visited']}/{cov_stats['nodes']['total']} "
-                f"({cov_stats['nodes']['percent']:.1f}%)\n"
-                f"Cards analyzed: {cov_stats['cards']['visited']}/{cov_stats['cards']['total']} "
-                f"({cov_stats['cards']['percent']:.1f}%)"
-            )
-            if cov_stats['visited_node_ids']:
-                try:
-                    annotated_visited = self._annotate_nodes_with_graph(cov_stats['visited_node_ids'][:10])
-                    coverage_summary += f"\nVisited nodes: {', '.join(annotated_visited)}"
-                except Exception:
-                    coverage_summary += f"\nVisited nodes: {', '.join(cov_stats['visited_node_ids'][:10])}"
-                if len(cov_stats['visited_node_ids']) > 10:
-                    coverage_summary += f" ... and {len(cov_stats['visited_node_ids']) - 10} more"
-            # Append a concise list of unvisited node IDs to guide coverage
-            try:
-                unvisited_sample, unvisited_count = self._get_unvisited_nodes_sample(max_n=15)
-                if unvisited_count > 0 and unvisited_sample:
-                    try:
-                        annotated_unvisited = self._annotate_nodes_with_graph(unvisited_sample[:10])
-                        sample_str = ', '.join(annotated_unvisited)
-                    except Exception:
-                        sample_str = ', '.join(unvisited_sample[:10])
-                    coverage_summary += f"\nUnvisited nodes: {unvisited_count} (sample: {sample_str}{'' if len(unvisited_sample) <= 10 else ', ...'})"
-                # Also show unvisited high-level components (contracts/modules/services/files)
-                try:
-                    sys_graph = (self.agent.loaded_data or {}).get('system_graph') or {}
-                    gdata = sys_graph.get('data') or {}
-                    nodes = gdata.get('nodes') or []
-                    edges = gdata.get('edges') or []
-                    comp_nodes = _high_level_nodes(nodes, edges)
-                    visited_ids = set(cov_stats.get('visited_node_ids') or [])
-                    unv_comp = [n for n in comp_nodes if str(n.get('id') or '') not in visited_ids]
-                    if unv_comp:
-                        samp = [f"{(n.get('id') or '')}@SystemArchitecture" for n in unv_comp[:10] if n.get('id')]
-                        coverage_summary += f"\nUnvisited components: {len(unv_comp)} (sample: {', '.join(samp)}{'' if len(unv_comp) <= 10 else ', ...'})"
-                        # Add a structured candidate list to guide planner selection
-                        lines = []
-                        for n in unv_comp[:10]:
-                            nid = str(n.get('id') or '')
-                            lbl = str(n.get('label') or nid)
-                            if nid:
-                                lines.append(f"- {lbl} ({nid})")
-                        if lines:
-                            coverage_summary += "\nCANDIDATE COMPONENTS (unvisited):\n" + "\n".join(lines)
-                except Exception:
-                    pass
-            except Exception:
-                pass
-
         # Heuristics: identify "high-level" SystemArchitecture nodes (contracts/modules/services/files)
         def _high_level_nodes(sys_nodes: list[dict], sys_edges: list[dict]) -> list[dict]:
             try:
@@ -1311,6 +1253,64 @@ class AgentRunner:
             out = [n for n in (sys_nodes or []) if is_high_level(n)]
             return out
 
+        # 2) Ask Strategist for more to top-up to n
+        graphs_summary = self._graph_summary()
+        hypotheses_summary = self._get_hypotheses_summary()
+        investigation_results = self._get_investigation_results_summary()
+        coverage_summary = None
+        cov_stats = None
+        if self.session_tracker:
+            cov_stats = self.session_tracker.get_coverage_stats()
+            coverage_summary = (
+                f"Nodes visited: {cov_stats['nodes']['visited']}/{cov_stats['nodes']['total']} "
+                f"({cov_stats['nodes']['percent']:.1f}%)\n"
+                f"Cards analyzed: {cov_stats['cards']['visited']}/{cov_stats['cards']['total']} "
+                f"({cov_stats['cards']['percent']:.1f}%)"
+            )
+            if cov_stats['visited_node_ids']:
+                try:
+                    annotated_visited = self._annotate_nodes_with_graph(cov_stats['visited_node_ids'][:10])
+                    coverage_summary += f"\nVisited nodes: {', '.join(annotated_visited)}"
+                except Exception:
+                    coverage_summary += f"\nVisited nodes: {', '.join(cov_stats['visited_node_ids'][:10])}"
+                if len(cov_stats['visited_node_ids']) > 10:
+                    coverage_summary += f" ... and {len(cov_stats['visited_node_ids']) - 10} more"
+            # Append a concise list of unvisited node IDs to guide coverage
+            try:
+                unvisited_sample, unvisited_count = self._get_unvisited_nodes_sample(max_n=15)
+                if unvisited_count > 0 and unvisited_sample:
+                    try:
+                        annotated_unvisited = self._annotate_nodes_with_graph(unvisited_sample[:10])
+                        sample_str = ', '.join(annotated_unvisited)
+                    except Exception:
+                        sample_str = ', '.join(unvisited_sample[:10])
+                    coverage_summary += f"\nUnvisited nodes: {unvisited_count} (sample: {sample_str}{'' if len(unvisited_sample) <= 10 else ', ...'})"
+                # Also show unvisited high-level components (contracts/modules/services/files)
+                try:
+                    sys_graph = (self.agent.loaded_data or {}).get('system_graph') or {}
+                    gdata = sys_graph.get('data') or {}
+                    nodes = gdata.get('nodes') or []
+                    edges = gdata.get('edges') or []
+                    comp_nodes = _high_level_nodes(nodes, edges)
+                    visited_ids = set(cov_stats.get('visited_node_ids') or [])
+                    unv_comp = [n for n in comp_nodes if str(n.get('id') or '') not in visited_ids]
+                    if unv_comp:
+                        samp = [f"{(n.get('id') or '')}@SystemArchitecture" for n in unv_comp[:10] if n.get('id')]
+                        coverage_summary += f"\nUnvisited components: {len(unv_comp)} (sample: {', '.join(samp)}{'' if len(unv_comp) <= 10 else ', ...'})"
+                        # Add a structured candidate list to guide planner selection
+                        lines = []
+                        for n in unv_comp[:10]:
+                            nid = str(n.get('id') or '')
+                            lbl = str(n.get('label') or nid)
+                            if nid:
+                                lines.append(f"- {lbl} ({nid})")
+                        if lines:
+                            coverage_summary += "\nCANDIDATE COMPONENTS (unvisited):\n" + "\n".join(lines)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
         # Determine phase (Coverage/Saliency) from mode flag or coverage
         def _determine_phase_two(cov: dict | None) -> str:
             # If mode is explicitly set, use it
@@ -1341,7 +1341,7 @@ class AgentRunner:
                 nodes = gdata.get('nodes') or []
                 edges = gdata.get('edges') or []
                 comps = _high_level_nodes(nodes, edges)
-                visited_ids = set(((cov_stats or {}).get('visited_node_ids') or [])) if 'cov_stats' in locals() else set()
+                visited_ids = set((cov_stats or {}).get('visited_node_ids') or []) if 'cov_stats' in locals() else set()
                 visited_comp = [n for n in comps if str(n.get('id') or '') in visited_ids]
                 comp_complete = (len(comps) > 0 and len(visited_comp) >= len(comps))
             except Exception:
@@ -1374,7 +1374,7 @@ class AgentRunner:
                 nodes = gdata.get('nodes') or []
                 edges = gdata.get('edges') or []
                 # Use visited set from coverage stats
-                visited_ids = set(((cov_stats or {}).get('visited_node_ids') or [])) if 'cov_stats' in locals() else set()
+                visited_ids = set((cov_stats or {}).get('visited_node_ids') or []) if 'cov_stats' in locals() else set()
                 comp_nodes = _high_level_nodes(nodes, edges)
                 unvisited = [n for n in comp_nodes if str(n.get('id') or '') not in visited_ids]
                 for nnode in unvisited[:need]:
@@ -1415,7 +1415,7 @@ class AgentRunner:
                     gdata = sys_graph.get('data') or {}
                     nodes = gdata.get('nodes') or []
                     edges = gdata.get('edges') or []
-                    visited_ids = set(((cov_stats or {}).get('visited_node_ids') or [])) if 'cov_stats' in locals() else set()
+                    visited_ids = set((cov_stats or {}).get('visited_node_ids') or []) if 'cov_stats' in locals() else set()
                     comp_nodes = _high_level_nodes(nodes, edges)
                     unvisited = [n for n in comp_nodes if str(n.get('id') or '') not in visited_ids]
                     for nnode in unvisited[:need]:
@@ -1650,7 +1650,6 @@ class AgentRunner:
                 meta += f", {cat}"
             goal = getattr(it, 'goal', '')
             # Phase 1 investigations are already properly formatted
-            phase = getattr(self, '_current_phase', None)
             console.print(f"  {mark} {goal}  ({meta})")
 
     def _log_planning_status(self, items: list[object], current_index: int = -1):
@@ -2007,12 +2006,12 @@ class AgentRunner:
                         phase = 'Coverage' if nodes_pct < 90.0 else 'Saliency'
                 if phase:
                     if phase == 'Coverage':
-                        console.print(f"\n[bold yellow]═══ PHASE 1: COVERAGE ═══[/bold yellow]")
+                        console.print("\n[bold yellow]═══ PHASE 1: COVERAGE ═══[/bold yellow]")
                         console.print("[dim]Wide sweep for shallow bugs at medium granularity[/dim]")
                         console.print("[dim]Approach: Examine each module/class for all security issues.[/dim]")
                         console.print("[dim]Also captures invariants and assumptions to build the knowledge graph.[/dim]\n")
                     else:
-                        console.print(f"\n[bold magenta]═══ PHASE 2: DEEP ANALYSIS ═══[/bold magenta]")
+                        console.print("\n[bold magenta]═══ PHASE 2: DEEP ANALYSIS ═══[/bold magenta]")
                         console.print("[dim]This phase uses graph-level reasoning to find complex, high-impact vulnerabilities.[/dim]")
                         console.print("[dim]Focus: Contradictions, invariant violations, cross-component interactions.[/dim]")
                         console.print("[dim]Leveraging annotations from Phase 1 to guide targeted investigation.[/dim]\n")
