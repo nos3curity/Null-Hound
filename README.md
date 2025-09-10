@@ -53,10 +53,12 @@ pip install -r requirements.txt
 
 ## Configuration
 
-Set up your API keys, e.g.:
+Set up your OpenAI API key and optional base URL:
 
 ```bash
 export OPENAI_API_KEY=your_key_here
+# Optional: override the base URL (defaults to https://api.openai.com)
+export OPENAI_BASE_URL=https://api.openai.com
 ```
 
 Copy the example configuration and edit as needed:
@@ -431,7 +433,7 @@ When you attach to a session, its status is set to `active` while the audit runs
 Hound ships with a lightweight web UI for steering and monitoring a running audit session. It discovers local runs via a simple telemetry registry and streams status/decisions live.
 
 Prerequisites:
-- Set API keys (at least `OPENAI_API_KEY`): `source ../API_KEYS.txt` or export manually
+- Set API keys (at least `OPENAI_API_KEY`, optional `OPENAI_BASE_URL` for custom endpoints): `source ../API_KEYS.txt` or export manually
 - Install Python deps in this submodule: `pip install -r requirements.txt`
 
 1) Start the agent with telemetry enabled
