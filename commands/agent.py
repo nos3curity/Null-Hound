@@ -1250,7 +1250,7 @@ class AgentRunner:
                     return True
                 return False
 
-            out = [n for n in (sys_nodes or []) if is_high_level(n)]
+            out = [node for node in (sys_nodes or []) if is_high_level(node)]
             return out
 
         # 2) Ask Strategist for more to top-up to n
@@ -1293,15 +1293,15 @@ class AgentRunner:
                     edges = gdata.get('edges') or []
                     comp_nodes = _high_level_nodes(nodes, edges)
                     visited_ids = set(cov_stats.get('visited_node_ids') or [])
-                    unv_comp = [n for n in comp_nodes if str(n.get('id') or '') not in visited_ids]
+                    unv_comp = [node for node in comp_nodes if str(node.get('id') or '') not in visited_ids]
                     if unv_comp:
-                        samp = [f"{(n.get('id') or '')}@SystemArchitecture" for n in unv_comp[:10] if n.get('id')]
+                        samp = [f"{(node.get('id') or '')}@SystemArchitecture" for node in unv_comp[:10] if node.get('id')]
                         coverage_summary += f"\nUnvisited components: {len(unv_comp)} (sample: {', '.join(samp)}{'' if len(unv_comp) <= 10 else ', ...'})"
                         # Add a structured candidate list to guide planner selection
                         lines = []
-                        for n in unv_comp[:10]:
-                            nid = str(n.get('id') or '')
-                            lbl = str(n.get('label') or nid)
+                        for node in unv_comp[:10]:
+                            nid = str(node.get('id') or '')
+                            lbl = str(node.get('label') or nid)
                             if nid:
                                 lines.append(f"- {lbl} ({nid})")
                         if lines:
@@ -1342,7 +1342,7 @@ class AgentRunner:
                 edges = gdata.get('edges') or []
                 comps = _high_level_nodes(nodes, edges)
                 visited_ids = set((cov_stats or {}).get('visited_node_ids') or []) if 'cov_stats' in locals() else set()
-                visited_comp = [n for n in comps if str(n.get('id') or '') in visited_ids]
+                visited_comp = [node for node in comps if str(node.get('id') or '') in visited_ids]
                 comp_complete = (len(comps) > 0 and len(visited_comp) >= len(comps))
             except Exception:
                 comp_complete = False
@@ -1376,7 +1376,7 @@ class AgentRunner:
                 # Use visited set from coverage stats
                 visited_ids = set((cov_stats or {}).get('visited_node_ids') or []) if 'cov_stats' in locals() else set()
                 comp_nodes = _high_level_nodes(nodes, edges)
-                unvisited = [n for n in comp_nodes if str(n.get('id') or '') not in visited_ids]
+                unvisited = [node for node in comp_nodes if str(node.get('id') or '') not in visited_ids]
                 for nnode in unvisited[:need]:
                     nid = str(nnode.get('id') or '')
                     lbl = str(nnode.get('label') or nid)
@@ -1417,7 +1417,7 @@ class AgentRunner:
                     edges = gdata.get('edges') or []
                     visited_ids = set((cov_stats or {}).get('visited_node_ids') or []) if 'cov_stats' in locals() else set()
                     comp_nodes = _high_level_nodes(nodes, edges)
-                    unvisited = [n for n in comp_nodes if str(n.get('id') or '') not in visited_ids]
+                    unvisited = [node for node in comp_nodes if str(node.get('id') or '') not in visited_ids]
                     for nnode in unvisited[:need]:
                         nid = str(nnode.get('id') or '')
                         lbl = str(nnode.get('label') or nid)
@@ -1437,7 +1437,7 @@ class AgentRunner:
             try:
                 sys_graph = (self.agent.loaded_data or {}).get('system_graph') or {}
                 gdata = sys_graph.get('data') or {}
-                node_by_id = {str(n.get('id') or ''): str(n.get('label') or n.get('id') or '') for n in (gdata.get('nodes') or [])}
+                node_by_id = {str(node.get('id') or ''): str(node.get('label') or node.get('id') or '') for node in (gdata.get('nodes') or [])}
                 def _norm_goal(item):
                     g = str(item.get('goal') or '')
                     bad = ('map entrypoint', "map entrypoints", "enumerate", "list ", "inventory", "map constructor")
