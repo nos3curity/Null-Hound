@@ -50,7 +50,10 @@ class OpenAIProvider(BaseLLMProvider):
         if not api_key:
             raise ValueError(f"API key not found in environment variable: {api_key_env}")
         
-        self.client = OpenAI(api_key=api_key)
+        # Allow custom base URL via environment variable; default to public OpenAI endpoint
+        base_url = os.environ.get("OPENAI_BASE_URL") or config.get("openai", {}).get("base_url", "https://api.openai.com")
+        
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
         # Prefer Responses API for GPT-5 family unless overridden
         mdl = (self.model_name or "").lower()
         env_force_resp = os.environ.get("HOUND_OPENAI_USE_RESPONSES", "").lower() in {"1","true","yes","on"}

@@ -11,7 +11,9 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 ROOT = Path(__file__).resolve().parent
 STATIC_DIR = ROOT / "static"
 
-REALTIME_SDP_ENDPOINT = "https://api.openai.com/v1/realtime"
+# Support custom base URL via OPENAI_BASE_URL; default to public OpenAI endpoint
+_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com").rstrip("/")
+REALTIME_SDP_ENDPOINT = f"{_BASE_URL}/v1/realtime"
 REGISTRY_DIR = Path(os.environ.get("HOUND_REGISTRY_DIR", os.path.expanduser("~/.local/state/hound/instances")))
 ACTIVE_PROJECT_FILE = ROOT / ".active_project"
 
@@ -1403,6 +1405,7 @@ if __name__ == "__main__":
     try:
         print(f"[Hound Chatbot] Starting on http://{host}:{port} (debug={debug})")
         print(f"[Hound Chatbot] OPENAI_API_KEY available: {'yes' if _get_openai_api_key() else 'no'}")
+        print(f"[Hound Chatbot] OPENAI_BASE_URL: {_BASE_URL}")
         print(f"[Hound Chatbot] Using registry dir: {REGISTRY_DIR}")
     except Exception:
         pass

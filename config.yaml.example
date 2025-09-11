@@ -3,6 +3,8 @@
 # API keys configuration
 openai:
   api_key_env: OPENAI_API_KEY
+  # Optional: override base URL (env var OPENAI_BASE_URL takes precedence)
+  # base_url: https://api.openai.com
 
 gemini:
   api_key_env: GOOGLE_API_KEY
