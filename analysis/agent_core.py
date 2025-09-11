@@ -1860,6 +1860,7 @@ DO NOT include any text before or after the JSON object."""
             added = 0
             dedup_skipped = 0
             dedup_details: list[str] = []
+            other_skipped: list[str] = []
             titles: list[str] = []
             hyp_info: list[dict] = []
             guidance_model_info = None
@@ -1929,8 +1930,8 @@ DO NOT include any text before or after the JSON object."""
                 # Be defensive: guard against unexpected returns
                 try:
                     res = self._form_hypothesis(params)
-                except Exception:
-                    res = {'status': 'error', 'error': 'hypothesis formation failed'}
+                except Exception as e:
+                    res = {'status': 'error', 'error': f'hypothesis formation failed: {e}'}
                 if isinstance(res, dict) and res.get('status') == 'success':
                     added += 1
                     # Append to existing list so subsequent items can see it for dedup
@@ -1963,6 +1964,11 @@ DO NOT include any text before or after the JSON object."""
                         if 'Duplicate title:' in summary or 'Similar to existing:' in summary:
                             dedup_skipped += 1
                             dedup_details.append(f"Store-dedup: {title} — {summary.replace('Failed: ', '')}")
+                        else:
+                            # Other error (e.g., formation failed)
+                            err = (res or {}).get('error', '') if isinstance(res, dict) else ''
+                            if summary or err:
+                                other_skipped.append(f"Form-fail: {title} — {(summary or err)[:200]}")
                     except Exception:
                         pass
             # Include raw strategist output if available for CLI display
@@ -1977,8 +1983,15 @@ DO NOT include any text before or after the JSON object."""
                 _sk = getattr(strategist, 'last_skipped', None) or {}
                 if isinstance(_sk, dict):
                     skipped_no_node_ids = list(_sk.get('no_node_ids') or [])
+                    skipped_invalid_format = list(_sk.get('invalid_format') or [])
+                    fallback_assigned = list(_sk.get('fallback_node_ids_assigned') or [])
+                else:
+                    skipped_invalid_format = []
+                    fallback_assigned = []
             except Exception:
                 skipped_no_node_ids = []
+                skipped_invalid_format = []
+                fallback_assigned = []
             # Heuristic guidance extraction for CLI display: pull bullet points after a GUIDANCE header
             guidance_bullets: list[str] = []
             try:
@@ -2009,6 +2022,18 @@ DO NOT include any text before or after the JSON object."""
                     guidance_bullets = guidance_bullets[:5]
             except Exception:
                 guidance_bullets = []
+            # Get store stats
+            store_stats = {}
+            try:
+                all_hyps = self.hypothesis_store.list_all()
+                store_stats = {
+                    'total': len(all_hyps),
+                    'high_severity': sum(1 for h in all_hyps if h.get('severity') == 'high'),
+                    'critical': sum(1 for h in all_hyps if h.get('severity') == 'critical'),
+                }
+            except Exception:
+                pass
+            
             return {
                 'status': 'success',
                 'summary': f'Deep analysis added {added} hypotheses' + (f", skipped {dedup_skipped} duplicates" if dedup_skipped else ''),
@@ -2020,6 +2045,10 @@ DO NOT include any text before or after the JSON object."""
                 'dedup_skipped': dedup_skipped,
                 'dedup_details': dedup_details,
                 'skipped_no_node_ids': skipped_no_node_ids,
+                'skipped_invalid_format': skipped_invalid_format,
+                'skipped_errors': other_skipped,
+                'fallback_node_ids_assigned': fallback_assigned,
+                'store_stats': store_stats,
             }
         except Exception as e:
             return {'status': 'error', 'error': str(e)}
@@ -2083,9 +2112,14 @@ DO NOT include any text before or after the JSON object."""
             visibility=params.get('visibility', getattr(self, 'default_hypothesis_visibility', 'global'))
         )
         
-        # Extract source files from nodes
+        # Extract source files from nodes (robust to missing cards map)
         source_files = set()
         affected_functions = []
+        cards_map = {}
+        try:
+            cards_map = getattr(self, 'cards', {}) or {}
+        except Exception:
+            cards_map = {}
         
         # Look up source files for each node
         for node_id in node_ids:
@@ -2095,8 +2129,8 @@ DO NOT include any text before or after the JSON object."""
                     if node.get('id') == node_id:
                         # Extract source files from source_refs (card IDs)
                         for card_id in node.get('source_refs', []):
-                            if card_id in self.cards:
-                                card = self.cards[card_id]
+                            if card_id in cards_map:
+                                card = cards_map[card_id]
                                 # Cards have 'relpath' not 'file_path'
                                 if 'relpath' in card:
                                     source_files.add(card['relpath'])
@@ -2113,8 +2147,8 @@ DO NOT include any text before or after the JSON object."""
                 for node in graph_data.get('nodes', []):
                     if node.get('id') == node_id:
                         for card_id in node.get('source_refs', []):
-                            if card_id in self.cards:
-                                card = self.cards[card_id]
+                            if card_id in cards_map:
+                                card = cards_map[card_id]
                                 # Cards have 'relpath' not 'file_path'
                                 if 'relpath' in card:
                                     source_files.add(card['relpath'])

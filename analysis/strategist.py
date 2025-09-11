@@ -26,6 +26,23 @@ class PlanBatch(BaseModel):
     investigations: list[PlanItemSchema] = Field(default_factory=list)
 
 
+class HypothesisItemJSON(BaseModel):
+    title: str
+    type: str = Field(default="security_issue")
+    root_cause: str = Field(default="")
+    attack_vector: str = Field(default="")
+    node_ids: list[str] = Field(default_factory=list)
+    affected_code: list[str] = Field(default_factory=list)
+    severity: str = Field(default="medium")
+    confidence: str | float = Field(default="medium")
+    reasoning: str = Field(default="")
+
+
+class HypothesisBatchJSON(BaseModel):
+    hypotheses: list[HypothesisItemJSON] = Field(default_factory=list)
+    guidance: list[str] = Field(default_factory=list)
+
+
 def _choose_profile(cfg: dict[str, Any]) -> str:
     # Prefer explicit strategist, then guidance, then agent as last resort
     try:
@@ -461,9 +478,23 @@ class Strategist:
 
         # Simpler user prompt for Phase 1
         if is_phase1:
+            # Extract existing hypotheses from context for prominent display
+            existing_hyps_section = ""
+            if "=== EXISTING HYPOTHESES" in context:
+                try:
+                    start = context.index("=== EXISTING HYPOTHESES")
+                    end = context.find("\n===", start + 1)
+                    if end == -1:
+                        end = context.find("\n\n", start)
+                    if end != -1:
+                        existing_hyps_section = context[start:end].strip()
+                except Exception:
+                    pass
+            
             user = (
                 mission_block +
                 "CONTEXT (code being analyzed):\n" + context + "\n\n"
+                + ("⚠️ CRITICAL: DO NOT DUPLICATE THESE EXISTING HYPOTHESES ⚠️\n" + existing_hyps_section + "\n\n" if existing_hyps_section else "") +
                 "Identify and describe all security vulnerabilities in this code.\n\n"
                 "OUTPUT FORMAT:\n"
                 "List each bug on a separate line using this format:\n"
@@ -472,21 +503,41 @@ class Strategist:
                 "- Provide up to 5 bugs maximum\n"
                 "- If you cannot identify any issues, respond with: NO_HYPOTHESES: true\n"
                 "- Also provide brief GUIDANCE on what to check next (2-3 suggestions)\n"
+                "\nOUTPUT STRICTNESS:\n"
+                "- When producing HYPOTHESES, ensure each hypothesis is kept on ONE line (no wrapping). Use commas/semicolons to keep it compact.\n"
             )
         else:
             # Original complex prompt for Phase 2
+            # Extract existing hypotheses from context for prominent display
+            existing_hyps_section = ""
+            if "=== EXISTING HYPOTHESES" in context:
+                try:
+                    start = context.index("=== EXISTING HYPOTHESES")
+                    end = context.find("\n===", start + 1)
+                    if end == -1:
+                        end = context.find("\n\n", start)
+                    if end != -1:
+                        existing_hyps_section = context[start:end].strip()
+                except Exception:
+                    pass
+            
             user = (
                 mission_block +
                 "CONTEXT (includes === INVESTIGATION GOAL === and compressed history):\n" + context + "\n\n"
+                "⚠️ CRITICAL DEDUPLICATION REQUIREMENT ⚠️\n"
+                + (f"{existing_hyps_section}\n\n" if existing_hyps_section else "") +
+                "DO NOT propose any hypothesis that duplicates the above existing hypotheses!\n"
+                "Check EACH hypothesis you're about to propose against the existing list.\n\n"
                 "OUTPUT INSTRUCTIONS:\n"
-                "1) HYPOTHESES (max 5, one per line, exactly this pipe-separated format, avoid speculation):\n"
+                "1) HYPOTHESES (max 5, EXACTLY ONE PER LINE, exactly this pipe-separated format; DO NOT wrap across lines; use commas/semicolons instead of line breaks):\n"
                 "   Title | Type | Root Cause | Attack Vector | Affected Node IDs | Affected Code | Severity | Confidence | Reasoning\n"
                 "   - severity: critical|high|medium|low; confidence: high|medium|low\n"
                 "   - Keep Title concise and actionable.\n"
                 "   - CRITICAL: Affected Node IDs must be EXACT node IDs as shown in the NODES sections (token before the first pipe) or listed under LOADED NODES (e.g., func_transfer, contract_Token, state_balances)\n"
                 "   - Use a comma-separated list of actual node IDs. Do NOT invent new IDs or use descriptions.\n"
                 "   - You MUST provide at least one valid node ID for each hypothesis\n"
-                "   - Affected Code should reference concrete functions/files if possible.\n\n"
+                "   - Affected Code should reference concrete functions/files if possible.\n"
+                "   - Hard limit: keep each hypothesis under 240 characters to avoid line wrapping.\n\n"
                 "2) GUIDANCE (next steps for the Scout):\n"
                 "   - Provide 2–5 concrete CODE-ONLY actions to gather evidence or rule in/out the hypotheses (load/read specific files, trace auth/dataflow, check invariants).\n"
                 "   - Reference specific nodes/functions/files the Scout should load or analyze next.\n"
@@ -538,36 +589,122 @@ class Strategist:
                 # Never fail deep_think on debug save issues
                 pass
 
+        # First try a strict JSON response for robust parsing
+        items: list[dict[str, Any]] | None = None
+        json_used = False
+        fallback_node_ids_assigned: list[str] = []
         try:
-            # Allow fine-grained reasoning control for hypothesis step
             hyp_effort = None
             try:
                 mdl_cfg = (self.config or {}).get('models', {}).get(self.profile, {})
                 hyp_effort = mdl_cfg.get('hypothesize_reasoning_effort')
             except Exception:
                 hyp_effort = None
-            resp = self.llm.raw(system=system, user=user, reasoning_effort=hyp_effort)
-            # Log usage and context after call
-            self._log_usage('deep_think', system, user)
-            # Keep raw strategist output for downstream CLI display
+            json_user = (
+                user
+                + "\n\nSTRICT OUTPUT: Return ONLY JSON with keys 'hypotheses' (list) and 'guidance' (list of strings).\n"
+                + "Each hypothesis must include: title,type,root_cause,attack_vector,node_ids (array),affected_code (array),severity,confidence (high|medium|low or 0.0-1.0),reasoning.\n"
+                + "Example: {\"hypotheses\":[{\"title\":\"...\",\"type\":\"...\",\"root_cause\":\"...\",\"attack_vector\":\"...\",\"node_ids\":[\"func_x\"],\"affected_code\":[\"path:func\"],\"severity\":\"high\",\"confidence\":\"medium\",\"reasoning\":\"...\"}],\"guidance\":[\"...\"]}"
+            )
+            batch = self.llm.parse(system=system, user=json_user, schema=HypothesisBatchJSON, reasoning_effort=hyp_effort)
+            self._log_usage('deep_think(json)', system, json_user)
+            # Keep raw JSON for display
             try:
-                self.last_raw = resp
+                import json as _json
+                self.last_raw = _json.dumps(batch.model_dump(), ensure_ascii=False, indent=2)
             except Exception:
-                pass
+                self.last_raw = str(batch)
+            # Convert to internal items
+            def _conf_to_float(val: str | float) -> float:
+                try:
+                    if isinstance(val, int | float):
+                        v = float(val)
+                        return max(0.0, min(1.0, v))
+                except Exception:
+                    pass
+                s = str(val).lower()
+                if 'high' in s:
+                    return 0.9
+                if 'low' in s:
+                    return 0.4
+                return 0.6
+            items = []
+            for h in batch.hypotheses:
+                conf = _conf_to_float(h.confidence)
+                node_ids = [n for n in (h.node_ids or []) if isinstance(n, str) and n.strip()]
+                # If no valid node IDs, generate fallback
+                if not node_ids:
+                    try:
+                        import hashlib as _hash
+                        sig = (h.title or '') + '|' + (h.type or '')
+                        nid = 'fallback_' + _hash.md5(sig.encode()).hexdigest()[:10]
+                    except Exception:
+                        nid = 'fallback_unknown'
+                    node_ids = [nid]
+                    try:
+                        fallback_node_ids_assigned.append(h.title[:140] if h.title else 'unknown')
+                    except Exception:
+                        pass
+                # Build details similarly to pipe format
+                details = (
+                    f"VULNERABILITY TYPE: {h.type}\n"
+                    f"ROOT CAUSE: {h.root_cause}\n"
+                    f"ATTACK VECTOR: {h.attack_vector}\n"
+                    f"AFFECTED NODES: {', '.join(node_ids)}\n"
+                    f"AFFECTED CODE: {', '.join(h.affected_code or [])}\n"
+                    f"SEVERITY: {h.severity}\n"
+                    f"REASONING: {h.reasoning}"
+                )
+                items.append({
+                    'description': h.title,
+                    'details': details,
+                    'vulnerability_type': h.type,
+                    'severity': str(h.severity).lower() if h.severity else 'medium',
+                    'confidence': conf,
+                    'node_ids': node_ids,
+                    'reasoning': h.reasoning or '',
+                })
+            json_used = True
         except Exception:
-            return []
+            items = None
 
-        raw_text = str(resp)
+        if items is None:
+            # Fallback to raw text and legacy parsing
+            try:
+                hyp_effort = None
+                try:
+                    mdl_cfg = (self.config or {}).get('models', {}).get(self.profile, {})
+                    hyp_effort = mdl_cfg.get('hypothesize_reasoning_effort')
+                except Exception:
+                    hyp_effort = None
+                resp = self.llm.raw(system=system, user=user, reasoning_effort=hyp_effort)
+                self._log_usage('deep_think', system, user)
+                try:
+                    self.last_raw = resp
+                except Exception:
+                    pass
+            except Exception:
+                return []
+
+        if items is None:
+            raw_text = str(resp)
+        else:
+            raw_text = str(self.last_raw or '')
         # Group multi-line hypotheses: accumulate lines until we have at least 8 pipes (9 fields)
         grouped: list[str] = []
+        invalid_groups: list[str] = []
         cur: list[str] = []
         cur_pipes = 0
         for raw_ln in raw_text.splitlines():
             ln = raw_ln.strip()
             if not ln:
-                # Blank line: flush if looks complete
-                if cur and cur_pipes >= 8:
-                    grouped.append(' '.join(cur))
+                # Blank line: flush current candidate
+                if cur:
+                    joined = ' '.join(cur)
+                    if cur_pipes >= 8:
+                        grouped.append(joined)
+                    else:
+                        invalid_groups.append(joined)
                 cur, cur_pipes = [], 0
                 continue
             if '|' not in ln:
@@ -581,13 +718,49 @@ class Strategist:
             if cur_pipes >= 8:
                 grouped.append(' '.join(cur))
                 cur, cur_pipes = [], 0
-        # Flush tail if complete
-        if cur and cur_pipes >= 8:
-            grouped.append(' '.join(cur))
+        # Flush tail (complete or incomplete)
+        if cur:
+            joined = ' '.join(cur)
+            if cur_pipes >= 8:
+                grouped.append(joined)
+            else:
+                invalid_groups.append(joined)
 
         lines = [ln for ln in grouped if ln and '|' in ln]
-        items: list[dict[str, Any]] = []
+        # Prepare containers (some may be reused when JSON path was used)
+        items = items or []
         skipped_no_node_ids: list[str] = []
+        skipped_invalid_format: list[str] = []
+
+        # Salvage invalid groups by padding missing fields and extracting hints
+        salvaged: list[str] = []
+        for raw in invalid_groups:
+            if '|' not in raw:
+                continue
+            parts = [p.strip() for p in raw.split('|')]
+            # Pad to 9 fields
+            while len(parts) < 9:
+                parts.append('')
+            # Heuristic: if affected_nodes empty, try to extract node-like tokens
+            if not parts[4]:
+                try:
+                    import re as _re
+                    toks = _re.findall(r"\b(?:func|contract|state|module|service|ext_service)_[A-Za-z0-9_\.:-]+", raw)
+                    if toks:
+                        parts[4] = ','.join(list(dict.fromkeys(toks))[:4])
+                except Exception:
+                    pass
+            # Default severity/confidence if missing
+            if not parts[6]:
+                parts[6] = 'medium'
+            if not parts[7]:
+                parts[7] = 'medium'
+            salvaged.append(' | '.join(parts[:9]))
+
+        # Merge salvaged into lines (avoid dupes)
+        for s in salvaged:
+            if s not in lines:
+                lines.append(s)
         for ln in lines:
             parts = [p.strip() for p in ln.split('|')]
             title = parts[0] if len(parts) > 0 else "Hypothesis"
@@ -620,14 +793,29 @@ class Strategist:
                     node_ids.append(nid)
                 # Otherwise skip it (it's likely a description)
             
-            # Skip hypotheses with no valid node IDs
+            # If no valid node IDs, try to infer; else fallback to 'system'
             if not node_ids:
-                # Record for reporting and continue
+                # Try extract node-like tokens from entire line
                 try:
-                    skipped_no_node_ids.append(title[:140])
+                    import re as _re
+                    toks = _re.findall(r"\b(?:func|contract|state|module|service|ext_service)_[A-Za-z0-9_\.:-]+", ln)
+                    if toks:
+                        node_ids = list(dict.fromkeys(toks))[:3]
                 except Exception:
                     pass
-                continue
+                if not node_ids:
+                    # Fallback to a unique placeholder node id to avoid store-level cross-collision
+                    try:
+                        import hashlib as _hash
+                        sig = (title or '') + '|' + (vuln_type or '')
+                        nid = 'fallback_' + _hash.md5(sig.encode()).hexdigest()[:10]
+                    except Exception:
+                        nid = 'fallback_unknown'
+                    node_ids = [nid]
+                    try:
+                        fallback_node_ids_assigned.append(title[:140])
+                    except Exception:
+                        pass
             
             details = (
                 f"VULNERABILITY TYPE: {vuln_type}\n"
@@ -648,6 +836,14 @@ class Strategist:
                 'node_ids': node_ids,
                 'reasoning': reasoning,
             })
+        # Record invalid-format items (not enough fields)
+        try:
+            for raw in invalid_groups[:5]:
+                text = raw.replace('\n',' ').strip()
+                if '|' in text:
+                    skipped_invalid_format.append(text[:160])
+        except Exception:
+            pass
         # Second-pass self-critique to reduce false positives (optional)
         if not getattr(self, 'two_pass_review', False):
             # Return first-pass items directly when two-pass review is disabled
@@ -655,8 +851,11 @@ class Strategist:
             try:
                 self.last_skipped = {
                     'no_node_ids': skipped_no_node_ids,
-                    'parsed_lines': len(lines),
+                    'invalid_format': skipped_invalid_format,
+                    'fallback_node_ids_assigned': fallback_node_ids_assigned,
+                    'parsed_lines': len(items) if json_used else len(lines),
                     'raw_text_len': len(raw_text or ''),
+                    'used_json': json_used,
                 }
             except Exception:
                 pass
@@ -704,8 +903,11 @@ class Strategist:
             try:
                 self.last_skipped = {
                     'no_node_ids': skipped_no_node_ids,
-                    'parsed_lines': len(lines),
+                    'invalid_format': skipped_invalid_format,
+                    'fallback_node_ids_assigned': fallback_node_ids_assigned,
+                    'parsed_lines': len(items) if json_used else len(lines),
                     'raw_text_len': len(raw_text or ''),
+                    'used_json': json_used,
                 }
             except Exception:
                 pass
@@ -718,8 +920,11 @@ class Strategist:
             try:
                 self.last_skipped = {
                     'no_node_ids': skipped_no_node_ids,
-                    'parsed_lines': len(lines),
+                    'invalid_format': skipped_invalid_format,
+                    'fallback_node_ids_assigned': fallback_node_ids_assigned,
+                    'parsed_lines': len(items) if json_used else len(lines),
                     'raw_text_len': len(raw_text or ''),
+                    'used_json': json_used,
                 }
             except Exception:
                 pass

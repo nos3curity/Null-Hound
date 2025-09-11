@@ -1907,38 +1907,142 @@ class AgentRunner:
                         console.print(f"\n[bold red]Strategist Error:[/bold red] {error_msg}")
                         console.print("[yellow]Continuing with scout exploration...[/yellow]")
                     elif result.get('status') == 'success':
-                        console.print("\n[bold green]══════ STRATEGIST ANALYSIS COMPLETE ══════[/bold green]")
+                        console.print("\n[bold green]═══ STRATEGIST ANALYSIS COMPLETE ═══[/bold green]")
                         
-                        # Show the strategist's analysis
+                        # Parse and display hypotheses from JSON response
                         full_response = result.get('full_response', '')
-                        if full_response:
-                            from rich.panel import Panel
-                            console.print(Panel(full_response, border_style="green", title="Strategist Output"))
+                        strategist_hypotheses = []
+                        guidance_items = []
                         
-                        # Show hypotheses formed
-                        hypotheses_formed = result.get('hypotheses_formed', 0)
-                        if hypotheses_formed > 0:
-                            console.print(f"[bold green]✓ Added {hypotheses_formed} hypothesis(es) to global store[/bold green]")
-                        # Show dedup skip summary (if any)
+                        if isinstance(full_response, str) and full_response.strip().startswith('{'):
+                            try:
+                                data = json.loads(full_response)
+                                strategist_hypotheses = data.get('hypotheses') or []
+                                guidance_items = data.get('guidance') or []
+                            except Exception:
+                                pass
+                        
+                        # Display hypothesis processing results
+                        if strategist_hypotheses:
+                            from rich.table import Table
+                            
+                            console.print("\n[bold cyan]═══ HYPOTHESIS PROCESSING RESULTS ═══[/bold cyan]")
+                            
+                            # Create a table for hypothesis status
+                            table = Table(show_header=True, header_style="bold magenta", box=None, padding=(0,1))
+                            table.add_column("#", style="dim", width=3)
+                            table.add_column("Title", style="cyan", overflow="fold")
+                            table.add_column("Type", style="yellow")
+                            table.add_column("Severity", style="red")
+                            table.add_column("Confidence", justify="right")
+                            table.add_column("Status", style="bold")
+                            
+                            # Track what happened to each hypothesis
+                            hypotheses_formed = result.get('hypotheses_formed', 0)
+                            hyp_info = result.get('hypotheses_info') or []
+                            dedup_details = result.get('dedup_details') or []
+                            
+                            # Build status map
+                            added_titles = {h.get('title') for h in hyp_info if h.get('title')}
+                            dedup_map = {}
+                            for detail in dedup_details:
+                                if ':' in str(detail):
+                                    parts = str(detail).split(':', 1)
+                                    if len(parts) > 1:
+                                        title_part = parts[1].strip()
+                                        if '(' in title_part:
+                                            title = title_part.split('(')[0].strip()
+                                            dedup_map[title] = detail
+                            
+                            for i, h in enumerate(strategist_hypotheses, 1):
+                                title = h.get('title', 'Unknown')
+                                vuln_type = h.get('type', 'unknown')
+                                severity = h.get('severity', 'medium')
+                                confidence = h.get('confidence', 'medium')
+                                
+                                # Format confidence
+                                try:
+                                    conf_val = float(confidence)
+                                    conf_str = f"{conf_val:.0%}"
+                                except (ValueError, TypeError):
+                                    conf_str = str(confidence)
+                                
+                                # Determine status
+                                if title in added_titles:
+                                    status = "[bold green]✓ ADDED[/bold green]"
+                                elif title in dedup_map:
+                                    status = "[yellow]⊘ DUPLICATE[/yellow]"
+                                else:
+                                    # Check if it was skipped for other reasons
+                                    if not h.get('node_ids'):
+                                        status = "[red]✗ NO NODES[/red]"
+                                    else:
+                                        status = "[yellow]⊘ SKIPPED[/yellow]"
+                                
+                                # Add row to table
+                                table.add_row(
+                                    str(i),
+                                    title[:60] + "..." if len(title) > 60 else title,
+                                    vuln_type[:15],
+                                    severity,
+                                    conf_str,
+                                    status
+                                )
+                            
+                            console.print(table)
+                            
+                            # Summary statistics
+                            console.print("\n[bold]Summary:[/bold]")
+                            console.print(f"  • Total hypotheses from strategist: {len(strategist_hypotheses)}")
+                            console.print(f"  • [green]Successfully added to store: {hypotheses_formed}[/green]")
+                            
+                            dedup_count = result.get('dedup_skipped', 0)
+                            if dedup_count > 0:
+                                console.print(f"  • [yellow]Skipped as duplicates: {dedup_count}[/yellow]")
+                            
+                            no_nodes = result.get('skipped_no_node_ids') or []
+                            if no_nodes:
+                                console.print(f"  • [red]Skipped (no node IDs): {len(no_nodes)}[/red]")
+                            
+                            fallback = result.get('fallback_node_ids_assigned') or []
+                            if fallback:
+                                console.print(f"  • [dim]Assigned fallback nodes: {len(fallback)}[/dim]")
+                            
+                            # Show detailed reasoning for duplicates if any
+                            if dedup_details:
+                                console.print("\n[yellow]Duplicate Detection Details:[/yellow]")
+                                for detail in dedup_details[:3]:
+                                    console.print(f"  • {detail}")
+                        
+                        elif not strategist_hypotheses:
+                            console.print("\n[yellow]ℹ No vulnerabilities identified in this analysis[/yellow]")
+                        
+                        # Show guidance
+                        if guidance_items:
+                            console.print("\n[bold cyan]Strategist Guidance:[/bold cyan]")
+                            for item in guidance_items[:5]:
+                                console.print(f"  → {item}")
+                        # Show format issues (invalid structure) and formation errors
                         try:
-                            dd = int(result.get('dedup_skipped', 0) or 0)
-                            details = result.get('dedup_details') or []
-                            if dd or details:
-                                console.print(f"[dim]Skipped as duplicates: {dd or len(details)}[/dim]")
-                                # Print a few examples to aid debugging
-                                for line in details[:3]:
-                                    s = str(line)
+                            inv = result.get('skipped_invalid_format') or []
+                            parsed_cnt = result.get('parsed_lines')
+                            if isinstance(parsed_cnt, int):
+                                console.print(f"[dim]Parsed candidate hypotheses: {parsed_cnt}[/dim]")
+                            if inv:
+                                console.print(f"[dim]Skipped (invalid format): {len(inv)}[/dim]")
+                                for t in inv[:3]:
+                                    s = str(t)
                                     if len(s) > 120:
                                         s = s[:117] + '...'
                                     console.print(f"  - {s}")
                         except Exception:
                             pass
-                        # Show format/skipping reasons (e.g., missing node IDs)
+                        # Show formation errors (parsing/robustness issues)
                         try:
-                            no_nodes = result.get('skipped_no_node_ids') or []
-                            if no_nodes:
-                                console.print(f"[dim]Skipped (no node IDs): {len(no_nodes)}[/dim]")
-                                for t in no_nodes[:3]:
+                            errs = result.get('skipped_errors') or []
+                            if errs:
+                                console.print(f"[dim]Skipped (formation errors): {len(errs)}[/dim]")
+                                for t in errs[:3]:
                                     s = str(t)
                                     if len(s) > 120:
                                         s = s[:117] + '...'
@@ -2385,31 +2489,94 @@ class AgentRunner:
                                     console.print("[yellow]Continuing with scout exploration...[/yellow]")
                                 elif result.get('status') == 'success':
                                     console.print("\n[bold green]═══ STRATEGIST ANALYSIS COMPLETE ═══[/bold green]")
-                                    full_response = result.get('full_response', '')
-                                    if full_response:
-                                        console.print(Panel(full_response, border_style="green", title="Strategist Output"))
                                     
-                                    hypotheses_formed = result.get('hypotheses_formed', 0)
-                                    hyp_info = result.get('hypotheses_info') or []
-                                    if hypotheses_formed > 0:
-                                        console.print(f"[bold green]✓ Added {hypotheses_formed} hypothesis(es) to global store[/bold green]")
-                                        if hyp_info:
-                                            console.print("[bold cyan]New hypotheses:[/bold cyan]")
-                                            for h in hyp_info[:5]:
-                                                title = h.get('title','Hypothesis')
-                                                sev = h.get('severity','medium')
-                                                conf = h.get('confidence',0)
-                                                console.print(f"  • {title} [dim](severity={sev}, confidence={conf})[/dim]")
-                                                reason = (h.get('reasoning') or '')
-                                                if reason:
-                                                    console.print(f"    [dim]{(reason[:200] + '...') if len(reason)>200 else reason}[/dim]")
-                                    # Show guidance bullets even if no hypotheses were formed
-                                    gb = result.get('guidance_bullets') or []
-                                    if gb:
-                                        console.print("[bold cyan]Strategist Guidance (next steps):[/bold cyan]")
-                                        for b in gb:
-                                            console.print(f"  • {b}")
-                                # 'skipped' status no longer used (guard removed)
+                                    # Parse and display hypotheses from JSON response
+                                    full_response = result.get('full_response', '')
+                                    strategist_hypotheses = []
+                                    guidance_items = []
+                                    
+                                    if isinstance(full_response, str) and full_response.strip().startswith('{'):
+                                        try:
+                                            data = json.loads(full_response)
+                                            strategist_hypotheses = data.get('hypotheses') or []
+                                            guidance_items = data.get('guidance') or []
+                                        except Exception:
+                                            pass
+                                    
+                                    # Display hypothesis processing results
+                                    if strategist_hypotheses:
+                                        from rich.table import Table
+                                        
+                                        console.print("\n[bold cyan]HYPOTHESIS PROCESSING RESULTS[/bold cyan]")
+                                        
+                                        # Create a table for hypothesis status
+                                        table = Table(show_header=True, header_style="bold magenta", box=None, padding=(0,1))
+                                        table.add_column("#", style="dim", width=3)
+                                        table.add_column("Title", style="cyan", overflow="fold")
+                                        table.add_column("Severity", style="red")
+                                        table.add_column("Status", style="bold")
+                                        
+                                        # Track what happened to each hypothesis
+                                        hypotheses_formed = result.get('hypotheses_formed', 0)
+                                        hyp_info = result.get('hypotheses_info') or []
+                                        dedup_details = result.get('dedup_details') or []
+                                        
+                                        # Build status map
+                                        added_titles = {h.get('title') for h in hyp_info if h.get('title')}
+                                        
+                                        for i, h in enumerate(strategist_hypotheses, 1):
+                                            title = h.get('title', 'Unknown')
+                                            severity = h.get('severity', 'medium')
+                                            
+                                            # Determine status
+                                            if title in added_titles:
+                                                status = "[bold green]✓ ADDED[/bold green]"
+                                            else:
+                                                # Check for duplicates
+                                                is_dup = False
+                                                for detail in dedup_details:
+                                                    if title in str(detail):
+                                                        status = "[yellow]⊘ DUPLICATE[/yellow]"
+                                                        is_dup = True
+                                                        break
+                                                if not is_dup:
+                                                    if not h.get('node_ids'):
+                                                        status = "[red]✗ NO NODES[/red]"
+                                                    else:
+                                                        status = "[yellow]⊘ SKIPPED[/yellow]"
+                                            
+                                            # Add row to table
+                                            table.add_row(
+                                                str(i),
+                                                title[:60] + "..." if len(title) > 60 else title,
+                                                severity,
+                                                status
+                                            )
+                                        
+                                        console.print(table)
+                                        
+                                        # Summary with store stats
+                                        console.print(f"\n[bold]Total: {len(strategist_hypotheses)} | [green]Added: {hypotheses_formed}[/green] | [yellow]Skipped: {len(strategist_hypotheses) - hypotheses_formed}[/yellow][/bold]")
+                                        
+                                        # Show hypothesis store stats if available
+                                        try:
+                                            store_stats = result.get('store_stats')
+                                            if not store_stats and hasattr(self, 'agent') and hasattr(self.agent, 'hypothesis_store'):
+                                                all_hyps = self.agent.hypothesis_store.list_all()
+                                                store_stats = {'total': len(all_hyps)}
+                                            if store_stats:
+                                                console.print(f"\n[dim]Hypothesis Store: {store_stats.get('total', 0)} total vulnerabilities tracked[/dim]")
+                                        except Exception:
+                                            pass
+                                    
+                                    elif not strategist_hypotheses:
+                                        console.print("\n[yellow]ℹ No vulnerabilities identified in this analysis[/yellow]")
+                                    
+                                    # Show guidance
+                                    if guidance_items:
+                                        console.print("\n[bold cyan]Strategist Guidance:[/bold cyan]")
+                                        for item in guidance_items[:5]:
+                                            console.print(f"  → {item}")
                                 else:
                                     error_msg = result.get('error', 'Unknown error')
                                     console.print(f"\n[bold red]Strategist Error:[/bold red] {error_msg}")
