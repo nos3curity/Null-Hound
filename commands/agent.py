@@ -1719,9 +1719,9 @@ class AgentRunner:
                 current_phase = getattr(self, '_current_phase', None)
                 category = getattr(it, 'category', '-')
                 if current_phase == 'Coverage' or category == 'aspect':
-                    phase_label = "[cyan]1 - Coverage[/cyan]"
+                    phase_label = "[cyan]1 - Sweep[/cyan]"
                 else:
-                    phase_label = "[magenta]2 - Saliency[/magenta]"
+                    phase_label = "[magenta]2 - Intuition[/magenta]"
                 priority = str(getattr(it, 'priority', '-'))
                 impact = getattr(it, 'expected_impact', '-')
                 
@@ -1991,7 +1991,7 @@ class AgentRunner:
             # Announce planning batch and current phase before spinner (print once)
             try:
                 console.print(f"\n[bold cyan]═══ Planning Batch {planned_round} ═══[/bold cyan]")
-                # Two-phase: Coverage vs Saliency
+                # Two-phase: Sweep vs Intuition
                 phase = getattr(self, '_current_phase', None)
                 if not phase:
                     # Check if mode is explicitly set
@@ -2006,12 +2006,12 @@ class AgentRunner:
                         phase = 'Coverage' if nodes_pct < 90.0 else 'Saliency'
                 if phase:
                     if phase == 'Coverage':
-                        console.print("\n[bold yellow]═══ PHASE 1: COVERAGE ═══[/bold yellow]")
+                        console.print("\n[bold yellow]═══ PHASE 1: SWEEP ═══[/bold yellow]")
                         console.print("[dim]Wide sweep for shallow bugs at medium granularity[/dim]")
                         console.print("[dim]Approach: Examine each module/class for all security issues.[/dim]")
                         console.print("[dim]Also captures invariants and assumptions to build the knowledge graph.[/dim]\n")
                     else:
-                        console.print("\n[bold magenta]═══ PHASE 2: DEEP ANALYSIS ═══[/bold magenta]")
+                        console.print("\n[bold magenta]═══ PHASE 2: INTUITION ═══[/bold magenta]")
                         console.print("[dim]This phase uses graph-level reasoning to find complex, high-impact vulnerabilities.[/dim]")
                         console.print("[dim]Focus: Contradictions, invariant violations, cross-component interactions.[/dim]")
                         console.print("[dim]Leveraging annotations from Phase 1 to guide targeted investigation.[/dim]\n")

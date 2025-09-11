@@ -114,12 +114,12 @@ class Strategist:
         # Build mode-specific system prompt
         if phase_hint == 'Coverage':
             system = (
-                "You are a senior security auditor in COVERAGE MODE (Phase 1).\n"
+                "You are a senior security auditor in SWEEP MODE (Phase 1).\n"
                 "Your goal: Systematically analyze each component for vulnerabilities.\n\n"
                 "OPERATING CONSTRAINTS:\n"
                 "- Static analysis only - no runtime execution\n"
                 "- All actions must be CODE-ONLY: reading files, mapping flows, static reasoning\n\n"
-                "COVERAGE MODE STRATEGY:\n"
+                "SWEEP MODE STRATEGY:\n"
                 "- Analyze each medium-sized logical unit (contract/module/class)\n"
                 "- Wide sweep to visit every component and find bugs\n"
                 "- Target medium-sized units: contracts, modules, classes, services\n"
@@ -169,8 +169,8 @@ class Strategist:
                 "- Static analysis only - no runtime execution\n"
                 "- All actions must be CODE-ONLY: reading files, mapping flows, static reasoning\n\n"
                 "Adapt your strategy based on coverage:\n"
-                "- If coverage < 90%: Focus on systematic component analysis\n"
-                "- If coverage >= 90%: Use intuition to find high-impact bugs\n\n"
+                "- If coverage < 90%: Use Sweep mode (systematic component analysis)\n"
+                "- If coverage >= 90%: Use Intuition mode (deep, high-impact exploration)\n\n"
                 "FOR EACH ITEM include WHY NOW and EXIT CRITERIA in 'reasoning'.\n"
             )
 
@@ -196,7 +196,7 @@ class Strategist:
             # Phase 1: Wide sweep for shallow bugs
             user = (
                 base_context +
-                f"CURRENT MODE: COVERAGE (Phase 1 - Wide exploration)\n\n"
+                f"CURRENT MODE: SWEEP (Phase 1 - Wide exploration)\n\n"
                 f"Plan the top {n} NEW investigations for systematic coverage.\n\n"
                 f"CRITICAL: DO NOT REPEAT ANY COMPLETED INVESTIGATIONS LISTED ABOVE!\n"
                 f"If you cannot find {n} new components to analyze, return fewer items.\n"
