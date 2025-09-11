@@ -1072,7 +1072,7 @@ DEDUPLICATION (IMPORTANT):
 - If a node is already loaded, prefer loading closely-connected nodes instead (callers/callees/storage it reads/writes).
 
 CRITICAL RULES FOR NODE AND GRAPH NAMES:
-- ALWAYS use EXACT node IDs as shown in the graphs (in square brackets like [node_id])
+- ALWAYS use EXACT node IDs as shown in the NODES sections (the token before the first pipe) or listed under LOADED NODES
 - NEVER guess, modify, or create node names
 - NEVER add prefixes like "func_" or "node_" unless they're already there
 - If a node doesn't exist in the graph, DON'T try variations - it doesn't exist!

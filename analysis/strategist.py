@@ -289,9 +289,57 @@ class Strategist:
           description, details, vulnerability_type, severity, confidence, node_ids, reasoning
         """
         # Extract valid node IDs from context for validation
+        # Robustly parse IDs from the formatted context produced by agent_core._format_graph_for_display()
+        # Sources:
+        #  - NODES sections: lines like "  <id>|<type>|<label>..."
+        #  - LOADED NODES section: comma-separated IDs on indented lines
         import re
-        node_id_pattern = r'\[([a-zA-Z0-9_]+)\]'
-        valid_node_ids = set(re.findall(node_id_pattern, context))
+        valid_node_ids: set[str] = set()
+        try:
+            lines = context.splitlines()
+            in_nodes = False
+            in_loaded_nodes = False
+            for ln in lines:
+                s = ln.strip()
+                # Section toggles
+                if s.startswith('NODES ('):
+                    in_nodes = True
+                    in_loaded_nodes = False
+                    continue
+                if s.startswith('EDGES (') or s.startswith('--- Graph:') or s.startswith('===') or s == '':
+                    in_nodes = False
+                if s.startswith('=== LOADED NODES'):
+                    in_loaded_nodes = True
+                    in_nodes = False
+                    continue
+                if in_loaded_nodes and (s.startswith('===') or s.startswith('---') or s.startswith('Total:') or s.startswith('ACTIONS') or s.startswith('SYSTEM ARCHITECTURE') or s == ''):
+                    in_loaded_nodes = False
+
+                # Collect IDs
+                if in_nodes and ln.startswith('  '):
+                    # Node lines are indented, with id before the first '|'
+                    try:
+                        nid = ln.strip().split('|', 1)[0]
+                        if nid:
+                            valid_node_ids.add(nid)
+                    except Exception:
+                        pass
+                elif in_loaded_nodes and ln.startswith('  '):
+                    # Comma-separated ids
+                    try:
+                        for nid in ln.strip().split(','):
+                            nid = nid.strip()
+                            if nid:
+                                valid_node_ids.add(nid)
+                    except Exception:
+                        pass
+
+            # Backward compatibility: also pick up any bracketed IDs if present in future
+            bracket_ids = re.findall(r"\[([a-zA-Z0-9_\.\-:]+)\]", context)
+            for bid in bracket_ids:
+                valid_node_ids.add(bid)
+        except Exception:
+            valid_node_ids = set()
         
         # Use phase parameter if provided, otherwise default to Phase 2 (Saliency)
         is_phase1 = (phase == 'Coverage')
@@ -364,8 +412,8 @@ class Strategist:
                 "   Title | Type | Root Cause | Attack Vector | Affected Node IDs | Affected Code | Severity | Confidence | Reasoning\n"
                 "   - severity: critical|high|medium|low; confidence: high|medium|low\n"
                 "   - Keep Title concise and actionable.\n"
-                "   - CRITICAL: Affected Node IDs must be EXACT node IDs from the graphs shown above (e.g., func_transfer, contract_Token, state_balances)\n"
-                "   - Use comma-separated list of actual node IDs from [brackets] in the graphs, NOT descriptions\n"
+                "   - CRITICAL: Affected Node IDs must be EXACT node IDs as shown in the NODES sections (token before the first pipe) or listed under LOADED NODES (e.g., func_transfer, contract_Token, state_balances)\n"
+                "   - Use a comma-separated list of actual node IDs. Do NOT invent new IDs or use descriptions.\n"
                 "   - You MUST provide at least one valid node ID for each hypothesis\n"
                 "   - Affected Code should reference concrete functions/files if possible.\n\n"
                 "2) GUIDANCE (next steps for the Scout):\n"
