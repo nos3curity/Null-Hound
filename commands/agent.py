@@ -1715,13 +1715,15 @@ class AgentRunner:
                     status = "[dim]PENDING[/dim]"
                 
                 goal = getattr(it, 'goal', '')
-                # Determine phase based on category and current phase
-                current_phase = getattr(self, '_current_phase', None)
                 category = getattr(it, 'category', '-')
-                if current_phase == 'Coverage' or category == 'aspect':
+                # Determine phase from current audit phase only (category is shown separately)
+                current_phase = getattr(self, '_current_phase', None)
+                if current_phase == 'Coverage':
                     phase_label = "[cyan]1 - Sweep[/cyan]"
-                else:
+                elif current_phase == 'Saliency':
                     phase_label = "[magenta]2 - Intuition[/magenta]"
+                else:
+                    phase_label = "[dim]-[/dim]"
                 priority = str(getattr(it, 'priority', '-'))
                 impact = getattr(it, 'expected_impact', '-')
                 
