@@ -195,54 +195,7 @@ class Strategist:
         hypotheses_str = hypotheses_summary or "(no hypotheses formed yet)"
         coverage_str = coverage_summary or "(no coverage data)"
 
-        # Extract unvisited targets (node IDs, possibly annotated as id@Graph) from coverage summary
-        def _extract_unvisited_targets(text: str) -> list[str]:
-            if not text:
-                return []
-            ids: list[str] = []
-            try:
-                import re
-                lines = [ln.rstrip() for ln in text.splitlines()]
-                # Parse explicit candidate list
-                start = -1
-                for i, ln in enumerate(lines):
-                    if ln.strip().startswith('CANDIDATE COMPONENTS (unvisited):'):
-                        start = i + 1
-                        break
-                if start >= 0:
-                    for ln in lines[start:]:
-                        s = ln.strip()
-                        if not s or not (s.startswith('- ') or s.startswith('* ')):
-                            break
-                        # Pattern: "- Label (node_id)"
-                        m = re.search(r"\(([A-Za-z0-9_\-\.]+)\)", s)
-                        if m:
-                            ids.append(m.group(1))
-                # Parse unvisited nodes sample: "Unvisited nodes: N (sample: id@Graph, ...)"
-                for ln in lines:
-                    if ln.lower().startswith('unvisited nodes:') and 'sample:' in ln.lower():
-                        # After 'sample:' comma-separated
-                        try:
-                            sample = ln.split('sample:', 1)[1]
-                        except Exception:
-                            sample = ''
-                        for tok in sample.split(','):
-                            t = tok.strip().strip(')').strip('(')
-                            if t:
-                                ids.append(t)
-                        break
-            except Exception:
-                pass
-            # Deduplicate, preserve order
-            out: list[str] = []
-            seen: set[str] = set()
-            for i in ids:
-                if i not in seen:
-                    out.append(i)
-                    seen.add(i)
-            return out[:8]
-
-        coverage_targets = _extract_unvisited_targets(coverage_str)
+        # Coverage targets extraction removed - not needed without coverage top-up
         
         # Calculate planning iteration count (this is passed as part of completed list)
         planning_iteration = len(completed) // n + 1 if n > 0 else 1
@@ -306,12 +259,7 @@ class Strategist:
                 f"  - \"Deep dive: authorization bypass in [critical function]\"\n\n"
                 f"Category: Primarily 'suspicion' for specific high-impact bugs\n"
                 f"Approach: Follow your intuition about what feels most vulnerable\n\n"
-                f"COVERAGE TOP-UP (do this even in intuition mode):\n"
-                f"- If COVERAGE STATUS lists unvisited items (see below), include at least 1–2 'aspect' investigations targeting them.\n"
-                f"- Use focus_areas to point at exact targets (e.g., node_id@GraphName).\n"
-                f"- Prefer items from 'CANDIDATE COMPONENTS (unvisited)' or the Unvisited nodes sample.\n\n"
-                + ("UNVISITED TARGETS (from coverage):\n- " + "\n- ".join(coverage_targets) + "\n\n" if coverage_targets else "")
-                + "For each investigation, include WHY NOW and EXIT CRITERIA in 'reasoning'."
+                f"For each investigation, include WHY NOW and EXIT CRITERIA in 'reasoning'."
             )
         else:
             # Auto mode - include both descriptions
@@ -321,9 +269,7 @@ class Strategist:
                 f"Plan the top {n} NEW investigations.\n\n"
                 f"Determine phase based on coverage percentage and adapt strategy accordingly.\n"
                 f"If coverage < 90%, use Coverage mode. Otherwise, use Intuition mode.\n\n"
-                f"COVERAGE TOP-UP: Regardless of phase, if unvisited items are listed below, include at least one 'aspect' investigation that targets them and sets focus_areas to id@GraphName.\n\n"
-                + ("UNVISITED TARGETS (from coverage):\n- " + "\n- ".join(coverage_targets) + "\n\n" if coverage_targets else "")
-                + "For each investigation, include WHY NOW and EXIT CRITERIA in 'reasoning'."
+                f"For each investigation, include WHY NOW and EXIT CRITERIA in 'reasoning'."
             )
 
         # Allow fine-grained reasoning control for planning step
@@ -346,21 +292,12 @@ class Strategist:
                 "category": it.category,
                 "expected_impact": it.expected_impact,
             })
-        # If in intuition mode and no coverage item was produced but we have targets, synthesize one compact 'aspect' plan
-        try:
-            if (phase_hint == 'Saliency' or (phase_hint or '').lower() == 'intuition') and coverage_targets and not any(str(d.get('category','')).lower() == 'aspect' for d in items):
-                target = coverage_targets[0]
-                fa = target if '@' in target else f"{target}@SystemArchitecture"
-                items.insert(0, {
-                    "goal": f"Coverage top-up: Vulnerability analysis of {target}",
-                    "focus_areas": [fa],
-                    "priority": 6,
-                    "reasoning": "Ensure unvisited code is inspected; map entrypoints/auth/dataflow.",
-                    "category": "aspect",
-                    "expected_impact": "medium",
-                })
-        except Exception:
-            pass
+        # DISABLED: Coverage top-up removed because we don't have card count information
+        # To properly implement this, we would need:
+        # 1. Number of code cards per node
+        # 2. Number of visited cards per node
+        # Then we could prioritize nodes with many unvisited cards
+        pass
         return items
 
     def revise_after(self, last_result: dict[str, Any]) -> None:
