@@ -1919,6 +1919,32 @@ class AgentRunner:
                         hypotheses_formed = result.get('hypotheses_formed', 0)
                         if hypotheses_formed > 0:
                             console.print(f"[bold green]✓ Added {hypotheses_formed} hypothesis(es) to global store[/bold green]")
+                        # Show dedup skip summary (if any)
+                        try:
+                            dd = int(result.get('dedup_skipped', 0) or 0)
+                            details = result.get('dedup_details') or []
+                            if dd or details:
+                                console.print(f"[dim]Skipped as duplicates: {dd or len(details)}[/dim]")
+                                # Print a few examples to aid debugging
+                                for line in details[:3]:
+                                    s = str(line)
+                                    if len(s) > 120:
+                                        s = s[:117] + '...'
+                                    console.print(f"  - {s}")
+                        except Exception:
+                            pass
+                        # Show format/skipping reasons (e.g., missing node IDs)
+                        try:
+                            no_nodes = result.get('skipped_no_node_ids') or []
+                            if no_nodes:
+                                console.print(f"[dim]Skipped (no node IDs): {len(no_nodes)}[/dim]")
+                                for t in no_nodes[:3]:
+                                    s = str(t)
+                                    if len(s) > 120:
+                                        s = s[:117] + '...'
+                                    console.print(f"  - {s}")
+                        except Exception:
+                            pass
                         console.print()
                     else:
                         # Strategist failed - show the error

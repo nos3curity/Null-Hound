@@ -1859,6 +1859,7 @@ DO NOT include any text before or after the JSON object."""
                 items = strategist.deep_think(context=context) or []
             added = 0
             dedup_skipped = 0
+            dedup_details: list[str] = []
             titles: list[str] = []
             hyp_info: list[dict] = []
             guidance_model_info = None
@@ -1896,6 +1897,7 @@ DO NOT include any text before or after the JSON object."""
                         'node_refs': params.get('node_ids') or [],
                     }
                     is_dup = False
+                    found_dup_ids: list[str] | None = None
                     batch_size = 20
                     for i in range(0, len(existing_hyps), batch_size):
                         batch = existing_hyps[i:i+batch_size]
@@ -1907,9 +1909,18 @@ DO NOT include any text before or after the JSON object."""
                         )
                         if dup_ids:
                             is_dup = True
+                            found_dup_ids = list(dup_ids)
                             break
                     if is_dup:
                         dedup_skipped += 1
+                        try:
+                            title = params.get('description', 'Hypothesis')
+                            if found_dup_ids:
+                                dedup_details.append(f"LLM-dedup: {title} (similar to {', '.join(found_dup_ids)})")
+                            else:
+                                dedup_details.append(f"LLM-dedup: {title}")
+                        except Exception:
+                            pass
                         # Skip forming duplicate
                         continue
                 except Exception:
@@ -1944,12 +1955,30 @@ DO NOT include any text before or after the JSON object."""
                         })
                     except Exception:
                         pass
+                else:
+                    # Record store-level duplicate reasons (or other failures) compactly
+                    try:
+                        summary = (res or {}).get('summary', '') if isinstance(res, dict) else ''
+                        title = params.get('description', 'Hypothesis')
+                        if 'Duplicate title:' in summary or 'Similar to existing:' in summary:
+                            dedup_skipped += 1
+                            dedup_details.append(f"Store-dedup: {title} — {summary.replace('Failed: ', '')}")
+                    except Exception:
+                        pass
             # Include raw strategist output if available for CLI display
             full_raw = None
             try:
                 full_raw = getattr(strategist, 'last_raw', None)
             except Exception:
                 full_raw = None
+            # Collect skip info from strategist (e.g., no-node-id cases)
+            skipped_no_node_ids: list[str] = []
+            try:
+                _sk = getattr(strategist, 'last_skipped', None) or {}
+                if isinstance(_sk, dict):
+                    skipped_no_node_ids = list(_sk.get('no_node_ids') or [])
+            except Exception:
+                skipped_no_node_ids = []
             # Heuristic guidance extraction for CLI display: pull bullet points after a GUIDANCE header
             guidance_bullets: list[str] = []
             try:
@@ -1987,7 +2016,10 @@ DO NOT include any text before or after the JSON object."""
                 'hypothesis_titles': titles,
                 'hypotheses_info': hyp_info,
                 'full_response': full_raw or '',
-                'guidance_bullets': guidance_bullets
+                'guidance_bullets': guidance_bullets,
+                'dedup_skipped': dedup_skipped,
+                'dedup_details': dedup_details,
+                'skipped_no_node_ids': skipped_no_node_ids,
             }
         except Exception as e:
             return {'status': 'error', 'error': str(e)}
