@@ -49,6 +49,35 @@ def check_duplicates_llm(
     if not client:
         return set()
 
+    # Pre-filter: require meaningful, non-generic node overlap to consider duplicates
+    def _normalize_nodes(nodes: list[str] | None) -> set[str]:
+        bad = {"", "system", "root", "project", "SystemArchitecture"}
+        out = set()
+        for n in (nodes or []):
+            s = str(n).strip()
+            if s and s not in bad:
+                out.add(s)
+        return out
+
+    cand_nodes = _normalize_nodes(new_hypothesis.get("node_refs"))
+    # If candidate has no specific nodes, be conservative: rely on exact-title store dedup only
+    if not cand_nodes:
+        return set()
+    # Keep only existing items with overlapping specific nodes
+    _filtered: list[dict[str, Any]] = []
+    for h in existing_batch:
+        if _normalize_nodes(h.get("node_refs")) & cand_nodes:
+            # Require same vulnerability type when available
+            try:
+                vt_new = (new_hypothesis.get("vulnerability_type") or "").strip().lower()
+                vt_old = (h.get("vulnerability_type") or "").strip().lower()
+            except Exception:
+                vt_new = vt_old = ""
+            if not vt_new or not vt_old or vt_new == vt_old:
+                _filtered.append(h)
+    if not _filtered:
+        return set()
+
     # Minimal, clear prompt for robust judging
     system = (
         "You are a fast, precise deduplication helper for security hypotheses.\n"
@@ -74,7 +103,7 @@ def check_duplicates_llm(
         )
 
     existing_lines = []
-    for i, h in enumerate(existing_batch, 1):
+    for i, h in enumerate(_filtered, 1):
         existing_lines.append(f"[{i}]\n" + _fmt_h(h))
 
     user = (
