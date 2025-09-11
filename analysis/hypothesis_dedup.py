@@ -52,11 +52,14 @@ def check_duplicates_llm(
     # Minimal, clear prompt for robust judging
     system = (
         "You are a fast, precise deduplication helper for security hypotheses.\n"
-        "Two items are duplicates iff they describe essentially the same problem:\n"
-        "- Same or highly similar root cause and code path(s)\n"
-        "- Same contract/function(s)/state interaction, even with different wording\n"
-        "- Ignore minor phrasing differences and synonyms\n"
-        "They are NOT duplicates if the root cause, scope, or affected code paths are materially different.\n"
+        "Two items are duplicates iff they describe essentially the SAME bug:\n"
+        "- Same root cause AND same concrete code locus (same contract/function/state)\n"
+        "- Minor rewording or synonyms do NOT matter\n"
+        "They are NOT duplicates if the root cause, scope, or affected code paths differ.\n"
+        "Node guidance:\n"
+        "- Consider node_refs as the affected code. Require meaningful overlap in specific nodes (functions/contracts).\n"
+        "- Ignore generic placeholders like 'system' or 'root'.\n"
+        "- If the new item lacks specific nodes, be conservative: only mark duplicate if the title/desc clearly indicate the exact same function/contract and root cause.\n"
         "Return strict JSON only."
     )
 
@@ -88,4 +91,3 @@ def check_duplicates_llm(
     except Exception:
         # Never block on dedup failures
         return set()
-

@@ -1942,17 +1942,49 @@ class AgentRunner:
                             hyp_info = result.get('hypotheses_info') or []
                             dedup_details = result.get('dedup_details') or []
                             
-                            # Build status map
+                            # Build status map and duplicate-of mapping
                             added_titles = {h.get('title') for h in hyp_info if h.get('title')}
-                            dedup_map = {}
+                            dedup_map: dict[str, str] = {}
+                            dup_ids_by_title: dict[str, list[str]] = {}
+                            try:
+                                import re as _re
+                                _id_re = _re.compile(r"hyp_[0-9a-f]{12}")
+                            except Exception:
+                                _id_re = None  # type: ignore[assignment]
                             for detail in dedup_details:
-                                if ':' in str(detail):
-                                    parts = str(detail).split(':', 1)
-                                    if len(parts) > 1:
-                                        title_part = parts[1].strip()
-                                        if '(' in title_part:
-                                            title = title_part.split('(')[0].strip()
-                                            dedup_map[title] = detail
+                                s = str(detail)
+                                if ':' in s:
+                                    title_part = s.split(':', 1)[1].strip()
+                                    # Stop before '(' or '—' separators if present
+                                    for _sep in ('(', '—'):
+                                        if _sep in title_part:
+                                            title_part = title_part.split(_sep)[0].strip()
+                                            break
+                                    if title_part:
+                                        dedup_map[title_part] = s
+                                        # Extract any hyp IDs from detail
+                                        try:
+                                            if _id_re:
+                                                ids = _id_re.findall(s)
+                                                if ids:
+                                                    dup_ids_by_title[title_part] = ids[:3]
+                                        except Exception:
+                                            pass
+                            # Load id->title mapping from hypotheses.json for nicer display
+                            id_to_title: dict[str, str] = {}
+                            try:
+                                from pathlib import Path as _Path
+                                hyp_file = (_Path(self.project_dir) / 'hypotheses.json') if self.project_dir else None
+                                if hyp_file and hyp_file.exists():
+                                    import json as _json2
+                                    with open(hyp_file) as _f:
+                                        _data = _json2.load(_f)
+                                    for _hid, _h in (_data.get('hypotheses') or {}).items():
+                                        # Prefer explicit id field, fallback to key
+                                        _key = _h.get('id') or _hid
+                                        id_to_title[_key] = _h.get('title', '')
+                            except Exception:
+                                id_to_title = {}
                             
                             for i, h in enumerate(strategist_hypotheses, 1):
                                 title = h.get('title', 'Unknown')
@@ -1971,7 +2003,19 @@ class AgentRunner:
                                 if title in added_titles:
                                     status = "[bold green]✓ ADDED[/bold green]"
                                 elif title in dedup_map:
-                                    status = "[yellow]⊘ DUPLICATE[/yellow]"
+                                    # Compose duplicate-of suffix with IDs and titles if available
+                                    dup_suffix = ""
+                                    try:
+                                        ids = dup_ids_by_title.get(title) or []
+                                        if ids:
+                                            parts: list[str] = []
+                                            for _id in ids:
+                                                _t = (id_to_title.get(_id) or '').strip()
+                                                parts.append(f"{_id}{(' [' + _t + ']') if _t else ''}")
+                                            dup_suffix = f" → duplicate of: {', '.join(parts)}"
+                                    except Exception:
+                                        dup_suffix = ""
+                                    status = f"[yellow]⊘ DUPLICATE[/yellow]{dup_suffix}"
                                 else:
                                     # Check if it was skipped for other reasons
                                     if not h.get('node_ids'):

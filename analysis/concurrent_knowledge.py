@@ -188,39 +188,11 @@ class HypothesisStore(ConcurrentFileStore):
         def update(data):
             hypotheses = data["hypotheses"]
             
-            # Improved duplicate check with similarity detection
+            # Duplicate check: keep conservative to allow multiple issues on same nodes
             for h_id, h in hypotheses.items():
-                # Check exact title match (case-insensitive)
-                if h["title"].lower() == hypothesis.title.lower():
+                # Exact title match (case-insensitive)
+                if (h.get("title", "").lower() or "") == hypothesis.title.lower():
                     return data, (False, f"Duplicate title: {h_id}")
-                
-                # Check for similar hypotheses (same vulnerability type and nodes)
-                if (h.get("vulnerability_type", "").lower() == hypothesis.vulnerability_type.lower() and
-                    set(h.get("node_refs", [])) & set(hypothesis.node_refs)):  # Overlapping nodes
-                    # Check description similarity
-                    existing_desc = h.get("description", "").lower()
-                    new_desc = hypothesis.description.lower()
-                    
-                    # Simple similarity check - if key terms overlap significantly
-                    existing_terms = set(existing_desc.split())
-                    new_terms = set(new_desc.split())
-                    
-                    # Remove common words
-                    common_words = {'the', 'a', 'an', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 
-                                   'by', 'from', 'as', 'is', 'was', 'are', 'were', 'be', 'been',
-                                   'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
-                                   'would', 'could', 'should', 'may', 'might', 'must', 'can', 'that',
-                                   'this', 'these', 'those', 'and', 'or', 'but', 'if', 'because'}
-                    
-                    existing_terms = existing_terms - common_words
-                    new_terms = new_terms - common_words
-                    
-                    if existing_terms and new_terms:
-                        overlap = len(existing_terms & new_terms)
-                        similarity = overlap / min(len(existing_terms), len(new_terms))
-                        
-                        if similarity > 0.6:  # 60% similarity threshold
-                            return data, (False, f"Similar to existing: {h_id}")
             
             hypothesis.created_by = self.agent_id
             hypotheses[hypothesis.id] = asdict(hypothesis)
