@@ -295,7 +295,7 @@ A reasoning model reviews all hypotheses and updates their status based on evide
 
 # Include all findings (not just confirmed)
 # (Use on the report command, not finalize)
-./hound.py report myaudit --include-all
+./hound.py report myaudit --all
 ```
 
 **What happens during finalization:**
