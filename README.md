@@ -552,10 +552,3 @@ Monitor audit progress and completeness:
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
 
-## License
-
-Apache 2.0 with additional terms:
-
-You may use Hound however you want, except selling it as an online service or as an appliance - that requires written permission from the author.
-
-- See [LICENSE](LICENSE) for details.

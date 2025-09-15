@@ -208,19 +208,3 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ---
-
-Additional Terms for Hound
-=====================================
-The following additional terms apply to the use of Hound:
-
-1. **Permitted Activities**  
-   Hound may be freely used for research and bug hunting activities, including those generating commercial rewards (e.g., manual audits, bug bounty programs or audit contests). These activities do not require prior approval or a commercial agreement.
-
-2. **Commercial Use Restriction**  
-   Hound may not be used as a whole or substantial portion of it as part of a commercial product or online service without prior written consent from Bernhard Mueller.
-
-3. **Agreement for Commercial Use**  
-   Any entity wishing to use Hound for purposes beyond those described in section 2 (e.g., integrating Hound into commercial software or services) must enter into a commercial licensing agreement with Bernhard Mueller.  
-   - For inquiries regarding commercial licensing, please contact:  
-     **Bernhard Mueller**  
-     **Telegram**: https://t.me/berndtzl
