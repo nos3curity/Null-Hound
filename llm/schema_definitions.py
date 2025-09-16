@@ -52,6 +52,17 @@ def get_schema_definition(schema: type[BaseModel]) -> str:
   
 IMPORTANT: You MUST return an array with the exact number of investigations requested.""",
 
+        "PlanBatch": """Return JSON with these fields:
+- investigations: array of investigation items; for each item include:
+  - goal: string (investigation goal or question)
+  - focus_areas: array of strings (may be empty)
+  - priority: integer 1-10 (10 = highest urgency)
+  - reasoning: string explaining why now and exit criteria
+  - category: string ("aspect" or "suspicion")
+  - expected_impact: string ("high", "medium", or "low")
+
+Return exactly the number of investigations requested; if none apply, return an empty array.""",
+
         "AgentDecision": """Return JSON with these fields:
 - action: string (one of: load_graph, load_nodes, update_node, form_hypothesis, update_hypothesis, complete)
 - reasoning: string (your reasoning for this action)

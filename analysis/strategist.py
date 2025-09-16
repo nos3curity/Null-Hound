@@ -16,7 +16,7 @@ from llm.unified_client import UnifiedLLMClient
 class PlanItemSchema(BaseModel):
     goal: str = Field(description="Investigation goal or question")
     focus_areas: list[str] = Field(default_factory=list)
-    priority: int = Field(ge=1, le=10, description="1-10, 10 = highest")
+    priority: int = Field(default=5, ge=1, le=10, description="1-10, 10 = highest")
     reasoning: str = Field(default="", description="Why this is promising")
     category: str = Field(default="aspect", description="aspect | suspicion")
     expected_impact: str = Field(default="medium", description="high | medium | low")
@@ -224,6 +224,7 @@ class Strategist:
                 f"  • Pick medium-sized components: contracts, modules, classes (NOT individual functions)\n"
                 f"  • Goal format: \"Vulnerability analysis of [Component]\"\n"
                 f"  • Category: 'aspect' (always)\n"
+                f"  • Assign priority 1-10 (10 = highest) for each investigation\n"
                 f"  • One investigation per component, spread across different modules\n"
                 f"  • Exclude: interfaces, tests, mocks, vendor libraries\n"
                 f"  • Focus on achieving broad coverage of the codebase\n"
@@ -258,6 +259,7 @@ class Strategist:
                 f"  - \"Analyze contradiction: [assumption X] vs [observation Y]\"\n"
                 f"  - \"Deep dive: authorization bypass in [critical function]\"\n\n"
                 f"Category: Primarily 'suspicion' for specific high-impact bugs\n"
+                f"Priority: Assign 1-10 (10 = highest) based on anticipated impact\n"
                 f"Approach: Follow your intuition about what feels most vulnerable\n\n"
                 f"For each investigation, include WHY NOW and EXIT CRITERIA in 'reasoning'."
             )
