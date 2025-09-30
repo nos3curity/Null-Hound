@@ -6,7 +6,6 @@ __pycache__
 .hound_cache
 .hound_debug
 graph_results
-config.yaml
 htmlcov/
 chatbot/.active_project 
 

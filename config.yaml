@@ -1,0 +1,74 @@
+# Default configuration for Null-Hound
+
+# API keys configuration
+openai:
+  api_key_env: OPENAI_API_KEY
+  # base_url: https://api.openai.com
+
+gemini:
+  api_key_env: GOOGLE_API_KEY
+  vertex_ai:
+    enabled: false
+    project_id: ""
+    region: ""
+
+anthropic:
+  api_key_env: ANTHROPIC_API_KEY
+
+xai:
+  api_key_env: XAI_API_KEY
+
+# Model configuration with context limits
+models:
+  # Graph building model - needs large context
+  graph:
+    provider: gemini
+    model: gemini-2.5-pro
+    max_context: 1000000
+    thinking_enabled: true
+    thinking_budget: -1
+    
+  # Scout/agent model for exploration
+  scout:
+    provider: gemini
+    model: gemini-2.5-flash
+    max_context: 1000000
+  
+  # Strategic thinking model
+  # For planning and reasoning about security issues
+  strategist:
+    provider: gemini
+    model: gemini-2.5-pro
+    max_context: 1000000
+    plan_reasoning_effort: medium
+    hypothesize_reasoning_effort: high
+  
+  # Lightweight utility model for quick, low-cost tasks (e.g., dedup)
+  lightweight:
+    provider: gemini
+    model: gemini-2.5-flash
+  
+  # QA model
+  finalize:
+    provider: gemini
+    model: gemini-2.5-pro
+    reasoning_effort: high
+  
+  # Reporting model
+  reporting:
+    provider: gemini
+    model: gemini-2.5-pro
+
+# Global context settings (used when model doesn't specify max_context)
+context:
+  max_tokens: 1000000 
+  compression_threshold: 0.9  # Compress history when 90% full
+
+# Timeouts and retries
+timeouts:
+  request_seconds: 600  # 10 minutes for large graph building requests
+
+retries:
+  max_attempts: 5  # More attempts for flaky connections
+  backoff_min_seconds: 5  # Longer backoff for rate limiting
+  backoff_max_seconds: 30  # Up to 30 seconds between retries
