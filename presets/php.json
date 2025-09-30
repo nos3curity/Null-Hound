@@ -1,0 +1,119 @@
+{
+  "name": "php",
+  "description": "Preset optimized for PHP web application security auditing",
+
+  "extensions": {
+    ".php": 1.5,
+    ".inc": 1.2,
+    ".phtml": 1.2,
+    ".js": 0.8,
+    ".ts": 0.8,
+    ".sql": 1.1,
+    ".htaccess": 0.9,
+    ".env": 0.7,
+    ".json": 0.4,
+    ".xml": 0.5,
+    ".yml": 0.5,
+    ".yaml": 0.5,
+    ".md": 0.1
+  },
+
+  "path_boosts": [
+    {
+      "pattern": "(^|/)(app|src|lib|includes?|core)(/|$)",
+      "weight": 0.8,
+      "description": "Core application directories"
+    },
+    {
+      "pattern": "(^|/)(api|rest|graphql|endpoints?)(/|$)",
+      "weight": 1.0,
+      "description": "API endpoints"
+    },
+    {
+      "pattern": "(^|/)(auth|login|session|user)(/|$)",
+      "weight": 0.9,
+      "description": "Authentication and session management"
+    },
+    {
+      "pattern": "(^|/)(admin|dashboard|panel)(/|$)",
+      "weight": 0.8,
+      "description": "Admin interfaces"
+    },
+    {
+      "pattern": "(^|/)(controllers?|routes?|handlers?)(/|$)",
+      "weight": 0.7,
+      "description": "Request handling logic"
+    },
+    {
+      "pattern": "(^|/)(models?|database|db|repositories)(/|$)",
+      "weight": 0.6,
+      "description": "Database layer"
+    },
+    {
+      "pattern": "(^|/)(config|configuration)(/|$)",
+      "weight": 0.5,
+      "description": "Configuration files"
+    }
+  ],
+
+  "path_penalties": [
+    {
+      "pattern": "(^|/)(tests?|__tests__|testing|phpunit)(/|$)",
+      "weight": -2.0,
+      "description": "Test directories"
+    },
+    {
+      "pattern": "(^|/)(vendor|node_modules|packages)(/|$)",
+      "weight": -2.5,
+      "description": "Third-party dependencies"
+    },
+    {
+      "pattern": "(^|/)(cache|tmp|temp|logs?)(/|$)",
+      "weight": -1.8,
+      "description": "Cache and temporary directories"
+    },
+    {
+      "pattern": "(^|/)(public|assets|static|resources)(/|$)",
+      "weight": -0.6,
+      "description": "Static assets"
+    },
+    {
+      "pattern": "(^|/)(docs?|documentation|examples?)(/|$)",
+      "weight": -0.7,
+      "description": "Documentation directories"
+    },
+    {
+      "pattern": "(^|/)(migrations?|seeds?)(/|$)",
+      "weight": -0.5,
+      "description": "Database migrations and seeds"
+    },
+    {
+      "pattern": "\\.(test|spec)\\.php$",
+      "weight": -1.5,
+      "description": "Test files"
+    }
+  ],
+
+  "config_top_files": [
+    "composer.json",
+    "composer.lock",
+    ".htaccess",
+    "index.php",
+    "config.php",
+    "bootstrap.php",
+    ".env",
+    ".env.example"
+  ],
+
+  "entrypoint_patterns": [
+    "(^|/)index\\.php$",
+    "(^|/)public/index\\.php$",
+    "(^|/)web/index\\.php$",
+    "(^|/)app\\.php$",
+    "(^|/)bootstrap\\.php$"
+  ],
+
+  "llm_system_prompt": "You prioritize PHP web application files for a security audit. Goal: identify the most critical files for security review - focus on: SQL injection vulnerabilities, authentication/authorization flaws, input validation issues, file upload handlers, session management, API endpoints, admin interfaces, database queries, and user input processing. Avoid test files, vendor code, and static assets. Prioritize request handlers, authentication logic, and database interactions. Respond JSON only.",
+
+  "llm_instructions": "Return JSON with a single field \"prioritized\", an array of relpaths, in priority order. Focus on files with the highest security impact for web vulnerabilities (SQLi, XSS, auth bypass, file upload, etc.). Do not include any other fields."
+}
