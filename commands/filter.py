@@ -217,25 +217,17 @@ def heuristic_rank(items: list[FileInfo]) -> list[FileInfo]:
     return sorted(items, key=lambda x: (x.score, min(x.loc, 5000)), reverse=True)
 
 
-def llm_rerank(items: list[FileInfo], preset: dict, loader, model: str = 'gemini-2.5-pro', max_items: int = 300) -> list[str]:
-    """Use Gemini to rerank candidate files; returns list of relpaths in prioritized order."""
-    try:
-        import google.generativeai as genai
-    except Exception as e:
-        console.print(f"[red]Gemini library not available: {e}[/red]")
-        console.print("[yellow]Install with: pip install google-generativeai[/yellow]")
-        return [it.rel for it in items]
+def llm_rerank(items: list[FileInfo], preset: dict, loader, config: dict, model: str = 'gemini-2.5-pro', max_items: int = 300) -> list[str]:
+    """Use LLM to rerank candidate files; returns list of relpaths in prioritized order.
 
-    # Configure Gemini with API key from environment
-    try:
-        api_key = os.environ.get('GOOGLE_API_KEY')
-        if not api_key:
-            console.print("[red]GOOGLE_API_KEY environment variable not set[/red]")
-            return [it.rel for it in items]
-        genai.configure(api_key=api_key)
-    except Exception as e:
-        console.print(f"[red]Failed to configure Gemini: {e}[/red]")
-        return [it.rel for it in items]
+    Uses the project's UnifiedLLMClient which includes retry/backoff logic.
+    """
+    from llm.unified_client import UnifiedLLMClient
+    from pydantic import BaseModel, Field
+
+    # Define response schema
+    class FilterResponse(BaseModel):
+        prioritized: list[str] = Field(description="Array of relpaths in priority order")
 
     # Prepare compact JSON describing candidates
     sample = [
@@ -249,42 +241,54 @@ def llm_rerank(items: list[FileInfo], preset: dict, loader, model: str = 'gemini
         for it in items[:max_items]
     ]
 
-    # Get prompts from preset
-    system, instructions = loader.get_llm_prompts(preset)
+    # Build system prompt with preset-specific security focus
+    security_focus = loader.get_security_focus(preset)
+    system_prompt = (
+        f"You prioritize source files for a security audit whitelist. {security_focus}"
+    )
 
+    # Hardcoded response format instructions
     user_content = json.dumps({
         'candidates': sample,
-        'instructions': instructions
+        'instructions': (
+            'Return JSON with a single field "prioritized", an array of relpaths, in priority order. '
+            'Do not include any other fields or explanations.'
+        )
     }, indent=2)
 
     try:
-        with console.status("[cyan]Reranking with Gemini...", spinner="dots"):
+        with console.status("[cyan]Reranking with LLM...", spinner="dots"):
             t0 = time.time()
 
-            # Initialize the model
-            gemini_model = genai.GenerativeModel(
-                model_name=model,
-                generation_config={
-                    "temperature": 0.1,
-                    "response_mime_type": "application/json",
-                },
-                system_instruction=system
-            )
+            # Create a minimal config for the filter profile
+            # This ensures we use the project's retry/backoff logic
+            filter_config = {
+                **config,
+                "models": {
+                    "filter": {
+                        "provider": "gemini",
+                        "model": model
+                    }
+                }
+            }
 
-            # Generate response
-            response = gemini_model.generate_content(user_content)
+            # Use UnifiedLLMClient with retry/backoff support
+            client = UnifiedLLMClient(filter_config, profile="filter")
+            response = client.parse(
+                system=system_prompt,
+                user=user_content,
+                schema=FilterResponse
+            )
 
             console.print(f"[green]✓ Rerank completed in {time.time()-t0:.1f}s[/green]")
 
-        txt = response.text or '{}'
-        data = json.loads(txt)
-        arr = data.get('prioritized') or []
-        out = [p for p in arr if isinstance(p, str)]
+        out = response.prioritized
         if out:
             return out
         return [it.rel for it in items]
     except Exception as e:
         console.print(f"[red]LLM rerank failed: {e}[/red]")
+        console.print("[yellow]Falling back to heuristic ranking[/yellow]")
         return [it.rel for it in items]
 
 
@@ -321,6 +325,10 @@ def filter_files(project_name: str, limit_loc: int, model: str, max_llm_items: i
     """
     from commands.project import ProjectManager
     from utils.presets import get_preset_loader
+    from utils.config_loader import load_config
+
+    # Load project config (for LLM client)
+    config = load_config()
 
     # Load project
     manager = ProjectManager()
@@ -384,7 +392,7 @@ def filter_files(project_name: str, limit_loc: int, model: str, max_llm_items: i
     if verbose:
         console.print(f"[cyan]Reranking top {min(len(ranked), max_llm_items)} candidates with {model}...[/cyan]")
 
-    prioritized = llm_rerank(ranked, preset, loader, model=model, max_items=max_llm_items)
+    prioritized = llm_rerank(ranked, preset, loader, config, model=model, max_items=max_llm_items)
 
     # Keep only those we have, in that order, then append unseen from heuristic
     seen = set()

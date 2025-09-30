@@ -85,7 +85,14 @@
     "(^|/)src/main\\.(ts|tsx|js|jsx)$"
   ],
 
-  "llm_system_prompt": "You prioritize source files for a security audit whitelist. Goal: choose the most security-relevant files across the project: core logic, state, auth, interfaces, and important configs. Avoid tests/mocks/fixtures unless they contain unique logic. Prefer spread across critical components. Respond JSON only.",
+  "security_focus": "Choose the most security-relevant files across the project: core logic, state management, authentication, interfaces, and important configs. Avoid tests/mocks/fixtures unless they contain unique logic. Prefer spread across critical components.",
 
-  "llm_instructions": "Return JSON with a single field \"prioritized\", an array of relpaths, in priority order. Do not include any other fields."
+  "graphs": {
+    "primary": "SystemArchitecture",
+    "required": [
+      "Data flow graph showing how information moves through the system, tracking transformations and dependencies",
+      "Access control and permission model showing authorization boundaries and privilege levels"
+    ],
+    "default_additional": 2
+  }
 }

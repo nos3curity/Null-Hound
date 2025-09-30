@@ -20,11 +20,7 @@ pip install -r requirements.txt
 
 ```bash
 # Set up API keys
-export OPENAI_API_KEY=your_key_here
-export GOOGLE_API_KEY=your_gemini_key_here  # For filter command
-
-# Copy and edit config
-cp config.yaml.example config.yaml
+export GOOGLE_API_KEY=your_gemini_key_here
 ```
 
 ### Usage
@@ -36,9 +32,14 @@ cp config.yaml.example config.yaml
 # 2. Generate smart file filter
 ./hound.py filter myaudit
 
-# 3. Build knowledge graphs
-./hound.py graph build myaudit --auto --iterations 3 \
-  --files "$(cat ~/.hound/projects/myaudit/filters/filter.txt | tr '\n' ',')"
+# 3. Build knowledge graphs (uses preset configuration)
+./hound.py graph build myaudit
+
+# Or specify number of additional auto-generated graphs
+./hound.py graph build myaudit --graphs 5
+
+# Or disable additional graphs
+./hound.py graph build myaudit --graphs 0
 
 # 4. Run security audit (Phase 1: Sweep)
 ./hound.py agent audit myaudit --mode sweep

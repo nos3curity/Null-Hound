@@ -93,21 +93,32 @@ class PresetLoader:
         """Get entrypoint regex patterns."""
         return preset.get("entrypoint_patterns", [])
 
-    def get_llm_prompts(self, preset: dict[str, Any]) -> tuple[str, str]:
-        """Get LLM system prompt and instructions.
+    def get_security_focus(self, preset: dict[str, Any]) -> str:
+        """Get security focus guidance from preset.
 
         Returns:
-            (system_prompt, instructions) tuple
+            Security-specific guidance for file prioritization
         """
-        system = preset.get(
-            "llm_system_prompt",
-            "You prioritize source files for a security audit whitelist."
+        return preset.get(
+            "security_focus",
+            "Choose the most security-relevant files across the project."
         )
-        instructions = preset.get(
-            "llm_instructions",
-            'Return JSON with a single field "prioritized", an array of relpaths, in priority order.'
-        )
-        return system, instructions
+
+    def get_graph_specs(self, preset: dict[str, Any]) -> dict[str, Any]:
+        """Get graph specifications from preset.
+
+        Returns:
+            Dictionary with:
+            - primary: Name of primary graph (default: "SystemArchitecture")
+            - required: List of required graph descriptions
+            - default_additional: Number of additional auto-generated graphs
+        """
+        graphs = preset.get("graphs", {})
+        return {
+            "primary": graphs.get("primary", "SystemArchitecture"),
+            "required": graphs.get("required", []),
+            "default_additional": graphs.get("default_additional", 2)
+        }
 
 
 def get_preset_loader() -> PresetLoader:

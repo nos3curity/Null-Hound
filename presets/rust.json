@@ -64,7 +64,15 @@
     "(^|/)src/lib\\.rs$"
   ],
 
-  "llm_system_prompt": "You prioritize Rust source files for a security audit. Goal: identify the most critical code for security review - focus on: unsafe blocks, public APIs, FFI boundaries, parser/deserializer code, crypto operations, and privileged operations. Exclude test and benchmark code. Prioritize core logic over examples. Respond JSON only.",
+  "security_focus": "Identify the most critical code for security review. Focus on: unsafe blocks, public APIs, FFI boundaries, parser/deserializer code, cryptographic operations, and privileged operations. Pay special attention to code handling untrusted input or performing memory-unsafe operations.",
 
-  "llm_instructions": "Return JSON with a single field \"prioritized\", an array of relpaths, in priority order. Focus on files with the highest security impact. Do not include any other fields."
+  "graphs": {
+    "primary": "SystemArchitecture",
+    "required": [
+      "Unsafe code graph mapping all unsafe blocks, raw pointer usage, and FFI boundaries with their safety invariants and assumptions",
+      "Public API surface graph showing all publicly exposed functions, types, and their trust boundaries",
+      "Data flow graph for untrusted input showing how external data enters the system and where it's validated or sanitized"
+    ],
+    "default_additional": 2
+  }
 }

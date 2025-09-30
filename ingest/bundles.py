@@ -8,7 +8,11 @@ from pathlib import Path
 # Disable joblib parallelization to avoid multiprocessing warnings
 os.environ['JOBLIB_MULTIPROCESSING'] = '0'
 
-import networkx as nx
+try:
+    import networkx as nx
+except ImportError:
+    print("networkx not found. Please install it with: pip install networkx")
+    exit(1)
 from sklearn.cluster import SpectralClustering
 
 

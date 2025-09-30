@@ -186,227 +186,153 @@ def build(
             content = "\n".join(event_log[-12:]) if event_log else "Initializing..."
             return Panel(content, title="[bold cyan]Graph Build Progress[/bold cyan]", border_style="cyan")
 
-        use_live = (progress_console.is_terminal and not quiet)
-        if use_live:
-            live_ctx = Live(_panel(), console=progress_console, refresh_per_second=8, transient=True)
-        else:
-            # Dummy context manager
-            from contextlib import contextmanager
-            @contextmanager
-            def live_ctx_manager():
-                yield None
-            live_ctx = live_ctx_manager()
+        # Don't use Live display here - it conflicts with Progress display used later
+        # Just print logs directly
+        def log_line(kind: str, msg: str):
+            now = datetime.now().strftime('%H:%M:%S')
+            colors = {
+                'ingest': 'bright_yellow', 'build': 'bright_cyan', 'discover': 'bright_magenta', 'graph': 'bright_cyan',
+                'sample': 'bright_white', 'update': 'bright_green', 'warn': 'bright_red', 'save': 'bright_green', 'phase': 'bright_blue',
+                'stats': 'bright_white', 'start': 'bright_white', 'complete': 'bright_green'
+            }
+            color = colors.get(kind, 'white')
+            line = f"[{color}]{now}[/{color}] {msg}"
+            event_log.append(line)
+            if not quiet:
+                progress_console.print(line)
 
-        with live_ctx as live:
-            def log_line(kind: str, msg: str):
-                now = datetime.now().strftime('%H:%M:%S')
-                colors = {
-                    'ingest': 'bright_yellow', 'build': 'bright_cyan', 'discover': 'bright_magenta', 'graph': 'bright_cyan',
-                    'sample': 'bright_white', 'update': 'bright_green', 'warn': 'bright_red', 'save': 'bright_green', 'phase': 'bright_blue',
-                    'stats': 'bright_white', 'start': 'bright_white', 'complete': 'bright_green'
-                }
-                color = colors.get(kind, 'white')
-                line = f"[{color}]{now}[/{color}] {msg}"
-                event_log.append(line)
-                if use_live and live is not None:
-                    live.update(_panel())
-                elif not quiet:
-                    progress_console.print(line)
-
-            # Step 1: Ingestion (reused if manifest exists and reuse_ingestion=True)
-            reuse_ok = reuse_ingestion and (manifest_dir / 'manifest.json').exists() and (manifest_dir / 'cards.jsonl').exists()
-            if reuse_ok:
-                # Reuse existing manifest/cards; verify whitelist compatibility if provided
-                try:
-                    from analysis.graph_builder import GraphBuilder as _GB
-                    cards_loaded, manifest_loaded = _GB.load_cards_from_manifest(manifest_dir)
-                    mwl = set((manifest_loaded or {}).get('whitelist') or [])
-                    fwl = set(files_to_include or [])
-                    if files_to_include is not None and mwl and mwl != fwl:
-                        # Provided whitelist differs from stored one; rebuild ingestion
-                        reuse_ok = False
-                    else:
-                        wl_note = f" (whitelist: {len(mwl)} files)" if mwl else ""
-                        log_line('ingest', f"Reusing existing manifest: {manifest_loaded.get('num_files','?')} files → {len(cards_loaded)} cards{wl_note}")
-                except Exception:
+        # Step 1: Ingestion (reused if manifest exists and reuse_ingestion=True)
+        reuse_ok = reuse_ingestion and (manifest_dir / 'manifest.json').exists() and (manifest_dir / 'cards.jsonl').exists()
+        if reuse_ok:
+            # Reuse existing manifest/cards; verify whitelist compatibility if provided
+            try:
+                from analysis.graph_builder import GraphBuilder as _GB
+                cards_loaded, manifest_loaded = _GB.load_cards_from_manifest(manifest_dir)
+                mwl = set((manifest_loaded or {}).get('whitelist') or [])
+                fwl = set(files_to_include or [])
+                if files_to_include is not None and mwl and mwl != fwl:
+                    # Provided whitelist differs from stored one; rebuild ingestion
                     reuse_ok = False
-            if not reuse_ok:
-                log_line('ingest', 'Step 1: Repository Ingestion')
-                # Ensure manifest dir exists before saving
-                try:
-                    manifest_dir.mkdir(parents=True, exist_ok=True)
-                except Exception:
-                    pass
-                manifest = RepositoryManifest(str(repo_path), config, file_filter=files_to_include)
-                cards, files = manifest.walk_repository()
-                manifest.save_manifest(manifest_dir)
-                log_line('ingest', f"Ingested {len(files)} files → {len(cards)} cards")
-                bundler = AdaptiveBundler(cards, files, config)
-                bundles = bundler.create_bundles()
-                bundler.save_bundles(manifest_dir)
-                log_line('ingest', f"Created {len(bundles)} bundles")
-
-            # Step 2: Graph Building with detailed progress
-            console.print("\n[bold]Step 2:[/bold] Graph Construction")
-            focus_list = [f.strip() for f in focus_areas.split(",")] if focus_areas else None
-            if focus_list:
-                log_line('build', f"Focus areas: {', '.join(focus_list)}")
-
-            builder = GraphBuilder(config, debug=debug, debug_logger=debug_logger)
-
-            # Narrative model names: reflect effective models used by builder
-            try:
-                graph_model = getattr(builder.llm, 'model', None) or 'Graph-Model'
+                else:
+                    wl_note = f" (whitelist: {len(mwl)} files)" if mwl else ""
+                    log_line('ingest', f"Reusing existing manifest: {manifest_loaded.get('num_files','?')} files → {len(cards_loaded)} cards{wl_note}")
             except Exception:
-                graph_model = 'Graph-Model'
+                reuse_ok = False
+        if not reuse_ok:
+            log_line('ingest', 'Step 1: Repository Ingestion')
+            # Ensure manifest dir exists before saving
             try:
-                discovery_model = getattr(builder.llm_agent, 'model', None) or 'Guidance-Model'
+                manifest_dir.mkdir(parents=True, exist_ok=True)
             except Exception:
-                discovery_model = 'Guidance-Model'
+                pass
+            manifest = RepositoryManifest(str(repo_path), config, file_filter=files_to_include)
+            cards, files = manifest.walk_repository()
+            manifest.save_manifest(manifest_dir)
+            log_line('ingest', f"Ingested {len(files)} files → {len(cards)} cards")
+            bundler = AdaptiveBundler(cards, files, config)
+            bundles = bundler.create_bundles()
+            bundler.save_bundles(manifest_dir)
+            log_line('ingest', f"Created {len(bundles)} bundles")
 
-            # Animated progress bar during graph construction
-            iteration_total = max_iterations
-            if progress_console.is_terminal and not quiet:
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"),
-                    BarColumn(),
-                    TaskProgressColumn(),
-                    console=progress_console,
-                    transient=True,
-                ) as progress:
-                    task = progress.add_task(f"Constructing graphs (iteration 0/{iteration_total})...", total=iteration_total, completed=0)
+        # Step 2: Graph Building with detailed progress
+        console.print("\n[bold]Step 2:[/bold] Graph Construction")
+        focus_list = [f.strip() for f in focus_areas.split(",")] if focus_areas else None
+        if focus_list:
+            log_line('build', f"Focus areas: {', '.join(focus_list)}")
 
-                    def builder_callback(info):
-                        # Handles dict payloads from GraphBuilder._emit
-                        if isinstance(info, dict):
-                            msg = info.get('message', '')
-                            kind = info.get('status', 'build')
-                            # Narrative seasoning + progress description
-                            if kind == 'discover':
-                                line = random.choice([
-                                    f"🧑‍🏭 {discovery_model} scouts the terrain: {msg}",
-                                    f"🧑‍🏭 Strategist {discovery_model} surveys the codebase — bold move!",
-                                    msg,
-                                ])
-                                log_line(kind, line)
-                                progress.update(task, description=_short(line, 80))
-                            elif kind in ('graph_build', 'building'):
-                                line = random.choice([
-                                    f"🗺️  {graph_model} sketches connections — {msg}",
-                                    msg,
-                                ])
-                                log_line(kind, line)
-                                
-                                # Parse iteration from building messages
-                                import re
-                                m = re.search(r"iteration\s+(\d+)/(\d+)", msg)
-                                if m:
-                                    cur = int(m.group(1))
-                                    total = int(m.group(2))
-                                    if total != progress.tasks[task].total:
-                                        progress.update(task, total=total)
-                                    # Update both completed and description
-                                    completed = min(cur, total)
-                                    progress.update(task, completed=completed, description=f"Constructing graphs (iteration {cur}/{total})...")
-                                else:
-                                    progress.update(task, description=_short(line, 80))
-                            elif kind == 'update':
-                                line = random.choice([
-                                    f"🔧 {graph_model} chisels the graph: {msg}",
-                                    msg,
-                                ])
-                                log_line(kind, line)
-                                progress.update(task, description=_short(line, 80))
-                            elif kind == 'save':
-                                line = random.choice([
-                                    f"💾 {graph_model} files the maps: {msg}",
-                                    msg,
-                                ])
-                                log_line(kind, line)
-                                progress.update(task, description=_short(line, 80))
-                            else:
-                                log_line(kind, msg)
-                                # Try to parse iteration updates like "iteration X/Y"
-                                import re
-                                m = re.search(r"iteration\s+(\d+)/(\d+)", msg)
-                                if m:
-                                    cur = int(m.group(1))
-                                    total = int(m.group(2))
-                                    if total != progress.tasks[task].total:
-                                        progress.update(task, total=total)
-                                    # ensure non-decreasing
-                                    completed = min(max(cur, progress.tasks[task].completed or 0), total)
-                                    progress.update(task, completed=completed, description=f"Constructing graphs (iteration {cur}/{total})...")
-                                else:
-                                    # update description only
-                                    progress.update(task, description=_short(msg, 80))
-                        else:
-                            text = str(info)
-                            progress.update(task, description=_short(text, 80))
-                            log_line('build', text)
+        builder = GraphBuilder(config, debug=debug, debug_logger=debug_logger)
 
-                    # Prepare forced graph spec if requested
-                    forced = None
-                    _spec = with_spec or graph_spec
-                    if _spec:
-                        base_line = _spec.split('\n', 1)[0]
-                        base = ''.join(ch for ch in base_line if ch.isalnum() or ch in (' ','_','-'))
-                        nm = (base[:28].strip().replace(' ', '_') or 'CustomGraph')
-                        forced = [{"name": nm, "focus": _spec}]
+        # Narrative model names: reflect effective models used by builder
+        try:
+            graph_model = getattr(builder.llm, 'model', None) or 'Graph-Model'
+        except Exception:
+            graph_model = 'Graph-Model'
+        try:
+            discovery_model = getattr(builder.llm_agent, 'model', None) or 'Guidance-Model'
+        except Exception:
+            discovery_model = 'Guidance-Model'
 
-                    # Handle --init and --auto shortcuts
-                    effective_graphs = max_graphs
-                    if init:
-                        effective_graphs = 1
-                    elif auto:
-                        effective_graphs = 5
+        # Animated progress bar during graph construction
+        iteration_total = max_iterations
+        if progress_console.is_terminal and not quiet:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TaskProgressColumn(),
+                console=progress_console,
+                transient=True,
+            ) as progress:
+                task = progress.add_task(f"Constructing graphs (iteration 0/{iteration_total})...", total=iteration_total, completed=0)
 
-                    # Decide how many graphs to create in this run
-                    try:
-                        existing_count = len(list(graphs_dir.glob("graph_*.json"))) if refine_existing else 0
-                    except Exception:
-                        existing_count = 0
-                    to_create = effective_graphs if not refine_existing else max(0, effective_graphs - existing_count)
-
-                    # decide discovery skipping
-                    skip_disc = (False if (auto and to_create > 0) else True)
-                    if refine_only:
-                        skip_disc = True
-
-                    # If a forced spec is provided, do NOT load/refine existing graphs
-                    _refine_existing = False if forced else refine_existing
-
-                    results = builder.build(
-                        manifest_dir=manifest_dir,
-                        output_dir=graphs_dir,
-                        max_iterations=max_iterations,
-                        focus_areas=focus_list,
-                        max_graphs=(1 if forced else to_create),
-                        force_graphs=forced,
-                        refine_existing=_refine_existing,
-                        skip_discovery_if_existing=skip_disc,
-                        progress_callback=builder_callback,
-                        refine_only=([refine_only] if refine_only else None)
-                    )
-            else:
-                # Quiet/non-TTY: simple logging, no progress bar
                 def builder_callback(info):
+                    # Handles dict payloads from GraphBuilder._emit
                     if isinstance(info, dict):
                         msg = info.get('message', '')
                         kind = info.get('status', 'build')
-                        if not quiet:
-                            if kind == 'discover':
-                                log_line(kind, f"🧑‍🏭 {discovery_model} scouts the terrain: {msg}")
-                            elif kind in ('graph_build','building'):
-                                log_line(kind, f"🗺️  {graph_model} sketches connections — {msg}")
-                            elif kind == 'update':
-                                log_line(kind, f"🔧 {graph_model} chisels the graph: {msg}")
+                        # Narrative seasoning + progress description
+                        if kind == 'discover':
+                            line = random.choice([
+                                f"🧑‍🏭 {discovery_model} scouts the terrain: {msg}",
+                                f"🧑‍🏭 Strategist {discovery_model} surveys the codebase — bold move!",
+                                msg,
+                            ])
+                            log_line(kind, line)
+                            progress.update(task, description=_short(line, 80))
+                        elif kind in ('graph_build', 'building'):
+                            line = random.choice([
+                                f"🗺️  {graph_model} sketches connections — {msg}",
+                                msg,
+                            ])
+                            log_line(kind, line)
+                            
+                            # Parse iteration from building messages
+                            import re
+                            m = re.search(r"iteration\s+(\d+)/(\d+)", msg)
+                            if m:
+                                cur = int(m.group(1))
+                                total = int(m.group(2))
+                                if total != progress.tasks[task].total:
+                                    progress.update(task, total=total)
+                                # Update both completed and description
+                                completed = min(cur, total)
+                                progress.update(task, completed=completed, description=f"Constructing graphs (iteration {cur}/{total})...")
                             else:
-                                log_line(kind, msg)
+                                progress.update(task, description=_short(line, 80))
+                        elif kind == 'update':
+                            line = random.choice([
+                                f"🔧 {graph_model} chisels the graph: {msg}",
+                                msg,
+                            ])
+                            log_line(kind, line)
+                            progress.update(task, description=_short(line, 80))
+                        elif kind == 'save':
+                            line = random.choice([
+                                f"💾 {graph_model} files the maps: {msg}",
+                                msg,
+                            ])
+                            log_line(kind, line)
+                            progress.update(task, description=_short(line, 80))
+                        else:
+                            log_line(kind, msg)
+                            # Try to parse iteration updates like "iteration X/Y"
+                            import re
+                            m = re.search(r"iteration\s+(\d+)/(\d+)", msg)
+                            if m:
+                                cur = int(m.group(1))
+                                total = int(m.group(2))
+                                if total != progress.tasks[task].total:
+                                    progress.update(task, total=total)
+                                # ensure non-decreasing
+                                completed = min(max(cur, progress.tasks[task].completed or 0), total)
+                                progress.update(task, completed=completed, description=f"Constructing graphs (iteration {cur}/{total})...")
+                            else:
+                                # update description only
+                                progress.update(task, description=_short(msg, 80))
                     else:
-                        if not quiet:
-                            log_line('build', str(info))
+                        text = str(info)
+                        progress.update(task, description=_short(text, 80))
+                        log_line('build', text)
 
                 # Prepare forced graph spec if requested
                 forced = None
@@ -417,18 +343,21 @@ def build(
                     nm = (base[:28].strip().replace(' ', '_') or 'CustomGraph')
                     forced = [{"name": nm, "focus": _spec}]
 
+                # Handle --init and --auto shortcuts
                 effective_graphs = max_graphs
                 if init:
                     effective_graphs = 1
                 elif auto:
                     effective_graphs = 5
 
+                # Decide how many graphs to create in this run
                 try:
                     existing_count = len(list(graphs_dir.glob("graph_*.json"))) if refine_existing else 0
                 except Exception:
                     existing_count = 0
                 to_create = effective_graphs if not refine_existing else max(0, effective_graphs - existing_count)
 
+                # decide discovery skipping
                 skip_disc = (False if (auto and to_create > 0) else True)
                 if refine_only:
                     skip_disc = True
@@ -448,52 +377,111 @@ def build(
                     progress_callback=builder_callback,
                     refine_only=([refine_only] if refine_only else None)
                 )
-    
-            # Display results in a nice table
-            if results['graphs']:
-                table = Table(title="Generated Graphs", box=box.SIMPLE_HEAD)
-                table.add_column("Graph", style="cyan", no_wrap=True)
-                table.add_column("Nodes", justify="right", style="green")
-                table.add_column("Edges", justify="right", style="green")
-                table.add_column("Focus", style="dim")
-        
-                total_nodes = 0
-                total_edges = 0
-                
-                for name, path in results['graphs'].items():
-                    with open(path) as f:
-                        graph_data = json.load(f)
-                    stats = graph_data.get('stats', {})
-                    nodes = stats.get('num_nodes', 0)
-                    edges = stats.get('num_edges', 0)
-                    focus = graph_data.get('focus', 'general')
-                    
-                    table.add_row(
-                        graph_data.get('name', name),
-                        str(nodes),
-                        str(edges),
-                        focus
-                    )
-                    total_nodes += nodes
-                    total_edges += edges
-                
-                console.print(table)
-                console.print(f"\n  [bold]Total:[/bold] {total_nodes} nodes, {total_edges} edges")
-    
-            # Step 3: Visualization
-            if visualize:
-                console.print("\n[bold]Step 3:[/bold] Visualization")
-                if progress_console.is_terminal and not quiet:
-                    # small spinner while generating viz
-                    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=progress_console, transient=True) as p:
-                        t = p.add_task("Generating interactive visualization...", total=None)
-                        html_path = generate_dynamic_visualization(graphs_dir)
-                        p.update(t, completed=1)
+        else:
+            # Quiet/non-TTY: simple logging, no progress bar
+            def builder_callback(info):
+                if isinstance(info, dict):
+                    msg = info.get('message', '')
+                    kind = info.get('status', 'build')
+                    if not quiet:
+                        if kind == 'discover':
+                            log_line(kind, f"🧑‍🏭 {discovery_model} scouts the terrain: {msg}")
+                        elif kind in ('graph_build','building'):
+                            log_line(kind, f"🗺️  {graph_model} sketches connections — {msg}")
+                        elif kind == 'update':
+                            log_line(kind, f"🔧 {graph_model} chisels the graph: {msg}")
+                        else:
+                            log_line(kind, msg)
                 else:
+                    if not quiet:
+                        log_line('build', str(info))
+
+            # Prepare forced graph spec if requested
+            forced = None
+            _spec = with_spec or graph_spec
+            if _spec:
+                base_line = _spec.split('\n', 1)[0]
+                base = ''.join(ch for ch in base_line if ch.isalnum() or ch in (' ','_','-'))
+                nm = (base[:28].strip().replace(' ', '_') or 'CustomGraph')
+                forced = [{"name": nm, "focus": _spec}]
+
+            effective_graphs = max_graphs
+            if init:
+                effective_graphs = 1
+            elif auto:
+                effective_graphs = 5
+
+            try:
+                existing_count = len(list(graphs_dir.glob("graph_*.json"))) if refine_existing else 0
+            except Exception:
+                existing_count = 0
+            to_create = effective_graphs if not refine_existing else max(0, effective_graphs - existing_count)
+
+            skip_disc = (False if (auto and to_create > 0) else True)
+            if refine_only:
+                skip_disc = True
+
+            # If a forced spec is provided, do NOT load/refine existing graphs
+            _refine_existing = False if forced else refine_existing
+
+            results = builder.build(
+                manifest_dir=manifest_dir,
+                output_dir=graphs_dir,
+                max_iterations=max_iterations,
+                focus_areas=focus_list,
+                max_graphs=(1 if forced else to_create),
+                force_graphs=forced,
+                refine_existing=_refine_existing,
+                skip_discovery_if_existing=skip_disc,
+                progress_callback=builder_callback,
+                refine_only=([refine_only] if refine_only else None)
+            )
+    
+        # Display results in a nice table
+        if results['graphs']:
+            table = Table(title="Generated Graphs", box=box.SIMPLE_HEAD)
+            table.add_column("Graph", style="cyan", no_wrap=True)
+            table.add_column("Nodes", justify="right", style="green")
+            table.add_column("Edges", justify="right", style="green")
+            table.add_column("Focus", style="dim")
+        
+            total_nodes = 0
+            total_edges = 0
+            
+            for name, path in results['graphs'].items():
+                with open(path) as f:
+                    graph_data = json.load(f)
+                stats = graph_data.get('stats', {})
+                nodes = stats.get('num_nodes', 0)
+                edges = stats.get('num_edges', 0)
+                focus = graph_data.get('focus', 'general')
+                
+                table.add_row(
+                    graph_data.get('name', name),
+                    str(nodes),
+                    str(edges),
+                    focus
+                )
+                total_nodes += nodes
+                total_edges += edges
+            
+            console.print(table)
+            console.print(f"\n  [bold]Total:[/bold] {total_nodes} nodes, {total_edges} edges")
+    
+        # Step 3: Visualization
+        if visualize:
+            console.print("\n[bold]Step 3:[/bold] Visualization")
+            if progress_console.is_terminal and not quiet:
+                # small spinner while generating viz
+                with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=progress_console, transient=True) as p:
+                    t = p.add_task("Generating interactive visualization...", total=None)
                     html_path = generate_dynamic_visualization(graphs_dir)
-                log_line('save', f"Visualization saved: {html_path}")
-                console.print(f"\n[bold]Open in browser:[/bold] [link]file://{html_path.resolve()}[/link]")
-                console.print(f"\n[dim]Tip: Use 'hound graph export {repo_name} --open' to regenerate and open visualization[/dim]")
+                    p.update(t, completed=1)
+            else:
+                html_path = generate_dynamic_visualization(graphs_dir)
+            log_line('save', f"Visualization saved: {html_path}")
+            console.print(f"\n[bold]Open in browser:[/bold] [link]file://{html_path.resolve()}[/link]")
+            console.print(f"\n[dim]Tip: Use 'hound graph export {repo_name} --open' to regenerate and open visualization[/dim]")
     
         # Finalize debug log if enabled
         if debug and debug_logger:

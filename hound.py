@@ -569,7 +569,7 @@ def graph_build(
     project: str = typer.Option(None, "--project", "-p", help="Use an existing project by name"),
     create_project: bool = typer.Option(False, "--create-project", help="Create a new project from the given source path"),
     iterations: int = typer.Option(3, "--iterations", "-i", help="Maximum iterations for graph refinement"),
-    graphs: int = typer.Option(5, "--graphs", "-g", help="Number of graphs to generate (ignored if --graph-spec is set)"),
+    graphs: int = typer.Option(None, "--graphs", "-g", help="Number of additional auto-generated graphs (defaults to preset value)"),
     focus: str = typer.Option(None, "--focus", "-f", help="Comma-separated focus areas"),
     files: str = typer.Option(None, "--files", help="Comma-separated list of file paths to include"),
     with_spec: str = typer.Option(None, "--with-spec", help="Build exactly one graph described by this text (skips discovery for others)"),
@@ -577,11 +577,16 @@ def graph_build(
     refine_existing: bool = typer.Option(True, "--refine-existing/--no-refine-existing", help="Load and refine existing graphs in the project directory"),
     init: bool = typer.Option(False, "--init", help="Initialize graphs by creating ONLY the SystemArchitecture graph"),
     auto: bool = typer.Option(False, "--auto", help="Auto-generate a default set of graphs (5)"),
+    regenerate: bool = typer.Option(False, "--regenerate", help="Delete and rebuild existing graphs"),
     reuse_ingestion: bool = typer.Option(True, "--reuse-ingestion/--no-reuse-ingestion", help="Reuse existing manifest/cards when present (faster)"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Reduce output and disable animations"),
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug output")
 ):
-    """Build system architecture graph from source code."""
+    """Build system architecture graph from source code.
+
+    Without --auto flag: Uses preset configuration to build primary graph + required graphs + additional auto-generated graphs.
+    With --auto flag: Uses old behavior (generates 5 graphs via discovery).
+    """
     
     manager = ProjectManager()
     resolved_project_name = None
@@ -623,14 +628,172 @@ def graph_build(
         console.print("[red]Error: Unable to resolve project name.[/red]")
         raise typer.Exit(1)
 
+    # Auto-load filter if it exists and --files not specified
+    if not files:
+        project_path = manager.get_project_path(resolved_project_name)
+        filter_file = project_path / "filters" / "filter.txt"
+        if filter_file.exists():
+            try:
+                filter_content = filter_file.read_text(encoding='utf-8').strip()
+                if filter_content:
+                    # Convert newline-separated to comma-separated
+                    files = ','.join(line.strip() for line in filter_content.split('\n') if line.strip())
+                    console.print(f"[cyan]Auto-loaded filter:[/cyan] {len(files.split(','))} files from {filter_file.name}")
+            except Exception as e:
+                console.print(f"[yellow]Warning: Failed to load filter file: {e}[/yellow]")
+
+    # Handle --regenerate flag: delete existing graphs
+    if regenerate:
+        project_path = manager.get_project_path(resolved_project_name)
+        graphs_dir = project_path / "graphs"
+        if graphs_dir.exists():
+            import shutil
+            graph_files = list(graphs_dir.glob("graph_*.json")) + list(graphs_dir.glob("graph_*.html"))
+            if graph_files:
+                console.print(f"[yellow]Deleting {len(graph_files)} existing graph files...[/yellow]")
+                for gf in graph_files:
+                    gf.unlink()
+                console.print("[green]✓ Existing graphs deleted[/green]\n")
+            else:
+                console.print("[dim]No existing graphs to delete[/dim]\n")
+
+    # Handle preset-based graph building when not in --auto or --init mode
     from commands.graph import build as graph_build_impl
-    # Prefer --with-spec over deprecated --graph-spec
+    from commands.graph import custom as graph_custom_impl
+
+    if not auto and not init and not with_spec and not graph_spec:
+        # Preset-based multi-graph building
+        from utils.presets import get_preset_loader
+        from datetime import datetime
+
+        # Load project config to get preset
+        project_path = manager.get_project_path(resolved_project_name)
+        project_config_file = project_path / "project.json"
+
+        if project_config_file.exists():
+            import json
+            with open(project_config_file) as f:
+                project_config = json.load(f)
+
+            preset_name = project_config.get("preset", "default")
+            loader = get_preset_loader()
+
+            try:
+                preset = loader.load(preset_name)
+                graph_specs = loader.get_graph_specs(preset)
+
+                console.print(f"[cyan]Using preset:[/cyan] {preset_name}")
+                console.print(f"[cyan]Building graphs:[/cyan] Primary + {len(graph_specs['required'])} required + {graphs if graphs is not None else graph_specs['default_additional']} additional\n")
+
+                # Create progress tracking
+                progress_log = []
+
+                def log_progress(msg: str):
+                    now = datetime.now().strftime('%H:%M:%S')
+                    progress_log.append(f"[cyan]{now}[/cyan] {msg}")
+
+                # 1. Build primary graph (SystemArchitecture or preset-defined)
+                log_progress(f"[bold cyan]Building primary graph: {graph_specs['primary']}[/bold cyan]")
+                console.print(progress_log[-1])
+
+                graph_build_impl(
+                    project_id=resolved_project_name,
+                    config_path=Path(config) if config else None,
+                    max_iterations=iterations,
+                    max_graphs=1,
+                    focus_areas=focus,
+                    file_filter=files,
+                    with_spec=None,
+                    graph_spec=None,
+                    refine_existing=refine_existing,
+                    init=True,
+                    auto=False,
+                    refine_only=None,
+                    reuse_ingestion=reuse_ingestion,
+                    visualize=True,
+                    debug=debug,
+                    quiet=quiet
+                )
+
+                log_progress(f"[green]✓ Primary graph complete[/green]")
+                console.print(progress_log[-1])
+
+                # 2. Build required graphs from preset
+                for i, required_spec in enumerate(graph_specs['required'], 1):
+                    log_progress(f"[bold cyan]Building required graph {i}/{len(graph_specs['required'])}[/bold cyan]")
+                    log_progress(f"[dim]{required_spec[:80]}...[/dim]" if len(required_spec) > 80 else f"[dim]{required_spec}[/dim]")
+                    console.print(progress_log[-2])
+                    console.print(progress_log[-1])
+
+                    graph_custom_impl(
+                        project_id=resolved_project_name,
+                        graph_spec_text=required_spec,
+                        config_path=Path(config) if config else None,
+                        iterations=iterations,
+                        file_filter=files,
+                        reuse_ingestion=True,
+                        debug=debug,
+                        quiet=quiet
+                    )
+
+                    log_progress(f"[green]✓ Required graph {i} complete[/green]")
+                    console.print(progress_log[-1])
+
+                # 3. Build additional auto-generated graphs
+                additional_count = graphs if graphs is not None else graph_specs['default_additional']
+                if additional_count > 0:
+                    log_progress(f"[bold cyan]Building {additional_count} additional auto-generated graphs[/bold cyan]")
+                    console.print(progress_log[-1])
+
+                    graph_build_impl(
+                        project_id=resolved_project_name,
+                        config_path=Path(config) if config else None,
+                        max_iterations=iterations,
+                        max_graphs=additional_count,
+                        focus_areas=focus,
+                        file_filter=files,
+                        with_spec=None,
+                        graph_spec=None,
+                        refine_existing=refine_existing,
+                        init=False,
+                        auto=True,
+                        refine_only=None,
+                        reuse_ingestion=True,
+                        visualize=True,
+                        debug=debug,
+                        quiet=quiet
+                    )
+
+                    log_progress(f"[green]✓ Additional graphs complete[/green]")
+                    console.print(progress_log[-1])
+
+                log_progress(f"[bold green]✓ All graphs built successfully[/bold green]")
+                console.print(progress_log[-1])
+
+                console.print(f"\n[bold green]✓ Completed preset-based graph building[/bold green]")
+                return
+
+            except typer.Exit:
+                # Let typer.Exit pass through (it's a clean exit, not an error)
+                raise
+            except (FileNotFoundError, ValueError, KeyError) as e:
+                # Only catch preset-loading errors, not graph building errors
+                if "preset" in str(e).lower() or "graph_specs" in str(e).lower():
+                    console.print(f"[yellow]Warning: Failed to use preset-based building: {e}[/yellow]")
+                    console.print("[yellow]Falling back to standard building...[/yellow]")
+                else:
+                    # Re-raise if it's not a preset error
+                    raise
+
+    # Standard/legacy graph building
     _spec = with_spec or graph_spec
+    max_graphs_val = graphs if graphs is not None else 5
+
     graph_build_impl(
         project_id=resolved_project_name,
         config_path=Path(config) if config else None,
         max_iterations=iterations,
-        max_graphs=graphs,
+        max_graphs=max_graphs_val,
         focus_areas=focus,
         file_filter=files,
         with_spec=_spec,
@@ -701,6 +864,20 @@ def graph_custom(
     Shows the designed schema on the CLI, then builds and refines the graph.
     """
     from commands.graph import custom as graph_custom_impl
+    manager = ProjectManager()
+
+    # Auto-load filter if it exists and --files not specified
+    if not files:
+        project_path = manager.get_project_path(project)
+        filter_file = project_path / "filters" / "filter.txt"
+        if filter_file.exists():
+            try:
+                filter_content = filter_file.read_text(encoding='utf-8').strip()
+                if filter_content:
+                    files = ','.join(line.strip() for line in filter_content.split('\n') if line.strip())
+                    console.print(f"[cyan]Auto-loaded filter:[/cyan] {len(files.split(','))} files from {filter_file.name}")
+            except Exception as e:
+                console.print(f"[yellow]Warning: Failed to load filter file: {e}[/yellow]")
 
     graph_custom_impl(
         project_id=project,
@@ -735,6 +912,19 @@ def graph_refine(
     if not all and not name:
         console.print("[red]Error:[/red] Specify a graph NAME or use --all.")
         raise typer.Exit(2)
+
+    # Auto-load filter if it exists and --files not specified
+    if not files:
+        project_path = manager.get_project_path(project)
+        filter_file = project_path / "filters" / "filter.txt"
+        if filter_file.exists():
+            try:
+                filter_content = filter_file.read_text(encoding='utf-8').strip()
+                if filter_content:
+                    files = ','.join(line.strip() for line in filter_content.split('\n') if line.strip())
+                    console.print(f"[cyan]Auto-loaded filter:[/cyan] {len(files.split(','))} files from {filter_file.name}")
+            except Exception as e:
+                console.print(f"[yellow]Warning: Failed to load filter file: {e}[/yellow]")
 
     # Pass a sentinel to activate strict refine mode for all graphs without filtering
     refine_only = name if not all else "__ALL__"

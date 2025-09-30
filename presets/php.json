@@ -113,7 +113,15 @@
     "(^|/)bootstrap\\.php$"
   ],
 
-  "llm_system_prompt": "You prioritize PHP web application files for a security audit. Goal: identify the most critical files for security review - focus on: SQL injection vulnerabilities, authentication/authorization flaws, input validation issues, file upload handlers, session management, API endpoints, admin interfaces, database queries, and user input processing. Avoid test files, vendor code, and static assets. Prioritize request handlers, authentication logic, and database interactions. Respond JSON only.",
+  "security_focus": "Identify the most critical files for web application security review. Focus on: SQL injection points, authentication/authorization logic, input validation, file upload handlers, session management, API endpoints, admin interfaces, database queries, and user input processing. Prioritize request handlers, authentication flows, and database interactions.",
 
-  "llm_instructions": "Return JSON with a single field \"prioritized\", an array of relpaths, in priority order. Focus on files with the highest security impact for web vulnerabilities (SQLi, XSS, auth bypass, file upload, etc.). Do not include any other fields."
+  "graphs": {
+    "primary": "SystemArchitecture",
+    "required": [
+      "Request routing and input handling graph showing all user input entry points, how data flows through controllers/handlers, and where validation occurs",
+      "Database interaction graph mapping all SQL queries, prepared statements, ORM usage, and potential injection points",
+      "Authentication and session flow graph showing login/logout paths, session creation/destruction, permission checks, and authentication bypass risks"
+    ],
+    "default_additional": 2
+  }
 }
