@@ -1262,7 +1262,9 @@ DO NOT include any text before or after the JSON object."""
                 return AgentDecision(**data)
                 
         except (json.JSONDecodeError, Exception) as e:
-            print(f"[!] JSON parsing failed: {e}")
+            # JSON parsing failed, try fallback parser (only log in debug mode)
+            if self.debug:
+                print(f"[!] JSON parsing failed: {e}")
             # Fallback to more robust parsing
             if response:
                 try:
@@ -1283,7 +1285,8 @@ DO NOT include any text before or after the JSON object."""
                             parameters={}
                         )
                 except Exception as e2:
-                    print(f"[!] Failed to parse response: {e2}")
+                    if self.debug:
+                        print(f"[!] Failed to parse response: {e2}")
             
             # Ultimate fallback - make a reasonable decision
             if not self.loaded_data['nodes']:

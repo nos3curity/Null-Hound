@@ -27,7 +27,7 @@ export GOOGLE_API_KEY=your_gemini_key_here
 
 ```bash
 # 1. Create project with preset (php, android or default)
-./hound.py project create myaudit /path/to/code solidity
+./hound.py project create myaudit /path/to/code php
 
 # 2. Generate smart file filter
 ./hound.py filter myaudit

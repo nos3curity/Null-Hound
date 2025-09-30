@@ -1,0 +1,191 @@
+{
+  "name": "nodejs",
+  "description": "Preset optimized for high-impact vulnerability discovery in Node.js applications",
+
+  "extensions": {
+    ".js": 1.5,
+    ".ts": 1.5,
+    ".jsx": 1.3,
+    ".tsx": 1.3,
+    ".mjs": 1.4,
+    ".cjs": 1.4,
+    ".json": 0.6,
+    ".env": 0.9,
+    ".yaml": 0.5,
+    ".yml": 0.5,
+    ".sql": 1.0,
+    ".graphql": 0.8,
+    ".md": 0.1
+  },
+
+  "path_boosts": [
+    {
+      "pattern": "(^|/)(src|lib|server|backend|api)(/|$)",
+      "weight": 0.9,
+      "description": "Core server-side code"
+    },
+    {
+      "pattern": "(^|/)(routes?|controllers?|handlers?|endpoints?)(/|$)",
+      "weight": 1.2,
+      "description": "Request handling and routing"
+    },
+    {
+      "pattern": "(^|/)(auth|authentication|login|session|jwt|oauth)(/|$)",
+      "weight": 1.3,
+      "description": "Authentication and authorization"
+    },
+    {
+      "pattern": "(^|/)(models?|database|db|repositories|orm)(/|$)",
+      "weight": 0.8,
+      "description": "Database layer"
+    },
+    {
+      "pattern": "(^|/)(middleware|middlewares)(/|$)",
+      "weight": 1.0,
+      "description": "Middleware components"
+    },
+    {
+      "pattern": "(^|/)(utils?|helpers?|services?)(/|$)",
+      "weight": 0.7,
+      "description": "Utility and service functions"
+    },
+    {
+      "pattern": "(^|/)(graphql|resolvers?)(/|$)",
+      "weight": 1.1,
+      "description": "GraphQL implementation"
+    },
+    {
+      "pattern": "(^|/)(websocket|ws|socket)(/|$)",
+      "weight": 0.9,
+      "description": "WebSocket handlers"
+    }
+  ],
+
+  "path_penalties": [
+    {
+      "pattern": "(^|/)(tests?|__tests__|test|spec|\\.test\\.|_test\\.)(/|$)",
+      "weight": -2.5,
+      "description": "Test files and directories"
+    },
+    {
+      "pattern": "(^|/)(node_modules|vendor|packages)(/|$)",
+      "weight": -3.0,
+      "description": "Third-party dependencies"
+    },
+    {
+      "pattern": "(^|/)(dist|build|out|compiled)(/|$)",
+      "weight": -2.0,
+      "description": "Build output directories"
+    },
+    {
+      "pattern": "(^|/)(public|static|assets|client|frontend)(/|$)",
+      "weight": -1.5,
+      "description": "Client-side and static assets"
+    },
+    {
+      "pattern": "(^|/)(docs?|documentation|examples?)(/|$)",
+      "weight": -1.0,
+      "description": "Documentation"
+    },
+    {
+      "pattern": "(^|/)(\\.git|\\.github|scripts?|tools?)(/|$)",
+      "weight": -0.8,
+      "description": "Development tooling"
+    }
+  ],
+
+  "config_top_files": [
+    "package.json",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    ".env",
+    ".env.example",
+    "tsconfig.json",
+    "server.js",
+    "index.js",
+    "app.js",
+    "main.js"
+  ],
+
+  "entrypoint_patterns": [
+    "(^|/)server\\.(js|ts|mjs)$",
+    "(^|/)app\\.(js|ts|mjs)$",
+    "(^|/)index\\.(js|ts|mjs)$",
+    "(^|/)main\\.(js|ts|mjs)$",
+    "(^|/)src/index\\.(js|ts|mjs)$",
+    "(^|/)src/server\\.(js|ts|mjs)$",
+    "(^|/)src/app\\.(js|ts|mjs)$"
+  ],
+
+  "filter_focus": "Prioritize server-side code with direct security impact: authentication/authorization logic, database query construction, command execution, file operations, deserialization, API endpoints, GraphQL resolvers, JWT handling, session management, and privilege escalation paths. Focus on code that handles user input and privileged operations.",
+
+  "graphs": {
+    "required": [
+      "Authentication and authorization flow graph showing login mechanisms, JWT/session handling, permission checks, role assignments, and all paths to privilege escalation",
+      "API request routing and input handling graph mapping all endpoints (REST/GraphQL/WebSocket), input sources, validation logic, and dangerous sinks (eval, exec, db queries)",
+      "Database interaction and query construction graph showing ORM usage, raw queries, NoSQL operations, and injection attack surfaces"
+    ]
+  },
+
+  "audit_prompts": {
+    "sweep_mode": {
+      "investigation_guidelines": "Focus exclusively on exploitable vulnerabilities with direct security impact. Prioritize authentication bypass, privilege escalation, remote code execution, SQL/NoSQL injection, insecure deserialization, and direct object reference issues. Ignore theoretical attacks, DoS, information disclosure, and UI-layer issues.",
+      "vulnerability_focus": "Hunt for CRITICAL vulnerabilities only: authentication bypass allowing unauthorized access, privilege escalation to admin/root, remote code execution through eval/exec/deserialization, SQL/NoSQL injection with data exfiltration, mass assignment leading to privilege elevation, JWT vulnerabilities enabling impersonation, SSRF with internal network access, and insecure file operations allowing code execution."
+    },
+    "intuition_mode": {
+      "key_targets": [
+        "AUTH BYPASS: Where can authentication be completely circumvented to access protected resources?",
+        "PRIVILEGE ESCALATION: Where can a low-privilege user elevate to admin/superuser through parameter manipulation or logic flaws?",
+        "REMOTE CODE EXECUTION: Where does user input reach eval(), exec(), child_process, vm.runInContext, or deserialization?",
+        "INJECTION WITH IMPACT: Where can SQL/NoSQL injection lead to authentication bypass, data exfiltration, or code execution?"
+      ],
+      "target_areas": [
+        "JWT verification and token validation logic - look for algorithm confusion, signature bypass, token forge",
+        "Role and permission assignment - mass assignment, prototype pollution affecting authorization",
+        "Database query construction - template injection, NoSQL injection, ORM bypasses",
+        "User input reaching child_process.exec, eval, Function constructor, vm module",
+        "Deserialization of user-controlled data (JSON, YAML, msgpack, pickle alternatives)",
+        "GraphQL mutations and resolvers with insufficient authorization checks",
+        "File upload and path handling leading to arbitrary file write or code execution",
+        "OAuth/SAML implementation flaws enabling account takeover",
+        "Session management allowing fixation, hijacking, or privilege inheritance",
+        "Prototype pollution affecting security checks or authentication state"
+      ],
+      "vulnerability_focus": "Prioritize EXPLOITABLE, HIGH-IMPACT vulnerabilities only. Focus on: complete authentication bypass, horizontal/vertical privilege escalation, remote code execution, authentication material theft (passwords, tokens, secrets), direct access to sensitive user data through IDOR, SQL/NoSQL injection enabling auth bypass or RCE, insecure deserialization leading to RCE, and mass assignment/prototype pollution affecting authorization. IGNORE: DoS, race conditions without auth impact, log injection, theoretical attacks, SSL issues, clickjacking, information disclosure."
+    },
+    "deep_analysis": {
+      "critical_checks": [
+        "Verify authentication can be COMPLETELY bypassed - not just circumvented with effort",
+        "Confirm privilege escalation allows LOW-PRIVILEGE user to become ADMIN/ROOT",
+        "Check if user input reaches code execution sinks: eval, exec, Function(), child_process, vm.runInContext, require with user path",
+        "Validate SQL/NoSQL injection enables authentication bypass, RCE via xp_cmdshell/loadfile, or full database exfiltration",
+        "Verify deserialization accepts user input and uses vulnerable libraries (node-serialize, serialize-javascript)",
+        "Confirm JWT vulnerabilities: alg=none acceptance, weak signing key, algorithm confusion (HS256->RS256)",
+        "Check mass assignment or prototype pollution affects security-critical properties (__proto__, isAdmin, role)",
+        "Verify IDOR allows access to OTHER USERS' sensitive data, not just metadata",
+        "Confirm file operations allow ARBITRARY FILE WRITE to executable locations or config overwrite",
+        "Only propose if exploitation is DIRECT and PRACTICAL - no multi-step theoretical chains"
+      ],
+      "vulnerability_types": [
+        "Authentication bypass (broken auth logic, JWT exploits, session fixation)",
+        "Privilege escalation (horizontal and vertical)",
+        "Remote code execution (eval, exec, child_process, insecure deserialization)",
+        "SQL injection enabling auth bypass or RCE",
+        "NoSQL injection (MongoDB, Redis, etc.) with authentication or data exfiltration impact",
+        "Mass assignment leading to privilege escalation",
+        "Prototype pollution affecting authorization or security checks",
+        "Insecure deserialization (node-serialize, yaml.load, msgpack)",
+        "JWT vulnerabilities (alg=none, weak secret, algorithm confusion)",
+        "GraphQL authentication bypass or privilege escalation",
+        "Server-side template injection leading to RCE",
+        "Command injection through child_process or exec",
+        "Insecure direct object references exposing sensitive user data",
+        "File upload leading to code execution or config overwrite",
+        "SSRF with internal network access or cloud metadata exploitation",
+        "OAuth/SAML implementation flaws enabling account takeover",
+        "XXE with file read or SSRF leading to RCE or credential theft"
+      ]
+    }
+  }
+}
