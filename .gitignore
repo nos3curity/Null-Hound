@@ -18,3 +18,5 @@ poetry.lock
 
 # IDE
 .vscode/
+
+CLAUDE.md

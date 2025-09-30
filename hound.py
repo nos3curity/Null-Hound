@@ -34,7 +34,7 @@ from commands.project import ProjectManager  # noqa: E402
 
 app = typer.Typer(
     name="hound",
-    help="Cracked security analysis agents",
+    help="Null-Hound: Cracked security analysis agents",
     add_completion=False,
 )
 console = Console()
@@ -79,16 +79,25 @@ def _invoke_click(cmd_func, params: dict):
 def project_create(
     name: str = typer.Argument(..., help="Project name"),
     source_path: str = typer.Argument(..., help="Path to source code"),
+    preset: str = typer.Argument("default", help="Preset name (default, solidity, rust)"),
     description: str = typer.Option(None, "--description", "-d", help="Project description"),
     auto_name: bool = typer.Option(False, "--auto-name", "-a", help="Auto-generate project name")
 ):
-    """Create a new project."""
+    """Create a new project with a specified preset.
+
+    Available presets: default, solidity, rust
+
+    Example:
+        ./hound.py project create myaudit /path/to/code solidity
+        ./hound.py project create webapp ~/code/webapp default
+    """
     from commands.project import create
     _invoke_click(create, {
         'name': name,
         'source_path': source_path,
         'description': description,
-        'auto_name': auto_name
+        'auto_name': auto_name,
+        'preset': preset
     })
 
 @project_app.command("list")
@@ -1194,10 +1203,39 @@ def poc_list(
 
 
 @app.command()
+def filter(
+    project_name: str = typer.Argument(..., help="Project name"),
+    limit_loc: int = typer.Option(40000, "--limit-loc", "-l", help="Total LOC budget for filter"),
+    model: str = typer.Option("gemini-2.5-pro", "--model", "-m", help="Gemini model to use"),
+    max_llm_items: int = typer.Option(300, "--max-llm-items", help="Max candidates to send to LLM"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output")
+):
+    """Generate a filtered file list optimized for security analysis.
+
+    Uses preset-configured heuristics and LLM reranking to select the most
+    security-relevant files. The filter is saved to the project's filters directory
+    and can be used with --files for graph building.
+
+    Example:
+        ./hound.py filter myproject
+        ./hound.py filter myproject --limit-loc 50000 --verbose
+    """
+    from commands.filter import filter_files
+    _invoke_click(filter_files, {
+        'project_name': project_name,
+        'limit_loc': limit_loc,
+        'model': model,
+        'max_llm_items': max_llm_items,
+        'verbose': verbose
+    })
+
+
+@app.command()
 def version():
-    """Show Hound version."""
-    console.print("[bold]Hound[/bold] v2.0.0")
+    """Show Null-Hound version."""
+    console.print("[bold]Null-Hound[/bold] v2.0.0+")
     console.print("AI-powered security analysis system")
+    console.print("[dim]Fork of Hound by muellerberndt[/dim]")
 
 
 def main():

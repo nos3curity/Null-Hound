@@ -80,57 +80,69 @@ class ProjectManager:
             except Exception:
                 pass
     
-    def create_project(self, name: str, source_path: str, 
+    def create_project(self, name: str, source_path: str,
                       description: str | None = None,
-                      auto_name: bool = False) -> dict:
+                      auto_name: bool = False,
+                      preset: str = "default") -> dict:
         """Create a new project."""
         source_path = Path(source_path).resolve()
-        
+
         if not source_path.exists():
             raise ValueError(f"Source path does not exist: {source_path}")
-        
+
         # Auto-generate name if requested
         if auto_name:
             name = f"{source_path.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
+
         # Check if project already exists
         registry = self._load_registry()
         if name in registry["projects"]:
             raise ValueError(f"Project '{name}' already exists")
-        
+
+        # Validate preset exists
+        from utils.presets import get_preset_loader
+        loader = get_preset_loader()
+        try:
+            loader.load(preset)  # Will raise if preset doesn't exist
+        except FileNotFoundError as e:
+            raise ValueError(str(e))
+
         # Create project directory
         project_dir = self.projects_dir / name
         project_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Create project subdirectories
         (project_dir / "graphs").mkdir(exist_ok=True)
         (project_dir / "manifest").mkdir(exist_ok=True)
         # Legacy 'agent_runs' directory no longer used
         (project_dir / "reports").mkdir(exist_ok=True)
-        
+        (project_dir / "filters").mkdir(exist_ok=True)  # Store filter results
+
         # Create project config
         project_config = {
             "name": name,
             "source_path": str(source_path),
             "description": description or f"Analysis of {source_path.name}",
+            "preset": preset,
             "created_at": datetime.now().isoformat(),
             "last_accessed": datetime.now().isoformat(),
             "status": "active"
         }
-        
+
         # Save project config
         with open(project_dir / "project.json", 'w') as f:
             json.dump(project_config, f, indent=2)
-        
+
         # Update registry
         registry["projects"][name] = {
             "path": str(project_dir),
             "source_path": str(source_path),
             "created_at": project_config["created_at"],
-            "description": project_config["description"]
+            "description": project_config["description"],
+            "preset": preset
         }
         self._save_registry(registry)
-        
+
         return project_config
     
     def list_projects(self) -> list[dict]:
@@ -334,12 +346,12 @@ def project():
 @click.argument('source_path')
 @click.option('--description', '-d', help="Project description")
 @click.option('--auto-name', '-a', is_flag=True, help="Auto-generate project name")
-def create(name: str, source_path: str, description: str | None, auto_name: bool):
+def create(name: str, source_path: str, description: str | None, auto_name: bool, preset: str = "default"):
     """Create a new project."""
     manager = ProjectManager()
-    
+
     try:
-        config = manager.create_project(name, source_path, description, auto_name)
+        config = manager.create_project(name, source_path, description, auto_name, preset)
         
         flair = random.choice([
             "🚀 Normal projects get created, but YOURS arrives with a coronation.",

@@ -1,0 +1,70 @@
+{
+  "name": "rust",
+  "description": "Preset optimized for Rust codebase analysis",
+
+  "extensions": {
+    ".rs": 1.5,
+    ".toml": 0.6,
+    ".md": 0.1
+  },
+
+  "path_boosts": [
+    {
+      "pattern": "(^|/)src(/|$)",
+      "weight": 0.8,
+      "description": "Source directory"
+    },
+    {
+      "pattern": "(^|/)src/main\\.rs$",
+      "weight": 1.0,
+      "description": "Main entry point"
+    },
+    {
+      "pattern": "(^|/)src/lib\\.rs$",
+      "weight": 0.9,
+      "description": "Library root"
+    },
+    {
+      "pattern": "(^|/)(core|protocol|runtime)(/|$)",
+      "weight": 0.7,
+      "description": "Core functionality"
+    }
+  ],
+
+  "path_penalties": [
+    {
+      "pattern": "(^|/)tests?(/|$)",
+      "weight": -1.8,
+      "description": "Test directories"
+    },
+    {
+      "pattern": "(^|/)benches(/|$)",
+      "weight": -1.5,
+      "description": "Benchmark directories"
+    },
+    {
+      "pattern": "(^|/)examples(/|$)",
+      "weight": -0.8,
+      "description": "Example directories"
+    },
+    {
+      "pattern": "/test[s_]",
+      "weight": -1.2,
+      "description": "Test modules"
+    }
+  ],
+
+  "config_top_files": [
+    "Cargo.toml",
+    "Cargo.lock"
+  ],
+
+  "entrypoint_patterns": [
+    "(^|/)src/main\\.rs$",
+    "(^|/)src/lib\\.rs$"
+  ],
+
+  "llm_system_prompt": "You prioritize Rust source files for a security audit. Goal: identify the most critical code for security review - focus on: unsafe blocks, public APIs, FFI boundaries, parser/deserializer code, crypto operations, and privileged operations. Exclude test and benchmark code. Prioritize core logic over examples. Respond JSON only.",
+
+  "llm_instructions": "Return JSON with a single field \"prioritized\", an array of relpaths, in priority order. Focus on files with the highest security impact. Do not include any other fields."
+}

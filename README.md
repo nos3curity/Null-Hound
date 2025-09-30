@@ -1,9 +1,10 @@
 <p align="center">
-  <img src="static/hound.png" alt="Hound Banner" width="75%">
+  <img src="static/hound.png" alt="Null-Hound Banner" width="75%">
 </p>
-<h1 align="center">Hound</h1>
+<h1 align="center">Null-Hound</h1>
 
 <p align="center"><strong>Autonomous agents for code security auditing</strong></p>
+<p align="center"><em>Custom fork with enhanced capabilities</em></p>
 
 <p align="center">
   <a href="https://github.com/muellerberndt/hound/actions"><img src="https://github.com/muellerberndt/hound/workflows/Tests/badge.svg" alt="Tests"></a>
@@ -28,7 +29,15 @@
 
 ## Overview
 
-Hound is a Language-agnostic AI auditor that autonomously builds and refines adaptive knowledge graphs for deep, iterative code reasoning.
+Null-Hound is a Language-agnostic AI auditor that autonomously builds and refines adaptive knowledge graphs for deep, iterative code reasoning.
+
+**Note:** This is a custom fork of the original [Hound project](https://github.com/muellerberndt/hound) with additional features and enhancements.
+
+### Null-Hound Enhancements
+
+- **Preset System:** Language/framework-specific configurations (Solidity, Rust, default) that optimize file filtering and analysis
+- **Integrated Filter Command:** Gemini-powered intelligent file selection built into the main CLI
+- **Project-Based Filtering:** Filters are saved with projects and respect preset configurations
 
 ### Key Features
 
@@ -38,10 +47,11 @@ Hound is a Language-agnostic AI auditor that autonomously builds and refines ada
 - Dynamic model switching – Lightweight "scout" models handle exploration; heavyweight "strategist" models provide deep reasoning, mirroring expert workflows while keeping costs efficient.
 - Strategic audit planning - Balances broad code coverage with focused investigation of the most promising aspects, ensuring both depth and efficiency.
 
-**Codebase size considerations:** While Hound can analyze any codebase, it's optimized for small-to-medium sized projects like typical smart contract applications. Large enterprise codebases may exceed context limits and require selective analysis of specific subsystems.
+**Codebase size considerations:** While Null-Hound can analyze any codebase, it's optimized for small-to-medium sized projects like typical smart contract applications. Large enterprise codebases may exceed context limits and require selective analysis of specific subsystems.
 
 ### Links
 
+- [Original Hound Repository](https://github.com/muellerberndt/hound)
 - [Paper](https://zenodo.org/records/17221190)
 - [Original blog post](https://muellerberndt.medium.com/unleashing-the-hound-how-ai-agents-find-deep-logic-bugs-in-any-codebase-64c2110e3a6f)
 - [Smart contract audit benchmarks datasets and tooling](https://github.com/scabench-org/scabench)
@@ -179,7 +189,7 @@ Operational notes:
 
 Whitelists (strongly recommended):
 
-- Always pass a whitelist of input files via `--files`. For the best results, the selected files should fit in the model’s available context window; whitelisting keeps the graph builder focused and avoids token overflows.
+- Always pass a whitelist of input files via `--files`. For the best results, the selected files should fit in the model's available context window; whitelisting keeps the graph builder focused and avoids token overflows.
 - If you do not pass `--files`, Hound will consider all files in the repository. On large codebases this triggers sampling and may degrade coverage/quality.
 - `--files` expects a comma‑separated list of paths relative to the repo root.
 
@@ -190,15 +200,16 @@ Examples:
 ./hound.py graph build myaudit --auto \
   --files "src/A.sol,src/B.sol,src/utils/Lib.sol"
 
-# Generate a whitelist automatically (recommended for larger projects)
-python whitelist_builder.py \
-  --input /path/to/repo \
-  --limit-loc 20000 \
-  --output whitelists/myaudit
+# Generate a smart filter automatically (recommended for larger projects)
+# First create a project with appropriate preset (solidity, rust, or default)
+./hound.py project create myaudit /path/to/contracts solidity
 
-# Use the generated list (newline-separated) as a comma list for --files
+# Run filter - uses preset configuration + Gemini for intelligent selection
+./hound.py filter myaudit --limit-loc 40000
+
+# Use the generated filter (saved to project's filters/ directory)
 ./hound.py graph build myaudit --auto \
-  --files "$(tr '\n' ',' < whitelists/myaudit | sed 's/,$//')"
+  --files "$(cat ~/.hound/projects/myaudit/filters/filter.txt | tr '\n' ',')"
 ```
 
 - Refine existing graphs (resume building):
@@ -470,7 +481,7 @@ When you attach to a session, its status is set to `active` while the audit runs
 
 ## Chatbot (Telemetry UI)
 
-Hound ships with a lightweight web UI for steering and monitoring a running audit session. It discovers local runs via a simple telemetry registry and streams status/decisions live.
+Null-Hound ships with a lightweight web UI for steering and monitoring a running audit session. It discovers local runs via a simple telemetry registry and streams status/decisions live.
 
 Prerequisites:
 - Set API keys (at least `OPENAI_API_KEY`, optional `OPENAI_BASE_URL` for custom endpoints): `source ../API_KEYS.txt` or export manually
