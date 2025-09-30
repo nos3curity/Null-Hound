@@ -26,31 +26,22 @@ export GOOGLE_API_KEY=your_gemini_key_here
 ### Usage
 
 ```bash
-# 1. Create project with preset (solidity, rust, or default)
+# 1. Create project with preset (php, android or default)
 ./hound.py project create myaudit /path/to/code solidity
 
 # 2. Generate smart file filter
 ./hound.py filter myaudit
 
-# 3. Build knowledge graphs (uses preset configuration)
+# 3. Build knowledge graphs
 ./hound.py graph build myaudit
 
-# Or specify number of additional auto-generated graphs
-./hound.py graph build myaudit --graphs 5
-
-# Or disable additional graphs
-./hound.py graph build myaudit --graphs 0
-
-# 4. Run security audit (Phase 1: Sweep)
-./hound.py agent audit myaudit --mode sweep
-
-# 5. Deep analysis (Phase 2: Intuition)
+# 4. Deep analysis (intuition mode)
 ./hound.py agent audit myaudit --mode intuition --time-limit 300
 
-# 6. Review findings
+# 5. Review findings
 ./hound.py finalize myaudit
 
-# 7. Generate report
+# 6. Generate report
 ./hound.py report myaudit
 ```
 

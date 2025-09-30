@@ -85,14 +85,59 @@
     "(^|/)src/main\\.(ts|tsx|js|jsx)$"
   ],
 
-  "security_focus": "Choose the most security-relevant files across the project: core logic, state management, authentication, interfaces, and important configs. Avoid tests/mocks/fixtures unless they contain unique logic. Prefer spread across critical components.",
+  "filter_focus": "Choose the most security-relevant files across the project: core logic, state management, authentication, interfaces, and important configs. Avoid tests/mocks/fixtures unless they contain unique logic. Prefer spread across critical components.",
 
   "graphs": {
-    "primary": "SystemArchitecture",
     "required": [
       "Data flow graph showing how information moves through the system, tracking transformations and dependencies",
       "Access control and permission model showing authorization boundaries and privilege levels"
-    ],
-    "default_additional": 2
+    ]
+  },
+
+  "audit_prompts": {
+    "sweep_mode": {
+      "investigation_guidelines": "Focus on achieving broad coverage of unvisited components. Prioritize components handling critical state or permissions. Look for common vulnerability patterns. Avoid repeating completed investigations.",
+      "vulnerability_focus": "Look for ALL types of vulnerabilities in components including: missing validation, access control issues, overflow vulnerabilities, reentrancy, logic errors, state corruption, and authentication bypasses."
+    },
+    "intuition_mode": {
+      "key_targets": [
+        "VALUE AT RISK: Where can money be stolen or locked?",
+        "CONTRADICTIONS: What doesn't match between docs and code?",
+        "AUTH BYPASSES: Where might permission checks fail?",
+        "STATE CORRUPTION: What could break critical invariants?"
+      ],
+      "target_areas": [
+        "Value transfer mechanisms and payment flows",
+        "Clear contradictions in the annotated graphs",
+        "Suspicious permission check patterns",
+        "Complex cross-component value interactions",
+        "Areas that 'feel' vulnerable based on patterns"
+      ],
+      "vulnerability_focus": "Prioritize MONETARY IMPACT above all else. Look for: theft vulnerabilities, fund locking, authorization bypasses, invariant violations, and high-confidence exploitable bugs."
+    },
+    "deep_analysis": {
+      "critical_checks": [
+        "Base analysis on investigation goal and exploration/history shown in context",
+        "Surface ANY vulnerabilities that can be justified from provided context",
+        "Propose hypothesis only if ROOT CAUSE is explicitly evidenced in provided code",
+        "Cite specific files/functions in Affected Code with exact node IDs from graphs",
+        "Verify that required preconditions are plausible given the code",
+        "Check for guards/require/reentrancy/permissions that would mitigate issues",
+        "Lower confidence to low or omit hypothesis if evidence is weak or ambiguous",
+        "Prefer fewer, higher-quality hypotheses over speculative ones"
+      ],
+      "vulnerability_types": [
+        "Missing validation vulnerabilities",
+        "Access control and authorization issues",
+        "Overflow and underflow vulnerabilities",
+        "Reentrancy vulnerabilities",
+        "Logic errors and edge cases",
+        "State corruption vulnerabilities",
+        "Authentication bypass vulnerabilities",
+        "Value theft and fund locking issues",
+        "Invariant violations",
+        "Cross-component interaction vulnerabilities"
+      ]
+    }
   }
 }

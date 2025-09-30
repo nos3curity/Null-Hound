@@ -1842,11 +1842,12 @@ DO NOT include any text before or after the JSON object."""
             from .strategist import Strategist
             # Pass debug and session_id to strategist for deep_think prompt saving
             strategist = Strategist(
-                config=self.config or {}, 
-                debug=self.debug, 
+                config=self.config or {},
+                debug=self.debug,
                 session_id=self.session_id,
                 debug_logger=getattr(self, 'debug_logger', None),
-                mission=getattr(self, 'mission', None)
+                mission=getattr(self, 'mission', None),
+                audit_prompts=getattr(self, 'audit_prompts', {})
             )
             # Pass phase if available (from parent runner)
             phase = getattr(self, 'current_phase', None)

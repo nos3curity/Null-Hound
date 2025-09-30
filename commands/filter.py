@@ -241,10 +241,10 @@ def llm_rerank(items: list[FileInfo], preset: dict, loader, config: dict, model:
         for it in items[:max_items]
     ]
 
-    # Build system prompt with preset-specific security focus
-    security_focus = loader.get_security_focus(preset)
+    # Build system prompt with preset-specific filter focus
+    filter_focus = loader.get_filter_focus(preset)
     system_prompt = (
-        f"You prioritize source files for a security audit whitelist. {security_focus}"
+        f"You prioritize source files for a security audit whitelist. {filter_focus}"
     )
 
     # Hardcoded response format instructions

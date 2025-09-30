@@ -113,15 +113,65 @@
     "(^|/)bootstrap\\.php$"
   ],
 
-  "security_focus": "Identify the most critical files for web application security review. Focus on: SQL injection points, authentication/authorization logic, input validation, file upload handlers, session management, API endpoints, admin interfaces, database queries, and user input processing. Prioritize request handlers, authentication flows, and database interactions.",
+  "filter_focus": "Identify the most critical files for web application security review. Focus on: SQL injection points, authentication/authorization logic, input validation, file upload handlers, session management, API endpoints, admin interfaces, database queries, and user input processing. Prioritize request handlers, authentication flows, and database interactions.",
 
   "graphs": {
-    "primary": "SystemArchitecture",
     "required": [
       "Request routing and input handling graph showing all user input entry points, how data flows through controllers/handlers, and where validation occurs",
       "Database interaction graph mapping all SQL queries, prepared statements, ORM usage, and potential injection points",
       "Authentication and session flow graph showing login/logout paths, session creation/destruction, permission checks, and authentication bypass risks"
-    ],
-    "default_additional": 2
+    ]
+  },
+
+  "audit_prompts": {
+    "sweep_mode": {
+      "investigation_guidelines": "Focus on web application security: input validation, SQL injection, XSS, CSRF, authentication, authorization, file upload, session management, and API security. Prioritize user input entry points and database interactions.",
+      "vulnerability_focus": "Look for web application vulnerabilities including: SQL injection, XSS, CSRF, authentication bypass, authorization issues, path traversal, file upload vulnerabilities, session fixation, insecure deserialization, command injection, and SSRF."
+    },
+    "intuition_mode": {
+      "key_targets": [
+        "INPUT INJECTION: Where can user input reach SQL queries, OS commands, or eval constructs?",
+        "AUTH BYPASS: Where might authentication or authorization checks be circumvented?",
+        "FILE OPERATIONS: Where can path traversal or malicious file uploads occur?",
+        "SESSION ATTACKS: Where are session tokens vulnerable to fixation, hijacking, or prediction?"
+      ],
+      "target_areas": [
+        "User input processing and validation routines",
+        "Database query construction and execution",
+        "Authentication and authorization logic",
+        "File upload and file system operations",
+        "Session management and cookie handling",
+        "API endpoints and request routing"
+      ],
+      "vulnerability_focus": "Prioritize critical web vulnerabilities with direct exploitation paths: SQL injection leading to data breach, authentication bypass allowing admin access, RCE through file upload or command injection, and privilege escalation through authorization flaws."
+    },
+    "deep_analysis": {
+      "critical_checks": [
+        "Verify if user input reaches dangerous sinks (SQL, eval, exec, file operations) without sanitization",
+        "Check if authentication can be bypassed through parameter manipulation or logic flaws",
+        "Confirm SQL injection by verifying lack of parameterized queries or escaping",
+        "Validate that authorization checks cannot be circumvented through direct object references",
+        "Check for XSS by confirming output encoding is missing or insufficient",
+        "Verify file upload restrictions and path traversal mitigations",
+        "Examine session management for fixation, prediction, or hijacking vulnerabilities",
+        "Only propose high-confidence hypotheses with clear exploitation paths"
+      ],
+      "vulnerability_types": [
+        "SQL injection (classic, blind, time-based)",
+        "Cross-site scripting (reflected, stored, DOM-based)",
+        "Cross-site request forgery",
+        "Authentication bypass vulnerabilities",
+        "Authorization and access control issues",
+        "Remote code execution (RCE)",
+        "Local file inclusion (LFI) and remote file inclusion (RFI)",
+        "Path traversal and directory traversal",
+        "File upload vulnerabilities",
+        "Session fixation and session hijacking",
+        "Insecure deserialization",
+        "Command injection",
+        "Server-side request forgery (SSRF)",
+        "XML external entity (XXE) injection"
+      ]
+    }
   }
 }

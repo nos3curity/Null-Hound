@@ -59,20 +59,22 @@ def _choose_profile(cfg: dict[str, Any]) -> str:
 class Strategist:
     """Senior planning agent."""
 
-    def __init__(self, config: dict[str, Any] | None = None, debug: bool = False, session_id: str | None = None, debug_logger=None, mission: str | None = None):
+    def __init__(self, config: dict[str, Any] | None = None, debug: bool = False, session_id: str | None = None, debug_logger=None, mission: str | None = None, audit_prompts: dict[str, Any] | None = None):
         self.config = config or {}
         profile = _choose_profile(self.config)
-        
+
         # Initialize or reuse debug logger
         self.debug_logger = debug_logger
         if debug and self.debug_logger is None:
             from analysis.debug_logger import DebugLogger
             self.debug_logger = DebugLogger(session_id or "strategist")
-        
+
         self.profile = profile
         self.llm = UnifiedLLMClient(cfg=self.config, profile=profile, debug_logger=self.debug_logger)
         # Overarching mission to keep in strategist context when available
         self.mission = mission
+        # Audit prompts from preset (vulnerability-specific guidance)
+        self.audit_prompts = audit_prompts or {}
         # Two-pass review toggle (off by default; enabled via config)
         try:
             self.two_pass_review = bool(self.config.get('strategist_two_pass_review', False))
@@ -130,6 +132,16 @@ class Strategist:
         """
         # Build mode-specific system prompt
         if phase_hint == 'Coverage':
+            # Get sweep mode guidance from preset
+            investigation_guidelines = ""
+            try:
+                sweep_config = self.audit_prompts.get('sweep_mode', {})
+                investigation_guidelines = sweep_config.get('investigation_guidelines', '')
+            except Exception:
+                pass
+            if not investigation_guidelines:
+                investigation_guidelines = "Focus on achieving broad coverage of unvisited components. Prioritize components handling critical state or permissions. Look for common vulnerability patterns. Avoid repeating completed investigations."
+
             system = (
                 "You are a senior security auditor in SWEEP MODE (Phase 1).\n"
                 "Your goal: Systematically analyze each component for vulnerabilities.\n\n"
@@ -146,14 +158,46 @@ class Strategist:
                 "- NEVER suggest investigating a component that was already completed\n"
                 "- If no unanalyzed components remain, return an empty list\n\n"
                 "INVESTIGATION GUIDELINES:\n"
-                "- Focus on achieving broad coverage of unvisited components\n"
-                "- Prioritize components handling critical state or permissions\n"
-                "- Look for common vulnerability patterns\n"
-                "- Avoid repeating completed investigations\n\n"
+                f"- {investigation_guidelines}\n\n"
                 "FOR EACH ITEM include WHY NOW and EXIT CRITERIA in 'reasoning'.\n"
                 "Category should be 'aspect', expected_impact realistic.\n"
             )
         elif phase_hint == 'Saliency':
+            # Get intuition mode prompts from preset
+            key_targets = []
+            target_areas = []
+            vuln_focus = ""
+            try:
+                intuition_config = self.audit_prompts.get('intuition_mode', {})
+                key_targets = intuition_config.get('key_targets', [])
+                target_areas = intuition_config.get('target_areas', [])
+                vuln_focus = intuition_config.get('vulnerability_focus', '')
+            except Exception:
+                pass
+
+            # Fallback to defaults if not in preset
+            if not key_targets:
+                key_targets = [
+                    "VALUE AT RISK: Where can money be stolen or locked?",
+                    "CONTRADICTIONS: What doesn't match between docs and code?",
+                    "AUTH BYPASSES: Where might permission checks fail?",
+                    "STATE CORRUPTION: What could break critical invariants?"
+                ]
+            if not target_areas:
+                target_areas = [
+                    "Value transfer mechanisms and payment flows",
+                    "Clear contradictions in the annotated graphs",
+                    "Suspicious permission check patterns",
+                    "Complex cross-component value interactions",
+                    "Areas that 'feel' vulnerable based on patterns"
+                ]
+            if not vuln_focus:
+                vuln_focus = "Prioritize MONETARY IMPACT above all else. Look for: theft vulnerabilities, fund locking, authorization bypasses, invariant violations, and high-confidence exploitable bugs."
+
+            # Format key targets and target areas
+            key_targets_text = "\n".join(f"{i}. {target}" for i, target in enumerate(key_targets, 1))
+            target_areas_text = "\n".join(f"  • {area}" for area in target_areas)
+
             system = (
                 "You are a senior security auditor in INTUITION MODE (Phase 2).\n"
                 "Your goal: Use intuition to find HIGH-IMPACT vulnerabilities.\n\n"
@@ -163,17 +207,16 @@ class Strategist:
                 "INTUITION MODE STRATEGY:\n"
                 "- Follow your instincts about what feels most vulnerable\n"
                 "- Deep-dive into the most promising, impactful areas\n"
-                "- PRIORITIZE MONETARY IMPACT above all else\n"
+                f"- {vuln_focus}\n"
                 "- Look for CONTRADICTIONS between assumptions and observations\n"
                 "- Target suspicious cross-component interactions\n"
                 "- Focus on invariant violations and high-confidence bugs\n"
                 "- Output primarily SUSPICION items (specific vulnerabilities)\n"
                 "- Flexible granularity - zoom into specific functions or patterns\n\n"
                 "KEY INTUITION TARGETS:\n"
-                "1. VALUE AT RISK: Where can money be stolen or locked?\n"
-                "2. CONTRADICTIONS: What doesn't match between docs and code?\n"
-                "3. AUTH BYPASSES: Where might permission checks fail?\n"
-                "4. STATE CORRUPTION: What could break critical invariants?\n\n"
+                f"{key_targets_text}\n\n"
+                "TARGET THESE AREAS:\n"
+                f"{target_areas_text}\n\n"
                 "FOR EACH ITEM include WHY NOW and EXIT CRITERIA in 'reasoning'.\n"
                 "Category should be 'suspicion' for bugs, 'aspect' for deep dives.\n"
             )
@@ -238,22 +281,47 @@ class Strategist:
                 f"If no new components remain, respond with an empty list of investigations."
             )
         elif phase_hint == 'Saliency':
-            # Phase 2: Intuition-guided deep exploration
+            # Phase 2: Intuition-guided deep exploration - use preset prompts
+            # Get intuition mode prompts from preset (reuse what we loaded for system prompt)
+            key_targets_formatted = []
+            target_areas_formatted = []
+            try:
+                intuition_config = self.audit_prompts.get('intuition_mode', {})
+                key_targets = intuition_config.get('key_targets', [])
+                target_areas = intuition_config.get('target_areas', [])
+
+                if key_targets:
+                    key_targets_formatted = [f"  {i}. {target}" for i, target in enumerate(key_targets, 1)]
+                if target_areas:
+                    target_areas_formatted = [f"  • {area}" for area in target_areas]
+            except Exception:
+                pass
+
+            # Fallback to defaults
+            if not key_targets_formatted:
+                key_targets_formatted = [
+                    "  1. MONETARY FLOWS: Areas where funds can be stolen, locked, or misdirected",
+                    "  2. CONTRADICTIONS: Salient mismatches between assumptions and observations",
+                    "  3. HIGH-IMPACT AUTH: Critical authentication/authorization vulnerabilities",
+                    "  4. STATE CORRUPTION: Manipulation affecting critical invariants"
+                ]
+            if not target_areas_formatted:
+                target_areas_formatted = [
+                    "  • Value transfer mechanisms and payment flows",
+                    "  • Clear contradictions in the annotated graphs",
+                    "  • Suspicious permission check patterns",
+                    "  • Complex cross-component value interactions",
+                    "  • Areas that \"feel\" vulnerable based on patterns"
+                ]
+
             user = (
                 base_context +
                 f"CURRENT MODE: INTUITION (Phase 2 - Deep exploration)\n\n"
                 f"Plan the top {n} NEW investigations using INTUITION to find high-impact bugs.\n\n"
                 f"USE YOUR INTUITION TO PRIORITIZE:\n"
-                f"  1. MONETARY FLOWS: Areas where funds can be stolen, locked, or misdirected\n"
-                f"  2. CONTRADICTIONS: Salient mismatches between assumptions and observations\n"
-                f"  3. HIGH-IMPACT AUTH: Critical authentication/authorization vulnerabilities\n"
-                f"  4. STATE CORRUPTION: Manipulation affecting critical invariants\n\n"
+                + "\n".join(key_targets_formatted) + "\n\n"
                 f"TARGET THESE AREAS:\n"
-                f"  • Value transfer mechanisms and payment flows\n"
-                f"  • Clear contradictions in the annotated graphs\n"
-                f"  • Suspicious permission check patterns\n"
-                f"  • Complex cross-component value interactions\n"
-                f"  • Areas that \"feel\" vulnerable based on patterns\n\n"
+                + "\n".join(target_areas_formatted) + "\n\n"
                 f"GOAL EXAMPLES:\n"
                 f"  - \"Investigate potential theft in [payment flow]\"\n"
                 f"  - \"Analyze contradiction: [assumption X] vs [observation Y]\"\n"
@@ -371,12 +439,21 @@ class Strategist:
         # Use phase parameter if provided, otherwise default to Phase 2 (Saliency)
         is_phase1 = (phase == 'Coverage')
         if is_phase1:
+            # Get vulnerability focus from preset, with fallback to default
+            vuln_focus = ""
+            try:
+                sweep_config = self.audit_prompts.get('sweep_mode', {})
+                vuln_focus = sweep_config.get('vulnerability_focus', '')
+            except Exception:
+                pass
+            if not vuln_focus:
+                vuln_focus = "Look for ALL types of vulnerabilities in this component including: missing validation, access control issues, overflow vulnerabilities, reentrancy, logic errors, state corruption, and authentication bypasses."
+
             system = (
                 "You are a security auditor analyzing code components for vulnerabilities.\n"
                 "Your task: Identify security vulnerabilities in the provided code.\n\n"
                 "INSTRUCTIONS:\n"
-                "- Look for ALL types of vulnerabilities in this component\n"
-                "- Consider issues like: missing validation, access control, overflow, reentrancy, logic errors, etc.\n"
+                f"- {vuln_focus}\n"
                 "- Provide thorough analysis of the component\n"
                 "- Focus on real, exploitable vulnerabilities\n"
                 "- If there are no vulnerabilities found, say 'NO_HYPOTHESES: true'\n\n"
@@ -385,7 +462,29 @@ class Strategist:
                 "- Skip any issues that have already been found.\n"
             )
         else:
-            # Phase 2 (Saliency) - use the original complex prompt
+            # Phase 2 (Saliency) - use preset prompts with fallback to defaults
+            # Get critical checks from preset
+            critical_checks = []
+            try:
+                deep_analysis = self.audit_prompts.get('deep_analysis', {})
+                critical_checks = deep_analysis.get('critical_checks', [])
+            except Exception:
+                pass
+            if not critical_checks:
+                critical_checks = [
+                    "Base analysis on investigation goal and exploration/history shown in context",
+                    "Surface ANY vulnerabilities that can be justified from provided context",
+                    "Propose hypothesis only if ROOT CAUSE is explicitly evidenced in provided code",
+                    "Cite specific files/functions in Affected Code with exact node IDs from graphs",
+                    "Verify that required preconditions are plausible given the code",
+                    "Check for guards/require/reentrancy/permissions that would mitigate issues",
+                    "Lower confidence to low or omit hypothesis if evidence is weak or ambiguous",
+                    "Prefer fewer, higher-quality hypotheses over speculative ones"
+                ]
+
+            # Format critical checks as bullet points
+            checks_text = "\n".join(f"- {check}" for check in critical_checks)
+
             system = (
                 "You are a deep-thinking senior security auditor.\n"
                 "Your job is to: (1) think deeply about the active investigation aspect,\n"
@@ -396,14 +495,8 @@ class Strategist:
                 "- Do NOT recommend or assume runtime execution or live system probing.\n"
                 "- All GUIDANCE must be CODE-ONLY: which files/functions/classes/methods to inspect and what to verify statically.\n"
                 "- You MAY include a theoretical exploit plan clearly labeled as \"theoretical/manual reproduction outside Hound\".\n\n"
-                "CRITICAL: Base your analysis on the investigation goal and the exploration/history shown in the context,\n"
-                "but do NOT limit yourself to only that goal — surface ANY vulnerabilities you can justify from the provided context.\n"
-                "ANTI–FALSE-POSITIVE GUARDRAILS:\n"
-                "- Propose a hypothesis only if the ROOT CAUSE is explicitly evidenced in the provided code.\n"
-                "- Cite specific files/functions in Affected Code; include exact node IDs from the graphs.\n"
-                "- Verify that required preconditions are plausible given the code; check for guards/require/reentrancy/permissions that would mitigate the issue.\n"
-                "- If evidence is weak or ambiguous, lower confidence to low or omit the hypothesis entirely.\n"
-                "- Prefer fewer, higher-quality hypotheses over speculative ones.\n"
+                "CRITICAL ANALYSIS GUIDELINES:\n"
+                f"{checks_text}\n\n"
                 "DEDUPLICATION:\n"
                 "- The context lists EXISTING HYPOTHESES. Do NOT propose duplicates.\n"
                 "- Treat items as duplicates if they share the same root cause and substantially the same affected code path(s)/function(s), even if phrased differently.\n"

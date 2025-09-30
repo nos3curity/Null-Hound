@@ -93,14 +93,14 @@ class PresetLoader:
         """Get entrypoint regex patterns."""
         return preset.get("entrypoint_patterns", [])
 
-    def get_security_focus(self, preset: dict[str, Any]) -> str:
-        """Get security focus guidance from preset.
+    def get_filter_focus(self, preset: dict[str, Any]) -> str:
+        """Get filter focus guidance from preset.
 
         Returns:
             Security-specific guidance for file prioritization
         """
         return preset.get(
-            "security_focus",
+            "filter_focus",
             "Choose the most security-relevant files across the project."
         )
 
@@ -109,16 +109,27 @@ class PresetLoader:
 
         Returns:
             Dictionary with:
-            - primary: Name of primary graph (default: "SystemArchitecture")
+            - primary: Always "SystemArchitecture" (mandatory)
             - required: List of required graph descriptions
             - default_additional: Number of additional auto-generated graphs
         """
         graphs = preset.get("graphs", {})
         return {
-            "primary": graphs.get("primary", "SystemArchitecture"),
+            "primary": "SystemArchitecture",  # Always SystemArchitecture
             "required": graphs.get("required", []),
             "default_additional": graphs.get("default_additional", 2)
         }
+
+    def get_audit_prompts(self, preset: dict[str, Any]) -> dict[str, Any]:
+        """Get audit prompt configuration from preset.
+
+        Returns:
+            Dictionary with:
+            - sweep_mode: Prompts for sweep/coverage mode
+            - intuition_mode: Prompts for intuition/saliency mode
+            - deep_analysis: Prompts for deep thinking analysis
+        """
+        return preset.get("audit_prompts", {})
 
 
 def get_preset_loader() -> PresetLoader:

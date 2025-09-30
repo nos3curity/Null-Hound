@@ -757,6 +757,28 @@ class AgentRunner:
         self.config = config
         # Remember project_dir for plan storage
         self.project_dir = project_dir
+
+        # Load project preset for audit prompts
+        try:
+            project_config_path = project_dir / "project.json"
+            if project_config_path.exists():
+                with open(project_config_path) as f:
+                    project_config = json.load(f)
+                preset_name = project_config.get("preset", "default")
+
+                from utils.presets import get_preset_loader
+                loader = get_preset_loader()
+                preset = loader.load(preset_name)
+                self.audit_prompts = loader.get_audit_prompts(preset)
+            else:
+                # Fallback to default preset if project.json doesn't exist
+                from utils.presets import get_preset_loader
+                loader = get_preset_loader()
+                preset = loader.load("default")
+                self.audit_prompts = loader.get_audit_prompts(preset)
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not load audit prompts from preset: {e}[/yellow]")
+            self.audit_prompts = {}
         
         # Validate required models before creating the agent
         if not _validate_required_models(self.config, console):
@@ -775,6 +797,13 @@ class AgentRunner:
         try:
             if getattr(self, 'mission', None):
                 self.agent.mission = self.mission
+        except Exception:
+            pass
+
+        # Pass audit prompts to the agent so it can use them in Strategist
+        try:
+            if hasattr(self, 'audit_prompts'):
+                self.agent.audit_prompts = self.audit_prompts
         except Exception:
             pass
 
@@ -1353,7 +1382,12 @@ class AgentRunner:
 
         self._current_phase = _determine_phase_two(cov_stats)
 
-        strategist = Strategist(config=self.config, debug=self.debug, session_id=self.session_id)
+        strategist = Strategist(
+            config=self.config,
+            debug=self.debug,
+            session_id=self.session_id,
+            audit_prompts=getattr(self, 'audit_prompts', {})
+        )
         need = max(0, n - len(prepared))
         planned: list[dict] = []
         # Strict coverage pre-planning in Early phase: iterate SystemArchitecture components
