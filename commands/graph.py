@@ -65,6 +65,7 @@ def build(
     visualize: bool = typer.Option(True, "--visualize/--no-visualize", help="Generate HTML"),
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug output"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Reduce output and disable animations"),
+    skip_confirmation: bool = False,  # Internal parameter for programmatic calls
 ):
     """Build agent-driven knowledge graphs."""
     time.time()
@@ -113,8 +114,8 @@ def build(
             console.print("[dim]Use '--auto' to add other graphs, or delete the existing file to re-initialize.[/dim]")
             raise typer.Exit(code=0)
     
-    # If --auto is requested and graphs already exist, ask for confirmation
-    if auto:
+    # If --auto is requested and graphs already exist, ask for confirmation (unless skip_confirmation is set)
+    if auto and not skip_confirmation:
         try:
             existing_graphs = list(graphs_dir.glob("graph_*.json"))
         except Exception:

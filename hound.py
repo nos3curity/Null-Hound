@@ -683,7 +683,7 @@ def graph_build(
                 graph_specs = loader.get_graph_specs(preset)
 
                 console.print(f"[cyan]Using preset:[/cyan] {preset_name}")
-                console.print(f"[cyan]Building graphs:[/cyan] Primary + {len(graph_specs['required'])} required + {graphs if graphs is not None else graph_specs['default_additional']} additional\n")
+                console.print(f"[cyan]Building graphs:[/cyan] Primary + {len(graph_specs['required'])} required\n")
 
                 # Create progress tracking
                 progress_log = []
@@ -705,12 +705,12 @@ def graph_build(
                     file_filter=files,
                     with_spec=None,
                     graph_spec=None,
-                    refine_existing=refine_existing,
+                    refine_existing=False,  # Don't refine when creating primary graph
                     init=True,
                     auto=False,
                     refine_only=None,
                     reuse_ingestion=reuse_ingestion,
-                    visualize=True,
+                    visualize=False,  # Don't visualize after each graph
                     debug=debug,
                     quiet=quiet
                 )
@@ -739,38 +739,17 @@ def graph_build(
                     log_progress(f"[green]✓ Required graph {i} complete[/green]")
                     console.print(progress_log[-1])
 
-                # 3. Build additional auto-generated graphs
-                additional_count = graphs if graphs is not None else graph_specs['default_additional']
-                if additional_count > 0:
-                    log_progress(f"[bold cyan]Building {additional_count} additional auto-generated graphs[/bold cyan]")
-                    console.print(progress_log[-1])
-
-                    graph_build_impl(
-                        project_id=resolved_project_name,
-                        config_path=Path(config) if config else None,
-                        max_iterations=iterations,
-                        max_graphs=additional_count,
-                        focus_areas=focus,
-                        file_filter=files,
-                        with_spec=None,
-                        graph_spec=None,
-                        refine_existing=refine_existing,
-                        init=False,
-                        auto=True,
-                        refine_only=None,
-                        reuse_ingestion=True,
-                        visualize=True,
-                        debug=debug,
-                        quiet=quiet
-                    )
-
-                    log_progress(f"[green]✓ Additional graphs complete[/green]")
-                    console.print(progress_log[-1])
-
                 log_progress(f"[bold green]✓ All graphs built successfully[/bold green]")
                 console.print(progress_log[-1])
 
-                console.print(f"\n[bold green]✓ Completed preset-based graph building[/bold green]")
+                # Generate final visualization for all graphs
+                from commands.graph import generate_dynamic_visualization
+                graphs_dir = project_path / "graphs"
+                console.print("\n[bold]Generating visualization...[/bold]")
+                html_path = generate_dynamic_visualization(graphs_dir)
+                console.print(f"[bold]Visualization:[/bold] [link]file://{html_path.resolve()}[/link]\n")
+
+                console.print(f"[bold green]✓ Completed preset-based graph building[/bold green]")
                 return
 
             except typer.Exit:
