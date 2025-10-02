@@ -18,4 +18,6 @@ poetry.lock
 # IDE
 .vscode/
 
+apks/*
+
 CLAUDE.md

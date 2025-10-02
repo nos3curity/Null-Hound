@@ -1,0 +1,184 @@
+{
+  "name": "android",
+  "description": "Preset for discovering high-impact vulnerabilities in Android applications through exported components, IPC, and deeplinks",
+
+  "extensions": {
+    ".java": 1.5,
+    ".kt": 1.5,
+    ".xml": 1.3,
+    ".smali": 1.2,
+    ".gradle": 0.7,
+    ".properties": 0.5,
+    ".json": 0.4,
+    ".pro": 0.3,
+    ".md": 0.1
+  },
+
+  "path_boosts": [
+    {
+      "pattern": "(^|/)AndroidManifest\\.xml$",
+      "weight": 2.0,
+      "description": "Manifest declaring exported components"
+    },
+    {
+      "pattern": "(^|/)(activities|activity)(/|$)",
+      "weight": 1.5,
+      "description": "Activity implementations"
+    },
+    {
+      "pattern": "(^|/)(services?|service)(/|$)",
+      "weight": 1.5,
+      "description": "Service implementations"
+    },
+    {
+      "pattern": "(^|/)(receivers?|receiver|broadcast)(/|$)",
+      "weight": 1.5,
+      "description": "Broadcast receiver implementations"
+    },
+    {
+      "pattern": "(^|/)(providers?|provider|content)(/|$)",
+      "weight": 1.8,
+      "description": "Content provider implementations"
+    },
+    {
+      "pattern": "(^|/)(auth|authentication|login|oauth)(/|$)",
+      "weight": 1.6,
+      "description": "Authentication components"
+    },
+    {
+      "pattern": "(^|/)(webview|web|hybrid)(/|$)",
+      "weight": 1.4,
+      "description": "WebView components"
+    },
+    {
+      "pattern": "(^|/)(deeplink|link|navigation)(/|$)",
+      "weight": 1.7,
+      "description": "Deeplink handling"
+    },
+    {
+      "pattern": "(^|/)(database|db|sql|room)(/|$)",
+      "weight": 1.0,
+      "description": "Database layer"
+    },
+    {
+      "pattern": "(^|/)(storage|file|cache)(/|$)",
+      "weight": 0.9,
+      "description": "Storage operations"
+    }
+  ],
+
+  "path_penalties": [
+    {
+      "pattern": "(^|/)(test|tests|androidTest|androidtest)(/|$)",
+      "weight": -2.5,
+      "description": "Test directories"
+    },
+    {
+      "pattern": "(^|/)(build|generated|release|debug)(/|$)",
+      "weight": -2.0,
+      "description": "Build artifacts"
+    },
+    {
+      "pattern": "(^|/)(\\.gradle|gradle)(/|$)",
+      "weight": -1.5,
+      "description": "Gradle configuration"
+    },
+    {
+      "pattern": "(^|/)(res/drawable|res/mipmap|res/anim|assets/images?)(/|$)",
+      "weight": -1.8,
+      "description": "Image and animation resources"
+    },
+    {
+      "pattern": "(^|/)(proguard|r8)(/|$)",
+      "weight": -1.0,
+      "description": "Obfuscation configs"
+    }
+  ],
+
+  "config_top_files": [
+    "AndroidManifest.xml",
+    "build.gradle",
+    "app/build.gradle",
+    "gradle.properties",
+    "proguard-rules.pro",
+    "strings.xml"
+  ],
+
+  "entrypoint_patterns": [
+    "AndroidManifest\\.xml$",
+    "(^|/)MainActivity\\.(java|kt)$",
+    "(^|/)Application\\.(java|kt)$",
+    "(^|/)[A-Z][a-zA-Z]*Activity\\.(java|kt)$",
+    "(^|/)[A-Z][a-zA-Z]*Service\\.(java|kt)$",
+    "(^|/)[A-Z][a-zA-Z]*Receiver\\.(java|kt)$",
+    "(^|/)[A-Z][a-zA-Z]*Provider\\.(java|kt)$"
+  ],
+
+  "filter_focus": "Focus EXCLUSIVELY on exported components and their attack surfaces: Activities, Services, BroadcastReceivers, and ContentProviders marked as exported in AndroidManifest.xml. Prioritize deeplink handlers, intent filters, WebView JavaScript interfaces, SQL database operations in exported components, and IPC mechanisms. Ignore non-exported components, UI logic, analytics, and internal utilities unless they're reachable via exported entry points.",
+
+  "graphs": {
+    "required": [
+      "Exported component attack surface graph showing ALL exported Activities/Services/Receivers/Providers from AndroidManifest, their intent filters, deeplink schemes, permission requirements, and which components have NO permission protection",
+      "IPC and intent handling graph mapping how exported components process incoming intents, extract intent extras, handle parcels, and pass data to internal components - track untrusted data flow from IPC to dangerous sinks",
+      "WebView JavaScript bridge graph showing exported components with WebViews, all @JavascriptInterface methods, what native functionality they expose, and whether file access or universal access is enabled"
+    ]
+  },
+
+  "audit_prompts": {
+    "sweep_mode": {
+      "investigation_guidelines": "ONLY investigate exported components (android:exported='true' in manifest or implicit export via intent-filter). Focus on IPC attack vectors: intent manipulation, deeplink exploitation, content provider SQL injection, JavaScript bridge abuse. Ignore all non-exported components, UI issues, and theoretical attacks requiring physical access or root.",
+      "vulnerability_focus": "Hunt for EXPORTED COMPONENT vulnerabilities ONLY: unprotected exported Activities/Services/Receivers/Providers, deeplink injection leading to code execution or file access, intent manipulation causing authentication bypass, WebView JavaScript interfaces exposing sensitive APIs, SQL injection in exported ContentProviders, arbitrary file read/write via content:// URIs, permission escalation through exported components, and session hijacking via intent extras."
+    },
+    "intuition_mode": {
+      "key_targets": [
+        "EXPORTED WITHOUT PERMISSION: Which exported components have NO permission requirement and accept arbitrary intents/data?",
+        "DEEPLINK EXPLOITATION: Where can deeplink parameters reach file paths, SQL queries, or JavaScript execution?",
+        "JAVASCRIPT BRIDGE RCE: Which @JavascriptInterface methods expose file access, exec, or component launching to WebView JavaScript?",
+        "IPC TO CODE EXECUTION: Where does intent extra data reach Runtime.exec(), ProcessBuilder, DexClassLoader, or reflection?"
+      ],
+      "target_areas": [
+        "Exported Activities with deeplink intent filters - parameter injection into file operations or WebView URLs",
+        "Exported Services processing intent extras - look for command injection, arbitrary file write, authentication bypass",
+        "Exported BroadcastReceivers handling untrusted broadcasts - intent manipulation affecting security state",
+        "Exported ContentProviders - SQL injection in query/update/delete, path traversal in openFile()",
+        "WebView components in exported Activities - JavaScript bridge exposing sensitive methods, file:// access enabled",
+        "Deeplink handlers parsing URLs - injection into file paths, SQL queries, intent extras, or navigation",
+        "Intent extras used in authentication decisions - session hijacking, privilege escalation via intent manipulation",
+        "Parcelable deserialization in exported components - type confusion or code execution"
+      ],
+      "vulnerability_focus": "ONLY CARE ABOUT EXPLOITABLE ATTACKS VIA EXPORTED COMPONENTS. Prioritize: arbitrary code execution through exported Activities/Services (Runtime.exec, DexClassLoader, reflection with intent data), authentication bypass via intent manipulation in exported components, arbitrary file read/write through exported ContentProviders or deeplinks, SQL injection in exported ContentProviders enabling data exfiltration, WebView JavaScript bridge methods exposing file access or component launching, session/token theft via exported component IPC, and permission escalation by chaining exported components. COMPLETELY IGNORE: non-exported components, DoS, race conditions, log injection, certificate pinning, tapjacking, hardcoded API keys, root-required attacks, unencrypted storage except credentials."
+    },
+    "deep_analysis": {
+      "critical_checks": [
+        "Verify component is EXPORTED (android:exported='true' or has intent-filter without permission)",
+        "Confirm vulnerability is exploitable via IPC - intent, broadcast, content provider URI, or deeplink",
+        "Check if intent/deeplink data reaches dangerous sinks: Runtime.exec, ProcessBuilder, file operations, SQL queries, DexClassLoader, reflection",
+        "Validate SQL injection in ContentProvider allows full database read/write, not just single table",
+        "Verify WebView JavaScript interface methods can be called from malicious web content or deeplinks",
+        "Confirm authentication bypass works by manipulating intent extras or deeplink parameters in exported component",
+        "Check if file path injection allows reading credentials, app data, or writing to executable locations",
+        "Verify deeplink can trigger the vulnerability without user interaction beyond opening a link",
+        "Confirm exported component has NO permission requirement or uses weak/custom permission",
+        "Only propose if attack is DIRECT via IPC - no multi-app chains or physical access required"
+      ],
+      "vulnerability_types": [
+        "Arbitrary code execution via exported component (Runtime.exec, DexClassLoader, reflection with intent data)",
+        "SQL injection in exported ContentProvider with data exfiltration",
+        "Arbitrary file read via exported ContentProvider openFile() or deeplink",
+        "Arbitrary file write via exported component with path injection",
+        "Authentication bypass through intent/deeplink manipulation in exported Activity/Service",
+        "WebView JavaScript interface exposing sensitive native methods",
+        "Deeplink injection leading to arbitrary URL load with file:// or javascript: scheme",
+        "Intent redirection in exported Activity allowing permission escalation",
+        "Session/token theft via exported component returning sensitive data",
+        "Path traversal in exported ContentProvider openFile() implementation",
+        "Command injection through exported component processing intent extras",
+        "Insecure parcelable deserialization in exported components",
+        "Fragment injection in exported Activity allowing arbitrary fragment load",
+        "Exported receiver triggering privileged operations without authentication",
+        "Deeplink to WebView with JavaScript execution and file access enabled",
+        "SQL injection via content:// URI selection/selectionArgs in exported provider"
+      ]
+    }
+  }
+}
